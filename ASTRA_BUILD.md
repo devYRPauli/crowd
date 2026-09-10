@@ -1,0 +1,3 @@
+# Astra build log
+
+- 2026-09-10T14:40:34Z — Milestone 1: built Crowd schemas with Shapely validation, pure engine contract stub, structured Astra client with usage estimates, FastAPI/static scaffold, synthetic room, and smoke tests; development agent: Codex with GPT-6 Astra; verification: `.venv/bin/python -m pytest -q` (25 passed, 1 skipped because OPENAI_API_KEY is unset; one Starlette/AnyIO deprecation warning), `curl --fail --silent --show-error http://127.0.0.1:8000/api/scene` (success, HTTP 200 and valid Scene), GET / (HTTP 200); Ruff/mypy unavailable in the existing venv; simulation and model endpoints remain explicit stubs.
