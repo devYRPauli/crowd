@@ -76,6 +76,7 @@ def ask_structured(
     receipt = {
         "time": datetime.now(timezone.utc).isoformat(),
         "model": MODEL,
+        "reasoning": reasoning,
         "input_tokens": None,
         "output_tokens": None,
         "cost_estimate_usd": None,
@@ -83,7 +84,7 @@ def ask_structured(
     }
     try:
         # No hidden retries: one application call corresponds to one receipt.
-        with OpenAI(api_key=load_api_key(), max_retries=0, timeout=60.0) as client:
+        with OpenAI(api_key=load_api_key(), max_retries=0, timeout=25.0) as client:
             response = client.responses.create(
                 model=MODEL,
                 input=[{"role": "user", "content": content}],

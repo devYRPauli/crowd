@@ -17,7 +17,7 @@ from shapely import intersects_xy
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import nearest_points, unary_union
 
-from crowd.schema import DensityGrid, Result, Scenario, Scene
+from crowd.schema import DensityGrid, Result, Scenario, Scene, effective_overflow_area
 
 DT = 0.05
 FRAME_DT = 0.1
@@ -219,9 +219,16 @@ def _build_queues(sim: jps.Simulation, scene: Scene, safe_floor: Polygon, seats:
                 description.set_transition_for_stage(service_stage, jps.Transition.create_fixed_transition(seat_stage))
                 journeys[destination] = sim.add_journey(description)
             queue.servers.append(_Server(position, service_stage, journeys))
+        area = Polygon(effective_overflow_area(target)).buffer(-RADIUS - 0.05).intersection(safe_floor)
         if target.overflow_area is None:
-            raise ValueError(f"Target {target.id}: explicit overflow_area is required")
-        area = Polygon(target.overflow_area).buffer(-RADIUS - 0.05).intersection(safe_floor)
+            # A default box straddles its own tail. Reserve holding positions
+            # clear of the polyline and service bodies, preserving native slots.
+            area = area.difference(LineString(target.queue_polyline).buffer(2 * RADIUS + 0.03))
+            area = area.difference(unary_union([
+                Point(position).buffer(2 * RADIUS + 0.03) for position in services
+            ]))
+        if area.is_empty:
+            raise ValueError(f"Target {target.id}: overflow_area has no safe holding positions")
         x0, y0, x1, y1 = area.bounds
         candidates = [(float(x), float(y)) for y in np.arange(y0, y1 + 1e-9, 0.65)
                       for x in np.arange(x0, x1 + 1e-9, 0.65) if area.covers(Point(x, y))]
@@ -264,7 +271,7 @@ def run(scene: Scene, scenario: Scenario) -> Result:
     A free server releases the assigned head immediately, then service begins
     only on physical arrival within 0.35 m. Queue pop is applied by iterate before
     switching journeys, preventing stale queue membership and re-queueing.
-    Overflow reserves explicit, separated holding slots off the queue/entrance;
+    Overflow reserves separated holding slots in its region or default tail box;
     promotion follows arrival order as soon as a main queue slot is available,
     including people still approaching their overflow reservation. Full holding
     capacity delays spawning outside the room. Every step retries pending arrivals;
@@ -498,7 +505,7 @@ def run(scene: Scene, scenario: Scenario) -> Result:
                 target = next(t for t in scene.targets if queues[t.id] is queue)
                 if (person not in joined
                         and math.dist(agents[hold.agent].position, hold.position) <= REACHED_M
-                        and Polygon(target.overflow_area).covers(Point(agents[hold.agent].position))):
+                        and Polygon(effective_overflow_area(target)).covers(Point(agents[hold.agent].position))):
                     joined[person] = time_s
                     states[person] = "queued"
                     event(person, "joined_queue", time_s, position=list(agents[hold.agent].position))

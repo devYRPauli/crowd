@@ -29,5 +29,229 @@
   ],
   "walkways": [
     {"id": "central_walkway", "poly": [[0, 6], [24, 6], [24, 8], [0, 8]]}
+  ],
+  "layout_options": [
+    {
+      "id": "desk_north",
+      "target_id": "check_in",
+      "obstacle_id": "check_in_desk",
+      "obstacle_poly": [
+        [
+          5,
+          10
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          9,
+          11
+        ],
+        [
+          5,
+          11
+        ]
+      ],
+      "target_poly": [
+        [
+          5,
+          9
+        ],
+        [
+          9,
+          9
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          5,
+          10
+        ]
+      ],
+      "service_positions": [
+        [
+          6,
+          9.5
+        ],
+        [
+          8,
+          9.5
+        ]
+      ],
+      "queue_polyline": [
+        [
+          5,
+          9.5
+        ],
+        [
+          3,
+          9.5
+        ],
+        [
+          3,
+          7
+        ],
+        [
+          13,
+          7
+        ]
+      ],
+      "destinations": [
+        {
+          "id": "seating_area",
+          "poly": [
+            [
+              17,
+              8.5
+            ],
+            [
+              22,
+              8.5
+            ],
+            [
+              22,
+              12
+            ],
+            [
+              17,
+              12
+            ]
+          ]
+        }
+      ],
+      "overflow_area": [
+        [
+          9.5,
+          8.5
+        ],
+        [
+          16.5,
+          8.5
+        ],
+        [
+          16.5,
+          11.5
+        ],
+        [
+          9.5,
+          11.5
+        ]
+      ],
+      "label": "North desk with the queue crossing the central walkway."
+    },
+    {
+      "id": "desk_east",
+      "target_id": "check_in",
+      "obstacle_id": "check_in_desk",
+      "obstacle_poly": [
+        [
+          22,
+          9
+        ],
+        [
+          23,
+          9
+        ],
+        [
+          23,
+          13
+        ],
+        [
+          22,
+          13
+        ]
+      ],
+      "target_poly": [
+        [
+          21,
+          9
+        ],
+        [
+          22,
+          9
+        ],
+        [
+          22,
+          13
+        ],
+        [
+          21,
+          13
+        ]
+      ],
+      "service_positions": [
+        [
+          21.5,
+          10
+        ],
+        [
+          21.5,
+          12
+        ]
+      ],
+      "queue_polyline": [
+        [
+          21,
+          10
+        ],
+        [
+          21,
+          8.25
+        ],
+        [
+          14,
+          8.25
+        ],
+        [
+          14,
+          9
+        ]
+      ],
+      "destinations": [
+        {
+          "id": "seating_area",
+          "poly": [
+            [
+              15,
+              10
+            ],
+            [
+              20,
+              10
+            ],
+            [
+              20,
+              12.5
+            ],
+            [
+              15,
+              12.5
+            ]
+          ]
+        }
+      ],
+      "overflow_area": [
+        [
+          9.5,
+          9.5
+        ],
+        [
+          14,
+          9.5
+        ],
+        [
+          14,
+          12.5
+        ],
+        [
+          9.5,
+          12.5
+        ]
+      ],
+      "label": "East desk with the queue above the central walkway."
+    }
   ]
 }

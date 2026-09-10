@@ -150,14 +150,14 @@ def test_http_scaffold(scene):
     with TestClient(app) as client:
         page = client.get("/")
         assert page.status_code == 200
-        assert "fetch('/api/scene')" in page.text
+        assert "'/api/scene'" in page.text
         response = client.get("/api/scene")
         assert response.status_code == 200
         assert Scene.model_validate(response.json()) == scene
         assert client.post("/api/scene", json=scene.model_dump()).status_code == 501
         for action in ("interpret", "propose", "explain"):
             response = client.post(f"/api/{action}", json={})
-            assert response.status_code == 501
+            assert response.status_code == 422
             assert response.json()["detail"]
 
 

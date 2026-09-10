@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import unary_union
 from shapely.validation import explain_validity
 
 Coordinate = Annotated[list[FiniteFloat], Field(min_length=2, max_length=2)]
@@ -58,7 +59,7 @@ class Target(Region):
     service_positions: list[Coordinate] = Field(default_factory=list)
     service_s: Annotated[FiniteFloat, Field(gt=0)]
     overflow_area: PolygonRing | None = Field(
-        default=None, description="Explicit waiting region off the queue and entrances."
+        default=None, description="Waiting region; omitted uses a 2 m box centered at the queue tail."
     )
 
     @model_validator(mode="after")
@@ -67,6 +68,29 @@ class Target(Region):
         if line.length <= 0 or not line.is_simple:
             raise ValueError(f"Target {self.id}: queue must be nonzero and simple")
         return self
+
+
+def effective_overflow_area(target: Target) -> list[list[float]]:
+    """Return the explicit holding polygon or a deterministic 2 m tail box."""
+    if target.overflow_area is not None:
+        return [list(point) for point in target.overflow_area]
+    x, y = target.queue_polyline[-1]
+    return [[x - 1, y - 1], [x + 1, y - 1], [x + 1, y + 1], [x - 1, y + 1]]
+
+
+class LayoutOption(Contract):
+    """One permitted complete arrangement of a target and its movable obstacle."""
+
+    id: Identifier
+    target_id: Identifier
+    obstacle_id: Identifier
+    obstacle_poly: PolygonRing
+    target_poly: PolygonRing
+    service_positions: list[Coordinate]
+    queue_polyline: Annotated[list[Coordinate], Field(min_length=2)]
+    destinations: Annotated[list[Region], Field(min_length=1)]
+    overflow_area: PolygonRing | None
+    label: Annotated[str, Field(min_length=1)]
 
 
 class Scene(Contract):
@@ -80,6 +104,7 @@ class Scene(Contract):
     exits: Annotated[list[Region], Field(min_length=1)]
     targets: Annotated[list[Target], Field(min_length=1)]
     walkways: list[Region]
+    layout_options: list[LayoutOption] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_geometry(self) -> Self:
@@ -94,7 +119,21 @@ class Scene(Contract):
         for region in regions:
             if not floor.covers(Polygon(region.poly)):
                 raise ValueError(f"Region {region.id} lies outside the walkable boundary")
+        for opening in [*self.entrances, *self.exits]:
+            if not Polygon(opening.poly).intersects(floor.boundary):
+                raise ValueError(f"Entrance/exit {opening.id} must touch the walkable boundary")
         solids = [(obstacle.id, Polygon(obstacle.poly)) for obstacle in self.obstacles]
+        accessible = floor.difference(unary_union([solid for _, solid in solids]))
+        if accessible.is_empty or not isinstance(accessible, Polygon):
+            raise ValueError("Walkable minus obstacles must be one connected region")
+        option_ids = [option.id for option in self.layout_options]
+        if len(option_ids) != len(set(option_ids)):
+            raise ValueError("Layout option IDs must be unique")
+        for option in self.layout_options:
+            if option.target_id not in {target.id for target in self.targets}:
+                raise ValueError(f"Layout option {option.id}: unknown target {option.target_id}")
+            if option.obstacle_id not in {obstacle.id for obstacle in self.obstacles}:
+                raise ValueError(f"Layout option {option.id}: unknown obstacle {option.obstacle_id}")
         for region in [
             *self.entrances, *self.exits, *self.targets, *self.walkways, *self.destinations,
         ]:
@@ -112,21 +151,20 @@ class Scene(Contract):
                         raise ValueError(f"Target {target.id}: queue/service hits {obstacle_id}")
             if not all(Polygon(target.poly).covers(Point(p)) for p in target.service_positions):
                 raise ValueError(f"Target {target.id}: service positions must lie in target")
-            if target.overflow_area is not None:
-                overflow = Polygon(target.overflow_area)
-                if not floor.covers(overflow):
-                    raise ValueError(f"Target {target.id}: overflow area lies outside room")
-                for obstacle_id, solid in solids:
-                    if overflow.intersection(solid).area > 0:
-                        raise ValueError(f"Target {target.id}: overflow area hits {obstacle_id}")
-                for entrance in self.entrances:
-                    if overflow.intersects(Polygon(entrance.poly)):
-                        raise ValueError(f"Target {target.id}: overflow area hits entrance {entrance.id}")
-                for other_target in self.targets:
-                    if overflow.intersects(LineString(other_target.queue_polyline)):
-                        raise ValueError(f"Target {target.id}: overflow area hits queue {other_target.id}")
-                    if any(overflow.covers(Point(p)) for p in other_target.service_positions):
-                        raise ValueError(f"Target {target.id}: overflow area hits service position")
+            overflow = Polygon(effective_overflow_area(target))
+            if not floor.covers(overflow):
+                raise ValueError(f"Target {target.id}: overflow area lies outside room")
+            for obstacle_id, solid in solids:
+                if overflow.intersection(solid).area > 0:
+                    raise ValueError(f"Target {target.id}: overflow area hits {obstacle_id}")
+            for entrance in self.entrances:
+                if overflow.intersects(Polygon(entrance.poly)):
+                    raise ValueError(f"Target {target.id}: overflow area hits entrance {entrance.id}")
+            for other_target in self.targets:
+                if (target.overflow_area is not None or other_target.id != target.id) and overflow.intersects(LineString(other_target.queue_polyline)):
+                    raise ValueError(f"Target {target.id}: overflow area hits queue {other_target.id}")
+                if any(overflow.covers(Point(p)) for p in other_target.service_positions):
+                    raise ValueError(f"Target {target.id}: overflow area hits service position")
         return self
 
 
