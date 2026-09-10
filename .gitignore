@@ -5,3 +5,9 @@ __pycache__/
 usage.jsonl
 data/
 .DS_Store
+
+# Downloaded source asset packs
+/static/assets/incoming/
+/static/assets/kenney-furniture/
+/static/assets/kaykit-furniture/
+/static/assets/kenney-characters/
