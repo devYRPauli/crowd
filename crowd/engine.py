@@ -67,7 +67,8 @@ def presample_people(scene: Scene, scenario: Scenario) -> list[dict]:
     Layout-only changes regenerate identical records; compare checks full record
     equality. Service-time changes intentionally invalidate that equality. Region
     choices depend on IDs, never coordinates. Front-loaded places round(0.7*N)
-    arrivals in the first half, shuffled across IDs.
+    arrivals in the first half, shuffled across IDs. Waves use five batches as
+    evenly sized as possible at 0, window/5, ..., 4*window/5, shuffled across IDs.
     """
     rng = np.random.default_rng(scenario.seed)
     n = scenario.n_people
@@ -77,6 +78,10 @@ def presample_people(scene: Scene, scenario: Scenario) -> list[dict]:
             rng.uniform(0, scenario.arrival_window_s / 2, early),
             rng.uniform(scenario.arrival_window_s / 2, scenario.arrival_window_s, n - early),
         ])
+        rng.shuffle(arrivals)
+    elif scenario.arrival_pattern == "waves":
+        batches = np.repeat(np.arange(5), [n // 5 + (i < n % 5) for i in range(5)])
+        arrivals = batches * (scenario.arrival_window_s / 5)
         rng.shuffle(arrivals)
     else:
         arrivals = rng.uniform(0, scenario.arrival_window_s, n)
@@ -99,6 +104,58 @@ def presample_people(scene: Scene, scenario: Scenario) -> list[dict]:
             "spawn_choice": float(spawn_choices[i]),
         })
     return people
+
+
+def _validated_people(scene: Scene, scenario: Scenario, people: list[dict], *, check_window=True) -> list[dict]:
+    """Copy supplied records after checking the same population contract as sampling."""
+    fields = {"id", "arrival_s", "preferred_speed_m_s", "service_s", "entrance_id",
+              "target_id", "destination_id", "spawn_choice"}
+    if not isinstance(people, list) or len(people) != scenario.n_people:
+        raise ValueError("Presampled people count must equal scenario.n_people")
+    references = {
+        "entrance_id": {item.id for item in scene.entrances},
+        "target_id": {item.id for item in scene.targets},
+        "destination_id": {item.id for item in scene.destinations},
+    }
+    copied, ids = [], set()
+    for index, person in enumerate(people):
+        if not isinstance(person, dict) or set(person) != fields:
+            raise ValueError(f"Presampled person {index}: unexpected or missing fields")
+        identifier = person["id"]
+        if not isinstance(identifier, str) or not identifier.strip() or identifier in ids:
+            raise ValueError(f"Presampled person {index}: IDs must be unique nonempty strings")
+        ids.add(identifier)
+        for key, choices in references.items():
+            if not isinstance(person[key], str) or person[key] not in choices:
+                raise ValueError(f"Presampled person {identifier}: unknown {key}")
+        for key in ("arrival_s", "preferred_speed_m_s", "service_s", "spawn_choice"):
+            value = person[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"Presampled person {identifier}: {key} must be a finite number")
+        if person["arrival_s"] < 0 or (check_window and person["arrival_s"] > scenario.arrival_window_s):
+            raise ValueError(f"Presampled person {identifier}: arrival_s is outside the arrival window")
+        if not 0.6 <= person["preferred_speed_m_s"] <= 1.8:
+            raise ValueError(f"Presampled person {identifier}: preferred_speed_m_s must be in [0.6, 1.8]")
+        if person["service_s"] < 3:
+            raise ValueError(f"Presampled person {identifier}: service_s must be at least 3 seconds")
+        if not 0 <= person["spawn_choice"] < 1:
+            raise ValueError(f"Presampled person {identifier}: spawn_choice must be in [0, 1)")
+        copied.append(dict(person))
+    return copied
+
+
+def reschedule_people(scene: Scene, scenario: Scenario, people: list[dict]) -> list[dict]:
+    """Change only arrival times, preserving the original ordered person records.
+
+    Arrival draws follow the new scenario's seed and pattern. Speeds, service
+    durations, region choices, and spawn choices remain exactly as supplied.
+    """
+    scene = Scene.model_validate(scene.model_dump())
+    scenario = Scenario.model_validate(scenario.model_dump())
+    copied = _validated_people(scene, scenario, people, check_window=False)
+    for person, sampled in zip(copied, presample_people(scene, scenario)):
+        person["arrival_s"] = sampled["arrival_s"]
+    return _validated_people(scene, scenario, copied)
 
 
 def _hash(model: Scene | Scenario) -> str:
@@ -264,9 +321,10 @@ def _handoff_waypoints(floor: Polygon, start: tuple, goal: tuple, waiting: list)
     return jps.RoutingEngine(component).compute_waypoints(start, goal)[1:-1]
 
 
-def run(scene: Scene, scenario: Scenario) -> Result:
+def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -> Result:
     """Rehearse at dt=0.05, saving frames at t=0, 0.1, ... <= horizon.
 
+    Supplied people are validated and copied; omitted people use the scenario seed.
     Main queue capacity is reserved before entry; native slots run head to tail.
     A free server releases the assigned head immediately, then service begins
     only on physical arrival within 0.35 m. Queue pop is applied by iterate before
@@ -288,7 +346,7 @@ def run(scene: Scene, scenario: Scenario) -> Result:
     """
     scene = Scene.model_validate(scene.model_dump())
     scenario = Scenario.model_validate(scenario.model_dump())
-    people = presample_people(scene, scenario)
+    people = presample_people(scene, scenario) if people is None else _validated_people(scene, scenario, people)
     floor = Polygon(scene.walkable).difference(unary_union([Polygon(o.poly) for o in scene.obstacles]))
     if floor.geom_type != "Polygon" or floor.is_empty:
         raise ValueError("Simulation requires one connected polygon after subtracting obstacles")
@@ -765,5 +823,36 @@ def compare(a: Result, b: Result) -> dict:
         "valid": True, "better": better,
         "status": "improvement" if better else "equivalent" if a.metrics == b.metrics and a.accounting == b.accounting else "trade_off",
         "deltas_b_minus_a": deltas,
+        "completed": {"a": a.accounting["done"], "b": b.accounting["done"]},
+    }
+
+
+def compare_operations(a: Result, b: Result) -> dict:
+    """Compare changed arrivals explicitly, without declaring an automatic winner.
+
+    Every non-arrival person field and the observation horizon must match.
+    Scene changes are allowed for staffing; permitted changes are checked by the
+    caller against the original scene. Unchanged arrivals use strict compare().
+    """
+    if a.horizon_s != b.horizon_s:
+        raise ValueError("Cannot compare operations across different horizons")
+    for result in (a, b):
+        for person in result.people:
+            arrival = person.get("arrival_s")
+            if isinstance(arrival, bool) or not isinstance(arrival, (int, float)) or not math.isfinite(arrival) or arrival < 0:
+                raise ValueError("Operations comparison requires finite nonnegative arrival_s for every person")
+    original = [{key: value for key, value in person.items() if key != "arrival_s"} for person in a.people]
+    candidate = [{key: value for key, value in person.items() if key != "arrival_s"} for person in b.people]
+    if original != candidate:
+        raise ValueError("Cannot compare operations with different non-arrival person fields")
+    if a.people == b.people and a.scenario_hash == b.scenario_hash:
+        return compare(a, b)
+    return {
+        "valid": True, "better": None, "status": "operations_trade_off",
+        "label": "different arrival schedule, same people and service times",
+        "deltas_b_minus_a": {
+            key: b.metrics[key] - value if value is not None and b.metrics[key] is not None else None
+            for key, value in a.metrics.items() if key in b.metrics
+        },
         "completed": {"a": a.accounting["done"], "b": b.accounting["done"]},
     }

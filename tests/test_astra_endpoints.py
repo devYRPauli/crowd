@@ -111,8 +111,8 @@ def test_propose_rejects_locked_candidate_and_runs_survivor_with_same_people(
 ):
     locked_index = next(i for i, item in enumerate(scene_data["obstacles"]) if item["locked"])
     calls = mock_answers(monkeypatch, [{"candidates": [
-        {"option_id": None, "patch": [{"op": "replace", "path": f"/scene/obstacles/{locked_index}/poly", "value": scene_data["obstacles"][locked_index]["poly"]}], "rationale": "Move a table."},
-        {"option_id": None, "patch": [{"op": "replace", "path": "/scene/targets/0/queue_polyline", "value": scene_data["targets"][0]["queue_polyline"]}], "rationale": "Retain the queue for comparison."},
+        {"kind": "layout", "option_id": None, "patch": [{"op": "replace", "path": f"/scene/obstacles/{locked_index}/poly", "value": scene_data["obstacles"][locked_index]["poly"]}], "rationale": "Move a table."},
+        {"kind": "layout", "option_id": None, "patch": [{"op": "replace", "path": "/scene/targets/0/queue_polyline", "value": scene_data["targets"][0]["queue_polyline"]}], "rationale": "Retain the queue for comparison."},
     ]}])
     baseline = run(Scene.model_validate(scene_data), Scenario.model_validate(scenario_data))
     measured = []

@@ -23,7 +23,7 @@ aside{background:#fcfdf9;border:1px solid var(--line);border-radius:12px;padding
 <form id="scenario" class="scenario">
 <label>People<input id="n-people" type="number" min="1" max="1000" step="1" value="150" required></label>
 <label>Arrivals · seconds<input id="arrival" type="number" min="0.1" step="0.1" value="600" required></label>
-<label>Arrival pattern<select id="pattern"><option value="front_loaded">Front-loaded</option><option value="uniform">Uniform</option></select></label>
+<label>Arrival pattern<select id="pattern"><option value="front_loaded">Front-loaded</option><option value="uniform">Uniform</option><option value="waves">Scheduled waves</option></select></label>
 <label>Horizon · seconds<input id="horizon" type="number" min="0.1" step="0.1" value="1200" required></label>
 <label>Seed<input id="seed" type="number" min="0" step="1" value="1" required></label>
 <button id="run" type="submit" disabled>Run rehearsal ↗</button>
@@ -32,6 +32,7 @@ aside{background:#fcfdf9;border:1px solid var(--line);border-radius:12px;padding
 <section><label for="brief">Brief</label><textarea id="brief" placeholder="Describe the event, guest arrivals, and how check-in works."></textarea><button id="interpret" type="button">Interpret brief</button><small>Review Astra’s assumptions before applying them. Measurements come from the engine.</small><div id="interpretation" hidden><ul id="assumptions"></ul><button id="confirm" type="button">Confirm assumptions</button></div></section>
 <section><button id="propose" type="button">Find a better setup</button><small id="proposal-stage" role="status" aria-live="polite"></small><label for="constraints" style="margin-top:10px">Constraints</label><textarea id="constraints" placeholder="Keep two volunteers and the dining tables"></textarea><small>Run the current room first. Candidates reuse the original people and seed.</small></section>
 </div>
+<div class="astra-tools"><section><label for="revise">Revise this rehearsal</label><textarea id="revise" placeholder="Describe a change to this scene or scenario."></textarea><button id="revise-run" type="button">Revise and rehearse</button><ul id="revision-assumptions"></ul></section><section><label>Try an operating change</label><button id="judge-one" type="button">One volunteer</button> <button id="judge-third" type="button">Third volunteer</button> <button id="judge-waves" type="button">15-minute waves</button><div id="operation-preview" hidden><p id="operation-description"></p><button id="operation-confirm" type="button">Confirm operating change</button></div><small>Drag unlocked obstacles or queue vertices to edit the layout. Each release is checked before rehearsal.</small></section></div>
 <p id="api-error" role="status" aria-live="polite"></p>
 <section id="comparison" class="comparison" hidden aria-label="Measured layout comparison"><div id="candidate-tabs" class="candidate-tabs"></div><div id="candidate-rejections"></div><div id="metric-comparison"></div><p id="explanation"></p></section>
 <div class="workspace">
@@ -55,13 +56,13 @@ const bg = base.getContext('2d'), fg = ink.getContext('2d'), hg = heat.getContex
 let scene = null, result = null, frames = null, people = [], ids = [], frameCount = 0, frameDt = .2;
 let time = 0, duration = 0, playing = false, busy = false, selected = -1, drawn = [], raf = 0, lastStamp = null;
 let width = 1, height = 1, dpr = 1, fit = {scale:1,x:0,y:0}, bounds, heatBucket = -1, sceneVersion = 0;
-let revision=0, controllers=new Set(), interpreted=null, lastRun=null, original=null, candidates=[], activeCandidate=-1, pollTimer=null, pollResolve=null;
+let revision=0, controllers=new Set(), interpreted=null, lastRun=null, original=null, candidates=[], activeCandidate=-1, pollTimer=null, pollResolve=null, proposalJob=null, pendingOperation=null, drag=null, suppressClick=false, confirmedAssumptions=[];
 const clone=value=>JSON.parse(JSON.stringify(value));
 function currentScenario(){return {n_people:Number($('n-people').value),arrival_window_s:Number($('arrival').value),arrival_pattern:$('pattern').value,seed:Number($('seed').value),horizon_s:Number($('horizon').value),mode:'queue'};}
 function fillScenario(value){for(const [id,key] of Object.entries({'n-people':'n_people',arrival:'arrival_window_s',pattern:'arrival_pattern',seed:'seed',horizon:'horizon_s'}))$(id).value=value[key];}
-function invalidate(){revision++;if(pollResolve){clearTimeout(pollTimer);const resolve=pollResolve;pollResolve=null;resolve();}$('proposal-stage').textContent='';for(const controller of controllers)controller.abort();controllers.clear();setBusy(false);$('interpret').disabled=false;$('propose').disabled=false;return revision;}
-function clearCandidates(){original=null;candidates=[];activeCandidate=-1;$('comparison').hidden=true;}
-function edited(kind){invalidate();$('api-error').textContent='';interpreted=null;$('interpretation').hidden=true;if(kind!=='brief')clearCandidates();}
+function invalidate(){revision++;if(drag){drag=null;if(scene)rebuildRoom();requestRender();}if(pollResolve){clearTimeout(pollTimer);const resolve=pollResolve;pollResolve=null;resolve();}$('proposal-stage').textContent='';for(const controller of controllers)controller.abort();controllers.clear();setBusy(false);$('interpret').disabled=false;$('propose').disabled=false;$('revise-run').disabled=false;return revision;}
+function clearCandidates(){original=null;candidates=[];activeCandidate=-1;proposalJob=null;pendingOperation=null;$('operation-preview').hidden=true;$('comparison').hidden=true;}
+function edited(kind){if(drag){drag=null;rebuildRoom();requestRender();}invalidate();$('api-error').textContent='';interpreted=null;$('interpretation').hidden=true;if(kind!=='brief')clearCandidates();}
 function fail(error,token){if(token===revision)$('api-error').textContent=error.message;}
 async function api(url,body,token,binary=false){
   const controller=new AbortController();controllers.add(controller);const timeout=['/api/interpret','/api/explain'].includes(url)?95000:30000;const timer=setTimeout(()=>controller.abort(),timeout);
@@ -91,17 +92,18 @@ function resize() {
   requestRender();
 }
 function rebuildRoom() {
+  const room=drag?.preview||scene;
   bg.clearRect(0,0,width,height);fg.clearRect(0,0,width,height);
-  path(bg,scene.walkable);bg.fillStyle='#fcfdf8';bg.fill();bg.strokeStyle='#a9baaa';bg.lineWidth=2;bg.stroke();
-  for(const w of scene.walkways){region(bg,w,'#edf3e8');hatch(bg,w.poly,'#d3dfcb',12);}
-  for(const d of scene.destinations){fg.setLineDash([5,4]);region(fg,d,null,'#699a83');fg.setLineDash([]);label(fg,name(d.id),d.poly,'#56806b');}
-  for(const o of scene.obstacles){region(fg,o,'#dce3d9','#829784');if(o.locked)hatch(fg,o.poly,'#b5c3b1',7);label(fg,`${o.locked?'⊠ ':''}${name(o.id)}`,o.poly);}
-  for(const e of scene.entrances){region(fg,e,'#cae6d4','#539775');label(fg,'IN',e.poly,'#285f44');}
-  for(const e of scene.exits){region(fg,e,'#e0ebf0','#8aa9ba');label(fg,'EXIT',e.poly,'#4c778b');}
-  for(const target of scene.targets){if(target.overflow_area){fg.setLineDash([4,4]);region(fg,{poly:target.overflow_area},null,'#cc8b7e');fg.setLineDash([]);label(fg,'overflow waiting',target.overflow_area,'#aa7267');}path(fg,target.queue_polyline,false);fg.strokeStyle='#b3965c';fg.lineWidth=2;fg.setLineDash([2,5]);fg.stroke();fg.setLineDash([]);
+  path(bg,room.walkable);bg.fillStyle='#fcfdf8';bg.fill();bg.strokeStyle='#a9baaa';bg.lineWidth=2;bg.stroke();
+  for(const w of room.walkways){region(bg,w,'#edf3e8');hatch(bg,w.poly,'#d3dfcb',12);}
+  for(const d of room.destinations){fg.setLineDash([5,4]);region(fg,d,null,'#699a83');fg.setLineDash([]);label(fg,name(d.id),d.poly,'#56806b');}
+  for(const o of room.obstacles){region(fg,o,'#dce3d9','#829784');if(o.locked)hatch(fg,o.poly,'#b5c3b1',7);label(fg,`${o.locked?'⊠ ':''}${name(o.id)}`,o.poly);}
+  for(const e of room.entrances){region(fg,e,'#cae6d4','#539775');label(fg,'IN',e.poly,'#285f44');}
+  for(const e of room.exits){region(fg,e,'#e0ebf0','#8aa9ba');label(fg,'EXIT',e.poly,'#4c778b');}
+  for(const target of room.targets){if(target.overflow_area){fg.setLineDash([4,4]);region(fg,{poly:target.overflow_area},null,'#cc8b7e');fg.setLineDash([]);label(fg,'overflow waiting',target.overflow_area,'#aa7267');}path(fg,target.queue_polyline,false);fg.strokeStyle='#b3965c';fg.lineWidth=2;fg.setLineDash([2,5]);fg.stroke();fg.setLineDash([]);
     const services=target.service_positions?.length?target.service_positions:[target.queue_polyline[0]];
     for(const p of services){const [x,y]=point(p),side=.3*fit.scale;fg.fillStyle='#9479b6';fg.fillRect(x-side/2,y-side/2,side,side);fg.strokeStyle='white';fg.strokeRect(x-side/2,y-side/2,side,side);}
-    const [tx,ty]=point(target.queue_polyline.at(-1));fg.fillStyle='#9b8356';fg.font='9px system-ui';fg.textAlign='left';fg.fillText('queue tail',tx+8,ty-9);}
+    for(const vertex of target.queue_polyline){const [vx,vy]=point(vertex);fg.beginPath();fg.arc(vx,vy,3,0,Math.PI*2);fg.fillStyle='#b3965c';fg.fill();}const [tx,ty]=point(target.queue_polyline.at(-1));fg.fillStyle='#9b8356';fg.font='9px system-ui';fg.textAlign='left';fg.fillText('queue tail',tx+8,ty-9);}
   const [x0,y0,x1]=bounds;fg.fillStyle='#8b9c8b';fg.font='9px system-ui';fg.textAlign='center';
   for(let x=Math.ceil(x0/2)*2;x<=x1;x+=2){const [px,py]=point([x,y0]);fg.fillText(`${x} m`,px,py+19);}
 }
@@ -130,11 +132,11 @@ function clearRun() {
 function loadScene(data, filename) { scene=validateScene(data);clearRun();$('filename').textContent=filename;$('scene-title').textContent=filename==='Sample room'?'The sample room':filename;$('run').disabled=false;resize(); }
 function setBusy(value) { busy=value;$('run').disabled=value||!scene;$('run').textContent=value?'Rehearsing…':'Run rehearsal ↗'; }
 async function responseError(response) { let data;try{data=await response.json();}catch{return `HTTP ${response.status}`;}return typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||data); }
-async function executeRun(runScene,scenario,token,label) {
+async function executeRun(runScene,scenario,token,label,request=null) {
   playing=false;lastStamp=null;setBusy(true);requestRender();status('Rehearsing the room. Previous playback remains available.');
   try{
-    const next=await api('/api/run',{scene:runScene,scenario},token);
-    const binary=await api(`/api/frames/${encodeURIComponent(next.run_id)}`,undefined,token,true);
+    const next=await api(request?.url||'/api/run',request?.body||{scene:runScene,scenario},token);if(token!==revision)throw Error('Request superseded by a newer edit.');runScene=next.scene||runScene;scenario=next.scenario||scenario;
+    const binary=await api(`/api/frames/${encodeURIComponent(next.run_id)}`,undefined,token,true);if(token!==revision)throw Error('Request superseded by a newer edit.');
     const nextCount=Number(binary.headers.get('X-Frame-Count')), n=Number(binary.headers.get('X-Person-Count')), dt=Number(binary.headers.get('X-Frame-Dt-S'));
     const nextIds=JSON.parse(binary.headers.get('X-Person-Ids')||'null'), buffer=binary.data;
     if(!Number.isInteger(nextCount)||nextCount<1||n!==scenario.n_people||dt!==.2||!Array.isArray(nextIds)||nextIds.length!==n||buffer.byteLength!==nextCount*n*2*4)throw Error('Frame data does not match its metadata.');
@@ -158,30 +160,38 @@ async function runScene(event) {
 function renderComparison(){
   $('comparison').hidden=false;$('candidate-tabs').replaceChildren();
   for(const [index,label] of [[-1,'Original'],...candidates.map(c=>[c.index,`Candidate ${String.fromCharCode(65+c.index)}`])]){const button=document.createElement('button');button.textContent=label;button.type='button';button.setAttribute('aria-pressed',String(index===activeCandidate));button.addEventListener('click',()=>selectCandidate(index));$('candidate-tabs').append(button);}
-  const selectedCandidate=candidates.find(c=>c.index===activeCandidate)||candidates[0];$('metric-comparison').replaceChildren();if(!selectedCandidate)return;
+  const selectedCandidate=candidates.find(c=>c.index===activeCandidate)||candidates.find(c=>c.metrics)||candidates[0];$('metric-comparison').replaceChildren();if(!selectedCandidate)return;
+  if(selectedCandidate.kind==='operations'){const notice=document.createElement('p');notice.textContent='Changes an operating assumption.'+(arrivalsDiffer(selectedCandidate)?' Arrival schedules differ; this is not an automatic layout improvement.':'');$('metric-comparison').append(notice);}
+  if(!selectedCandidate.metrics){const preview=document.createElement('p');preview.textContent=selectedCandidate.rationale||'Review this operating change before measuring it.';$('metric-comparison').append(preview);const button=document.createElement('button');button.textContent='Confirm and measure operating change';button.addEventListener('click',()=>selectCandidate(selectedCandidate.index,true));$('metric-comparison').append(button);return;}
   const table=document.createElement('table'),header=table.insertRow();for(const text of ['Engine measurement','Original',`Candidate ${String.fromCharCode(65+selectedCandidate.index)}`,'Change']){const th=document.createElement('th');th.textContent=text;header.append(th);}
   for(const [key,label,higher] of [['mean_wait_s','Mean wait · s',false],['max_wait_s','Max wait · s',false],['walkway_conflict_person_s','Walkway conflict · person-s',false],['completed','Completed',true]]){
     const a=key==='completed'?original.accounting.done:original.metrics[key],b=key==='completed'?selectedCandidate.accounting.done:selectedCandidate.metrics[key],delta=Number.isFinite(a)&&Number.isFinite(b)?b-a:NaN,row=table.insertRow(),title=document.createElement('th');title.textContent=label;row.append(title);
     for(const value of [a,b])row.insertCell().textContent=fmt(value);const cell=row.insertCell();cell.textContent=Number.isFinite(delta)?`${delta>0?'+':''}${fmt(delta)}`:'—';if(Number.isFinite(delta)&&delta)cell.className=(higher?delta>0:delta<0)?'better':'worse';}
   $('metric-comparison').append(table);const rationale=document.createElement('p');rationale.textContent=selectedCandidate.rationale;$('metric-comparison').append(rationale);
 }
+function arrivalsDiffer(candidate){return candidate.scenario&&(candidate.scenario.arrival_pattern!==original.scenario.arrival_pattern||candidate.scenario.arrival_window_s!==original.scenario.arrival_window_s);}
 async function explainCandidate(candidate,token){
+  if(!candidate.metrics)return;
   $('explanation').textContent='Explaining the measured trade-offs…';
-  try{const data=await api('/api/explain',{baseline_metrics:original.metrics,baseline_accounting:original.accounting,candidate_metrics:candidate.metrics,candidate_accounting:candidate.accounting,rationale:candidate.rationale},token);$('explanation').textContent=data.explanation;}
+  try{const data=await api('/api/explain',{baseline_metrics:original.metrics,baseline_accounting:original.accounting,candidate_metrics:candidate.metrics,candidate_accounting:candidate.accounting,rationale:candidate.rationale+(candidate.kind==='operations'?' This changes an operating assumption.':'')+(arrivalsDiffer(candidate)?' Arrival schedules differ; do not call this an automatic layout improvement.':'')},token);$('explanation').textContent=data.explanation;}
   catch(error){if(token===revision)$('explanation').textContent='';fail(error,token);}
 }
-async function selectCandidate(index){
+async function selectCandidate(index,confirmed=false){
   if(!original)return;const chosen=index===-1?original:candidates.find(c=>c.index===index);if(!chosen)return;
+  if(chosen.kind==='operations'&&!confirmed&&!chosen.confirmed){invalidate();activeCandidate=index;renderComparison();$('explanation').textContent='Confirm the operating assumption before running this candidate.';return;}
   const token=invalidate();$('api-error').textContent='';const scenario={...chosen.scenario,seed:original.scenario.seed};
-  try{const next=await executeRun(chosen.scene,scenario,token,index===-1?'Original':`Candidate ${String.fromCharCode(65+index)}`);chosen.metrics=next.metrics;chosen.accounting=next.accounting;activeCandidate=index;renderComparison();const candidate=index===-1?candidates[0]:chosen;if(candidate)await explainCandidate(candidate,token);}
-  catch(error){fail(error,token);}
+  try{const request=proposalJob?{url:`/api/propose/${encodeURIComponent(proposalJob)}/run`,body:{index,confirmed:confirmed||!!chosen.confirmed}}:chosen.operationRequest||null;
+    const next=await executeRun(chosen.scene,scenario,token,index===-1?'Original':`Candidate ${String.fromCharCode(65+index)}`,request);
+    Object.assign(chosen,{scene:next.scene||chosen.scene,scenario:next.scenario||scenario,metrics:next.metrics,accounting:next.accounting,comparison:next.comparison,confirmed:confirmed||chosen.confirmed});
+    if(next.baseline_metrics){original.metrics=next.baseline_metrics;original.accounting=next.baseline_accounting;}activeCandidate=index;renderComparison();const candidate=index===-1?candidates.find(c=>c.metrics):chosen;if(candidate)await explainCandidate(candidate,token);
+  }catch(error){fail(error,token);}
 }
 $('interpret').addEventListener('click',async()=>{
   if(!$('brief').value.trim()){$('api-error').textContent='Add an event brief first.';return;}const token=invalidate();$('api-error').textContent='';$('interpret').disabled=true;interpreted=null;$('interpretation').hidden=true;
   try{const data=await api('/api/interpret',{brief:$('brief').value},token);if(data.errors)throw Error(JSON.stringify(data.errors));if(!data.scenario||!Array.isArray(data.assumptions))throw Error('Interpretation is missing its scenario or assumptions.');if(data.scene)validateScene(data.scene);interpreted=data;$('assumptions').replaceChildren();for(const text of data.assumptions){const li=document.createElement('li');li.textContent=text;$('assumptions').append(li);}$('interpretation').hidden=false;}
   catch(error){fail(error,token);}finally{if(token===revision)$('interpret').disabled=false;}
 });
-$('confirm').addEventListener('click',()=>{if(!interpreted)return;invalidate();clearCandidates();if(interpreted.scene)loadScene(clone(interpreted.scene),'Interpreted scene');fillScenario(interpreted.scenario);$('interpretation').hidden=true;interpreted=null;$('api-error').textContent='';status('Assumptions confirmed. Run to measure this scenario.');});
+$('confirm').addEventListener('click',()=>{if(!interpreted)return;invalidate();clearCandidates();if(interpreted.scene)loadScene(clone(interpreted.scene),'Interpreted scene');fillScenario(interpreted.scenario);confirmedAssumptions=clone(interpreted.assumptions);$('interpretation').hidden=true;interpreted=null;$('api-error').textContent='';status('Assumptions confirmed. Run to measure this scenario.');});
 function waitForPoll(){return new Promise(resolve=>{pollResolve=resolve;pollTimer=setTimeout(()=>{pollResolve=null;resolve();},1000);});}
 async function pollProposal(jobId,token){
   const labels={asking_astra:'Astra is considering permitted layouts…',validating:'Validating candidate layouts…','simulating A':'Simulating Candidate A…','simulating B':'Simulating Candidate B…',done:'Candidate measurements ready.'};
@@ -198,9 +208,49 @@ async function pollProposal(jobId,token){
 $('propose').addEventListener('click',async()=>{
   if(!lastRun||JSON.stringify(lastRun.scene)!==JSON.stringify(scene)||JSON.stringify(lastRun.scenario)!==JSON.stringify(currentScenario())){$('api-error').textContent='Run the current scene and scenario before finding a better setup.';return;}
   const token=invalidate();$('api-error').textContent='';$('propose').disabled=true;$('proposal-stage').textContent='Starting proposal…';original=clone(lastRun);candidates=[];activeCandidate=-1;$('comparison').hidden=true;$('explanation').textContent='';
-  try{const started=await api('/api/propose',{scene:original.scene,scenario:original.scenario,baseline_metrics:original.metrics,baseline_accounting:original.accounting,constraints:$('constraints').value},token);if(typeof started.job_id!=='string'||!started.job_id)throw Error('Proposal response is missing its job ID.');const data=await pollProposal(started.job_id,token);candidates=data.candidates||[];$('candidate-rejections').replaceChildren();for(const rejected of data.rejected||[]){const line=document.createElement('div');line.className='rejected';line.textContent=`Candidate ${String.fromCharCode(65+rejected.index)} rejected: ${rejected.reason}`;$('candidate-rejections').append(line);}renderComparison();if(candidates[0])await explainCandidate(candidates[0],token);else $('explanation').textContent='No permitted candidate was returned. You can edit the constraints or continue manually.';}
+  try{const started=await api('/api/propose',{scene:original.scene,scenario:original.scenario,baseline_metrics:original.metrics,baseline_accounting:original.accounting,constraints:$('constraints').value},token);if(typeof started.job_id!=='string'||!started.job_id)throw Error('Proposal response is missing its job ID.');const data=await pollProposal(started.job_id,token);proposalJob=started.job_id;candidates=data.candidates||[];$('candidate-rejections').replaceChildren();for(const rejected of data.rejected||[]){const line=document.createElement('div');line.className='rejected';line.textContent=`Candidate ${String.fromCharCode(65+rejected.index)} rejected: ${rejected.reason}`;$('candidate-rejections').append(line);}renderComparison();const measured=candidates.find(c=>c.metrics);if(measured)await explainCandidate(measured,token);else $('explanation').textContent=candidates.length?'Operating changes require confirmation before measurement.':'No permitted candidate was returned. You can edit the constraints or continue manually.';}
   catch(error){if(token===revision)$('proposal-stage').textContent='Proposal stopped. Manual rehearsal remains available.';fail(error,token);}finally{if(token===revision)$('propose').disabled=false;}
 });
+function hasCurrentRun(){return lastRun&&JSON.stringify(lastRun.scene)===JSON.stringify(scene)&&JSON.stringify(lastRun.scenario)===JSON.stringify(currentScenario());}
+function previewOperation(preset,label){
+  if(!hasCurrentRun()){$('api-error').textContent='Run the current rehearsal before changing an operating assumption.';return;}
+  invalidate();pendingOperation={preset,label,baseline:clone(lastRun)};$('operation-description').textContent=`Changes an operating assumption: ${label}.`;$('operation-preview').hidden=false;$('api-error').textContent='';
+}
+async function confirmOperation(){
+  if(!pendingOperation)return;const pending=pendingOperation,token=invalidate();clearCandidates();original=pending.baseline;$('api-error').textContent='';
+  try{const next=await executeRun(original.scene,original.scenario,token,pending.label,{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,preset:pending.preset,confirmed:true}});
+    if(token!==revision)return;confirmedAssumptions.push(pending.label);original.metrics=next.baseline_metrics;original.accounting=next.baseline_accounting;candidates=[{index:0,kind:'operations',confirmed:true,scene:next.scene,scenario:next.scenario,metrics:next.metrics,accounting:next.accounting,comparison:next.comparison,rationale:pending.label,operationRequest:{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,preset:pending.preset,confirmed:true}}}];activeCandidate=0;renderComparison();await explainCandidate(candidates[0],token);
+  }catch(error){fail(error,token);}
+}
+$('judge-one').addEventListener('click',()=>previewOperation('one_volunteer','Use one volunteer'));
+$('judge-third').addEventListener('click',()=>previewOperation('third_volunteer','Use a third volunteer'));
+$('judge-waves').addEventListener('click',()=>previewOperation('waves_15min','Five scheduled arrival waves over 15 minutes'));
+$('operation-confirm').addEventListener('click',confirmOperation);
+$('revise-run').addEventListener('click',async()=>{
+  if(!scene||!$('revise').value.trim()){$('api-error').textContent='Describe a revision to the loaded scene first.';return;}
+  const prior=clone(scene),scenario=currentScenario(),token=invalidate();clearCandidates();$('revise-run').disabled=true;$('api-error').textContent='';
+  try{const data=await api('/api/interpret',{brief:$('revise').value,scene:prior,scenario},token);if(token!==revision)return;if(!data.scenario)throw Error('Revision did not return a scenario.');if(data.scene)validateScene(data.scene);await executeRun(data.scene||prior,data.scenario,token,'Revised rehearsal');if(token!==revision)return;confirmedAssumptions=clone(data.assumptions||[]);$('revision-assumptions').replaceChildren();for(const assumption of data.assumptions||[]){const li=document.createElement('li');li.textContent=assumption;$('revision-assumptions').append(li);}status('Revision measured. Review the returned assumptions in the revision panel.');}
+  catch(error){fail(error,token);}finally{if(token===revision)$('revise-run').disabled=false;}
+});
+function containsPoint(poly,p){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])inside=!inside;}return inside;}
+function canvasPoint(event){const rect=canvas.getBoundingClientRect();return [(event.clientX-rect.left-fit.x)/fit.scale,(fit.y-(event.clientY-rect.top))/fit.scale];}
+async function applyDraggedScene(draft,previous,token){
+  try{const checked=await api('/api/scene/validate',{scene:draft},token);if(token!==revision)return;validateScene(checked.scene);await executeRun(checked.scene,currentScenario(),token,'Edited layout');}
+  catch(error){if(token===revision){scene=previous;rebuildRoom();requestRender();fail(error,token);}}
+}
+canvas.addEventListener('pointerdown',event=>{
+  if(!scene||busy||event.button!==0)return;const p=canvasPoint(event);let hit=null;
+  for(let target=0;target<scene.targets.length;target++)for(let vertex=0;vertex<scene.targets[target].queue_polyline.length;vertex++)if(Math.hypot(...scene.targets[target].queue_polyline[vertex].map((v,i)=>v-p[i]))*fit.scale<=9)hit={target,vertex};
+  if(!hit){const obstacle=scene.obstacles.findIndex(o=>!o.locked&&containsPoint(o.poly,p));if(obstacle>=0)hit={obstacle};}if(!hit)return;
+  const token=invalidate();clearCandidates();playing=false;lastStamp=null;drag={...hit,start:p,previous:clone(scene),preview:clone(scene),token,moved:false};canvas.setPointerCapture(event.pointerId);event.preventDefault();
+});
+canvas.addEventListener('pointermove',event=>{
+  if(!drag)return;const p=canvasPoint(event),dx=p[0]-drag.start[0],dy=p[1]-drag.start[1];drag.moved ||= Math.hypot(dx,dy)*fit.scale>2;
+  if(drag.obstacle!==undefined)drag.preview.obstacles[drag.obstacle].poly=drag.previous.obstacles[drag.obstacle].poly.map(v=>[v[0]+dx,v[1]+dy]);else drag.preview.targets[drag.target].queue_polyline[drag.vertex]=p;
+  rebuildRoom();requestRender();
+});
+canvas.addEventListener('pointerup',event=>{if(!drag)return;const finished=drag;drag=null;suppressClick=finished.moved;canvas.releasePointerCapture(event.pointerId);rebuildRoom();requestRender();if(finished.moved)applyDraggedScene(finished.preview,finished.previous,finished.token);});
+canvas.addEventListener('pointercancel',()=>{drag=null;rebuildRoom();requestRender();});
 function stateAt(person, t) {
   const e=person.timeline, passed=kind=>e[kind]&&e[kind].time_s<=t+1e-8;
   if(!passed('spawned'))return 'not_arrived';if(passed('seated'))return 'done';if(passed('service_end'))return 'walking';
@@ -256,12 +306,12 @@ function requestRender() { if(!raf)raf=requestAnimationFrame(tick); }
 function seek(value) { playing=false;lastStamp=null;time=Math.max(0,Math.min(duration,value));requestRender(); }
 $('scenario').addEventListener('submit',runScene);
 $('scenario').addEventListener('input',()=>edited('scenario'));
-$('brief').addEventListener('input',()=>edited('brief'));$('constraints').addEventListener('input',()=>edited('constraints'));
+$('revise').addEventListener('input',()=>edited('revise'));$('brief').addEventListener('input',()=>edited('brief'));$('constraints').addEventListener('input',()=>edited('constraints'));
 $('play').addEventListener('click',()=>{if(!frames)return;if(time>=duration)time=0;playing=!playing;lastStamp=null;requestRender();});
 $('speed').addEventListener('change',()=>{lastStamp=null;requestRender();});$('heat').addEventListener('change',requestRender);
 $('scrubber').addEventListener('input',event=>seek(Number(event.target.value)));
 $('person-select').addEventListener('change',event=>{selected=event.target.value===''?-1:Number(event.target.value);showPerson();requestRender();});
-canvas.addEventListener('click',event=>{const rect=canvas.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;const hits=drawn.filter(p=>Math.hypot(p.x-x,p.y-y)<=Math.max(8,.175*fit.scale+3)).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y));selected=hits.length?hits[(hits.findIndex(p=>p.i===selected)+1)%hits.length].i:-1;showPerson();requestRender();});
+canvas.addEventListener('click',event=>{if(suppressClick){suppressClick=false;return;}const rect=canvas.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;const hits=drawn.filter(p=>Math.hypot(p.x-x,p.y-y)<=Math.max(8,.175*fit.scale+3)).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y));selected=hits.length?hits[(hits.findIndex(p=>p.i===selected)+1)%hits.length].i:-1;showPerson();requestRender();});
 canvas.addEventListener('keydown',event=>{if(event.code==='Space'&&frames){event.preventDefault();$('play').click();}if(event.key==='ArrowRight'){event.preventDefault();seek(time+1);}if(event.key==='ArrowLeft'){event.preventDefault();seek(time-1);}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){playing=false;lastStamp=null;requestRender();}});
 $('open-file').addEventListener('click',()=>$('file').click());

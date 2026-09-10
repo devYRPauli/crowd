@@ -171,7 +171,7 @@ class Scene(Contract):
 class Scenario(Contract):
     n_people: Annotated[int, Field(ge=1, strict=True)]
     arrival_window_s: Annotated[FiniteFloat, Field(gt=0)]
-    arrival_pattern: Literal["front_loaded", "uniform"]
+    arrival_pattern: Literal["front_loaded", "uniform", "waves"]
     seed: Annotated[int, Field(ge=0, strict=True)]
     horizon_s: Annotated[FiniteFloat, Field(gt=0)]
     mode: Literal["queue"]

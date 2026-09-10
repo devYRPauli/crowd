@@ -47,7 +47,7 @@ def submit(client, request):
 
 
 def unchanged():
-    return {"option_id": None, "patch": [], "rationale": "Retain the layout for comparison."}
+    return {"kind": "layout", "option_id": None, "patch": [], "rationale": "Retain the layout for comparison."}
 
 
 def test_post_returns_while_astra_pending_and_manual_run_remains_available(monkeypatch, rehearsal):
@@ -100,7 +100,7 @@ def test_manual_run_during_each_candidate_simulation(monkeypatch, rehearsal, blo
     calls = []
     monkeypatch.setattr(server.astra, "ask_structured", lambda *args, **kwargs: {"candidates": [unchanged(), unchanged()]})
 
-    def simulate(scene, scenario):
+    def simulate(scene, scenario, **kwargs):
         if current_thread().name.startswith("crowd-proposal-"):
             index = len(calls)
             calls.append(index)
@@ -191,7 +191,7 @@ def test_bad_model_schema_ends_job_with_validation_errors(monkeypatch, rehearsal
 ])
 def test_forbidden_patch_is_rejected_inside_completed_job(monkeypatch, rehearsal, path, value):
     request, _ = rehearsal
-    bad = {"option_id": None, "patch": [{"op": "replace", "path": path, "value": value}],
+    bad = {"kind": "layout", "option_id": None, "patch": [{"op": "replace", "path": path, "value": value}],
            "rationale": "Adjust the rehearsal."}
     monkeypatch.setattr(server.astra, "ask_structured", lambda *args, **kwargs: {"candidates": [bad, unchanged()]})
     client = TestClient(server.app)

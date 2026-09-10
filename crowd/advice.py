@@ -63,6 +63,7 @@ class Patch(Contract):
 
 
 class Proposal(Contract):
+    kind: Literal["layout", "operations"]
     option_id: str | None
     patch: Annotated[list[Patch], Field(max_length=20)]
     rationale: str
