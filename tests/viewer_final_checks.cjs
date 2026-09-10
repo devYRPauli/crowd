@@ -14,11 +14,11 @@ function createViewer() {
     get(target, key) { return key in target ? target[key] : () => {}; },
   });
   function element(tag = 'div') {
-    const listeners = new Map(), attributes = new Map();
+    const listeners = new Map(), attributes = new Map(), classes = new Set();
     return {
       tagName: tag.toUpperCase(), value: '', hidden: false, disabled: false,
       textContent: '', children: [], dataset: {}, style: {}, clientWidth: 900, clientHeight: 600,
-      classList: {toggle() {}, add() {}, remove() {}},
+      classList: {toggle(key, value) {if(value)classes.add(key);else classes.delete(key);}, add(key) {classes.add(key);}, remove(key) {classes.delete(key);}, contains: key => classes.has(key)},
       getContext: () => context, reportValidity: () => true,
       getBoundingClientRect: () => ({left: 0, top: 0, width: 900, height: 600}),
       setAttribute(key, value) { attributes.set(key, String(value)); },
@@ -276,6 +276,59 @@ async function runChecks() {
     await viewer.elements.get('propose').click();
     assert.equal(viewer.evaluate('capturedProposal.cohort_id'), 'cohort-original');
     assert.deepEqual(plain(viewer.evaluate('capturedProposal.scenario')), plain(viewer.evaluate('pinnedBaseline.scenario')));
+  });
+  await check('validation errors become one concise first message without JSON or Value error prefix', async () => {
+    const viewer = createViewer();
+    for (const value of [
+      'Value error, Queue must stay inside the room.\n Move its tail.',
+      {detail: [{loc: ['body', 'scene'], msg: 'Value error, Queue must stay inside the room.\n Move its tail.'}, {msg: 'Second error'}]},
+      {errors: ['Value error: Queue must stay inside the room.  Move its tail.']},
+      JSON.stringify({detail: {errors: ['Value error, Queue must stay inside the room. Move its tail.']}}),
+    ]) {
+      viewer.sandbox.errorFixture = value;
+      assert.equal(viewer.evaluate('errorLine(errorFixture)'), 'Queue must stay inside the room. Move its tail.');
+    }
+    assert.equal(viewer.evaluate(`errorLine(new Error('Value error, Keep the door clear.'))`), 'Keep the door clear.');
+    assert.equal(viewer.evaluate(`errorLine({unrecognized:'private diagnostic'})`), 'The request could not be completed.');
+  });
+  await check('step changes clear inline and canvas errors without changing the measured run', async () => {
+    const viewer = createViewer();
+    const before = viewer.state();
+    viewer.evaluate(`fail(Error('Old validation failure'),revision);flashRule('Old validation failure');status('Old validation failure',true);setStep('improve');`);
+    assert.equal(viewer.elements.get('api-error').textContent, '');
+    assert.equal(viewer.evaluate('ruleCallout'), null);
+    assert.equal(viewer.elements.get('status').classList.contains('error'), false);
+    assert.deepEqual(viewer.state(), before);
+  });
+  await check('successful POST clears previous validation while stale POST cannot clear a newer error', async () => {
+    const viewer = createViewer();
+    viewer.sandbox.fetch = async () => ({ok: true, json: async () => ({scene: sample})});
+    viewer.evaluate(`fail(Error('Old error'),revision)`);
+    await viewer.evaluate(`api('/api/scene/validate',{scene},revision)`);
+    assert.equal(viewer.elements.get('api-error').textContent, '');
+    let resolveFetch;
+    viewer.sandbox.fetch = () => new Promise(resolve => {resolveFetch = resolve;});
+    const pending = viewer.evaluate(`api('/api/scene/validate',{scene},revision)`);
+    viewer.evaluate(`invalidate();fail(Error('New error'),revision)`);
+    resolveFetch({ok: true, json: async () => ({scene: sample})});
+    await assert.rejects(pending, /superseded/);
+    assert.equal(viewer.elements.get('api-error').textContent, 'New error');
+  });
+  await check('invalid drag rolls back and shows the targeted first rule for three seconds', async () => {
+    const viewer = createViewer(), before = viewer.state();
+    let callback, timeout;
+    viewer.sandbox.setTimeout = (fn, milliseconds) => {callback = fn; timeout = milliseconds; return 1;};
+    viewer.sandbox.clearTimeout = () => {};
+    viewer.sandbox.fetch = async () => ({ok: false, status: 422, json: async () => ({detail: [{msg:'Value error, dining_1 must remain inside the room.'},{msg:'Additional detail'}]})});
+    viewer.evaluate(`fixtureCandidate=clone(scene);fixtureCandidate.obstacles[1].poly=fixtureCandidate.obstacles[1].poly.map(p=>[p[0]+50,p[1]]);`);
+    await viewer.evaluate('applyDraggedScene(fixtureCandidate,clone(scene),revision)');
+    assert.deepEqual(viewer.state(), before);
+    assert.equal(viewer.elements.get('api-error').textContent, 'dining_1 must remain inside the room.');
+    assert.equal(viewer.evaluate('ruleCallout.text'), 'dining_1 must remain inside the room.');
+    assert.deepEqual(plain(viewer.evaluate('ruleCallout.position')), [57, 3]);
+    assert.equal(timeout, 3000);
+    callback();
+    assert.equal(viewer.evaluate('ruleCallout'), null);
   });
   return passed;
 }
