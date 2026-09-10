@@ -124,6 +124,6 @@ diagnosed from traces.
 - `79d6bde`: five-step guided flow, room palette and sprite fallbacks.
 - `6d26641`: replay/export hardening, advice recovery, clean-start verification.
 - `58a2199`: live Astra work panel, correction notices and canvas rule feedback.
-- Watch view: shared 3D replay, CC0 furniture models and capsule fallback (this milestone).
+- `d0ed10d`: shared 3D replay, CC0 furniture models and capsule fallback.
 
 Crowd code is MIT licensed; JuPedSim remains LGPLv3-or-later. See LICENSE.
