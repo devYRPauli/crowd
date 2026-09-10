@@ -284,6 +284,7 @@ def interpret(request: InterpretRequest) -> dict:
     if context:
         prompt += "\nRevise this current context according to the brief; preserve unspecified scenario values. "
         prompt += "Return scene null to retain the current geometry. Current context: " + json.dumps(context, separators=(",", ":"))
+    correction_errors = []
     for attempt in range(2):
         raw = _ask(prompt, strict_schema(Interpretation), images=images)
         try:
@@ -291,22 +292,35 @@ def interpret(request: InterpretRequest) -> dict:
         except ValidationError as exc:
             errors = _validation_errors(exc)
             if attempt == 1:
-                raise HTTPException(status_code=422, detail={"errors": errors, "attempts": 2}) from None
+                raise HTTPException(status_code=422, detail={"errors": errors, "attempts": 2,
+                                                           "correction_errors": correction_errors}) from None
+            correction_errors = list(errors)
             prompt += "\nCorrect the previous output exactly once. Validation errors: " + json.dumps(errors)
             prompt += "\nPrevious output: " + json.dumps(raw)
             continue
         return {"scenario": output.scenario.model_dump(mode="json"),
                 "scene": output.scene.model_dump(mode="json") if output.scene else None,
-                "assumptions": assumption_receipt(output)}
+                "assumptions": assumption_receipt(output), "correction_errors": correction_errors}
     raise RuntimeError("Interpretation correction loop did not return")
 
 
 def _proposal_update(job_id: str, **fields) -> None:
     with _proposal_jobs_lock:
-        _proposal_jobs[job_id] = {**_proposal_jobs[job_id], **fields}
+        _proposal_jobs[job_id] = {**_proposal_jobs[job_id], **deepcopy(fields)}
+
+
+def _proposal_progress(constraints: str) -> dict:
+    return {"constraints": constraints, "allowed_operations": [
+        "Layout: choose a declared layout option, edit a queue, or translate an unlocked obstacle.",
+        "Layout: service positions may move only with unchanged staffing count.",
+        "Operations: arrival pattern/window or staffing count may change only after confirmation.",
+        "Never change locked objects, n_people, service_s, region IDs, seed, horizon_s, or mode.",
+        "Every proposed scene must pass schema and Shapely geometry checks.",
+    ], "candidates": []}
 
 
 def _proposal_work(job_id: str, request: ProposeRequest) -> dict:
+    progress = _proposal_progress(request.constraints)
     _proposal_update(job_id, status="running", stage="validating", detail="Measuring the original layout")
     baseline = _measured(request.scene, request.scenario, cached=True)
     cache_key = _cache_key({"scene": request.scene.model_dump(mode="json"),
@@ -341,10 +355,25 @@ def _proposal_work(job_id: str, request: ProposeRequest) -> dict:
         proposals = Proposals.model_validate(raw)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail={"errors": _validation_errors(exc)}) from None
-    candidates, rejected, permitted = [], [], []
     for index, proposal in enumerate(proposals.candidates):
         try:
             rationale = qualitative_rationale(proposal.rationale)
+        except ValueError:
+            rationale = None
+        progress["candidates"].append({
+            "index": index, "kind": proposal.kind, "option_id": proposal.option_id,
+            "patch": [row.model_dump(mode="json") for row in proposal.patch],
+            "rationale": rationale, "status": "proposed", "rule_checks": ["Structured-output schema checked."],
+        })
+    _proposal_update(job_id, progress=progress)
+    candidates, rejected, permitted = [], [], []
+    for index, proposal in enumerate(proposals.candidates):
+        record = progress["candidates"][index]
+        record["status"] = "validating"
+        _proposal_update(job_id, progress=progress)
+        try:
+            rationale = qualitative_rationale(proposal.rationale)
+            record["rule_checks"].append("Qualitative rationale checked; no invented measurements or safety claims.")
             patch = [row.model_dump(mode="json") for row in proposal.patch]
             if proposal.kind == "operations":
                 if proposal.option_id is not None:
@@ -367,23 +396,38 @@ def _proposal_work(job_id: str, request: ProposeRequest) -> dict:
                 }
             if proposal.kind == "operations":
                 candidates.append(preview)
+                record["status"] = "awaiting_confirmation"
             else:
                 permitted.append((index, scene, scenario, preview))
+                record["status"] = "accepted"
+            record["rule_checks"].extend(["Protected fields and permitted operation scope checked.",
+                                           "Scene schema and Shapely geometry checks passed."])
         except ValueError as exc:
             rejected.append({"index": index, "reason": str(exc)})
+            record.update(status="rejected", rejection_reason=str(exc))
+            record["rule_checks"].append("Rejected by validation: " + str(exc))
+        _proposal_update(job_id, progress=progress)
     for index, scene, scenario, preview in permitted:
-        _proposal_update(job_id, stage=f"simulating {'AB'[index]}", detail=f"Measuring Candidate {'AB'[index]}")
+        record = progress["candidates"][index]
+        record.update(status="simulating", simulation={"status": "running", "n_people": len(baseline.people)})
+        _proposal_update(job_id, stage=f"simulating {'AB'[index]}", detail=f"Measuring Candidate {'AB'[index]}", progress=progress)
         try:
             result = _measured(scene, scenario, people=baseline.people)
             candidates.append({**preview, "metrics": result.metrics, "accounting": result.accounting,
                                "comparison": compare(baseline, result)})
+            record.update(status="completed", simulation={"status": "completed", "n_people": len(result.people),
+                                                           "completed": result.accounting["done"]})
         except (ValueError, RuntimeError) as exc:
             with _proposal_jobs_lock:
                 _proposal_private[job_id]["candidates"].pop(index, None)
             rejected.append({"index": index, "reason": str(exc)})
+            record.update(status="rejected", rejection_reason=str(exc),
+                          simulation={"status": "failed", "n_people": len(baseline.people)})
+            record["rule_checks"].append("Simulation or comparison rejected: " + str(exc))
+        _proposal_update(job_id, progress=progress)
     return {"candidates": sorted(candidates, key=lambda row: row["index"]),
             "rejected": sorted(rejected, key=lambda row: row["index"]),
-            "baseline_metrics": baseline.metrics, "baseline_accounting": baseline.accounting}
+            "baseline_metrics": baseline.metrics, "baseline_accounting": baseline.accounting, "progress": progress}
 
 
 def _proposal_worker(job_id: str, request: ProposeRequest) -> None:
@@ -429,7 +473,7 @@ def propose(request: ProposeRequest) -> dict:
             del _proposal_jobs[finished]
             _proposal_private.pop(finished, None)
         _proposal_jobs[job_id] = {"job_id": job_id, "status": "pending", "stage": "validating",
-                                  "detail": "Waiting to start"}
+                                  "detail": "Waiting to start", "progress": _proposal_progress(request.constraints)}
     try:
         Thread(target=_proposal_worker, args=(job_id, request), daemon=True,
                name=f"crowd-proposal-{job_id[:8]}").start()
@@ -448,7 +492,7 @@ def proposal_status(job_id: str) -> dict:
         job = _proposal_jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Proposal job not found or expired")
-        return dict(job)
+        return deepcopy(job)
 
 
 def _matched_run(baseline: Result, original: Scenario, scene: Scene, scenario: Scenario, *, operations=False) -> dict:
