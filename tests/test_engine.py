@@ -102,7 +102,7 @@ def test_events_waits_service_and_accounting(result):
         assert person["service_s"] <= times[3] - times[2] + 1e-9
         assert times[3] - times[2] < person["service_s"] + DT + 1e-9
         start = events[2]
-        assert np.linalg.norm(np.array(start["position"]) - start["service_position"]) <= 0.25
+        assert np.linalg.norm(np.array(start["position"]) - start["service_position"]) <= 0.35
         waits.append(times[2] - times[1])
         intervals.append((tuple(start["service_position"]), times[2], times[3]))
     for i, (position, start, end) in enumerate(intervals):
@@ -140,13 +140,44 @@ def test_overflow_visible_and_censored(scene, scenario):
     assert result.accounting["queued"] > 2
     assert result.metrics["overflow_count"] > 0
     assert result.metrics["censored_wait_count"] == result.accounting["queued"]
-    overflowed = [i for i, p in enumerate(result.people) if any(e["kind"] == "queue_overflow" for e in result.events[p["id"]])]
-    assert result.metrics["overflow_count"] == len(overflowed)
+    requested = [i for i, p in enumerate(result.people) if any(e["kind"] == "overflow_requested" for e in result.events[p["id"]])]
+    assert result.metrics["overflow_count"] == len(requested)
+    waiting_in_overflow = [
+        i for i in requested
+        if "queue_overflow" in {e["kind"] for e in result.events[result.people[i]["id"]]}
+        and "overflow_end" not in {e["kind"] for e in result.events[result.people[i]["id"]]}
+    ]
+    assert waiting_in_overflow
     last = decode(result)[-1]
-    assert np.isfinite(last[overflowed]).all()
-    assert (np.linalg.norm(last[overflowed] - [4.5, 9.5], axis=1) < 3).any()
+    assert np.isfinite(last[requested]).all()
+    area = Polygon(scene.targets[0].overflow_area)
+    assert all(area.covers(Point(last[i])) for i in waiting_in_overflow)
     assert result.metrics["spawn_delayed_count"] > 0
     assert result.metrics["spawn_native_rejections"] > 0
+
+
+
+def test_overflow_advances_in_arrival_order(scene, scenario):
+    scene.targets[0].queue_polyline = [[5, 9.5], [4.5, 9.5]]
+    scene.targets[0].service_s = 3
+    scenario.n_people = 12
+    scenario.arrival_window_s = 0.1
+    scenario.horizon_s = 240
+    result = run(scene, scenario)
+    promotions = []
+    requested = []
+    for i, person in enumerate(result.people):
+        kinds = [e["kind"] for e in result.events[person["id"]]]
+        if "overflow_requested" in kinds:
+            requested.append((person["arrival_s"], i))
+            assert kinds.count("queue_overflow") == 1
+            assert kinds.count("overflow_end") == 1
+            assert kinds.index("queue_overflow") < kinds.index("overflow_end")
+            promoted = next(e for e in result.events[person["id"]] if e["kind"] == "overflow_end")
+            promotions.append((promoted["time_s"], i))
+    assert len(promotions) >= 3
+    assert [i for _, i in sorted(promotions)] == [i for _, i in sorted(requested)]
+    assert result.accounting["done"] == 12
 
 
 def test_not_arrived_accounted_at_short_horizon(scene, scenario):

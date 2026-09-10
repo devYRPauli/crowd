@@ -76,7 +76,7 @@ function rebuildRoom() {
   for(const o of scene.obstacles){region(fg,o,'#dce3d9','#829784');if(o.locked)hatch(fg,o.poly,'#b5c3b1',7);label(fg,`${o.locked?'⊠ ':''}${name(o.id)}`,o.poly);}
   for(const e of scene.entrances){region(fg,e,'#cae6d4','#539775');label(fg,'IN',e.poly,'#285f44');}
   for(const e of scene.exits){region(fg,e,'#e0ebf0','#8aa9ba');label(fg,'EXIT',e.poly,'#4c778b');}
-  for(const target of scene.targets){path(fg,target.queue_polyline,false);fg.strokeStyle='#b3965c';fg.lineWidth=2;fg.setLineDash([2,5]);fg.stroke();fg.setLineDash([]);
+  for(const target of scene.targets){if(target.overflow_area){fg.setLineDash([4,4]);region(fg,{poly:target.overflow_area},null,'#cc8b7e');fg.setLineDash([]);label(fg,'overflow waiting',target.overflow_area,'#aa7267');}path(fg,target.queue_polyline,false);fg.strokeStyle='#b3965c';fg.lineWidth=2;fg.setLineDash([2,5]);fg.stroke();fg.setLineDash([]);
     const services=target.service_positions?.length?target.service_positions:[target.queue_polyline[0]];
     for(const p of services){const [x,y]=point(p),side=.3*fit.scale;fg.fillStyle='#9479b6';fg.fillRect(x-side/2,y-side/2,side,side);fg.strokeStyle='white';fg.strokeRect(x-side/2,y-side/2,side,side);}
     const [tx,ty]=point(target.queue_polyline.at(-1));fg.fillStyle='#9b8356';fg.font='9px system-ui';fg.textAlign='left';fg.fillText('queue tail',tx+8,ty-9);}
@@ -132,7 +132,7 @@ async function runScene(event) {
 function stateAt(person, t) {
   const e=person.timeline, passed=kind=>e[kind]&&e[kind].time_s<=t+1e-8;
   if(!passed('spawned'))return 'not_arrived';if(passed('seated'))return 'done';if(passed('service_end'))return 'walking';
-  if(passed('service_start'))return 'in_service';if(passed('queue_overflow'))return 'overflow';if(passed('joined_queue'))return 'queued';return 'walking';
+  if(passed('service_start'))return 'in_service';if(passed('queue_overflow')&&!passed('overflow_end'))return 'overflow';if(passed('joined_queue'))return 'queued';return 'walking';
 }
 function personPosition(index, state) {
   const p=people[index];if(state==='done')return p.timeline.seated.position;
@@ -141,8 +141,8 @@ function personPosition(index, state) {
   if(Number.isFinite(frames[offset])&&Number.isFinite(frames[nextOffset]))return [frames[offset]+(frames[nextOffset]-frames[offset])*fraction,frames[offset+1]+(frames[nextOffset+1]-frames[offset+1])*fraction];
   if(Number.isFinite(frames[offset]))return [frames[offset],frames[offset+1]];
   if(Number.isFinite(frames[nextOffset]))return [frames[nextOffset],frames[nextOffset+1]];
-  // Never discard an overflow person because a sample is absent: retain the native tail.
-  if(state==='overflow'){const target=scene.targets.find(t=>t.id===p.timeline.queue_overflow.target_id);if(target)return target.queue_polyline.at(-1);}
+  // Preserve the measured overflow entry when a frame is absent.
+  if(state==='overflow')return p.timeline.queue_overflow.position;
   return p.timeline.spawned?.position;
 }
 function updateHeat(frame) {
@@ -158,7 +158,7 @@ function showPerson() {
   const p=people[selected];$('events').replaceChildren();$('person-select').value=p?String(selected):'';
   $('person-title').textContent=p?`Person ${p.id.slice(1)}`:'Every wait has a story.';$('person-state').textContent=p?stateAt(p,time).replaceAll('_',' '):'';
   $('person-hint').hidden=!!p;if(!p)return;
-  const names={spawned:'Entered the room',joined_queue:'Joined queue',queue_overflow:'Queue overflow',service_start:'Service started',service_end:'Service ended',seated:'Reached destination'};
+  const names={spawned:'Entered the room',joined_queue:'Joined queue',overflow_requested:'Overflow place reserved',queue_overflow:'Entered overflow area',overflow_end:'Advanced to queue',service_start:'Service started',service_end:'Service ended',seated:'Reached destination'};
   for(const event of p.events){const li=document.createElement('li'),title=document.createElement('strong'),when=document.createElement('time');li.dataset.time=event.time_s;title.textContent=names[event.kind]||name(event.kind);when.textContent=`${clock(event.time_s)} · ${fmt(event.time_s)} s`;li.append(title,when);
     if(event.kind==='joined_queue'){const ahead=document.createElement('small');ahead.textContent=`People ahead at join: ${event.people_ahead??'unavailable'}`;li.append(ahead);}$('events').append(li);}
 }

@@ -57,6 +57,9 @@ class Target(Region):
     queue_polyline: Annotated[list[Coordinate], Field(min_length=2)]
     service_positions: list[Coordinate] = Field(default_factory=list)
     service_s: Annotated[FiniteFloat, Field(gt=0)]
+    overflow_area: PolygonRing | None = Field(
+        default=None, description="Explicit waiting region off the queue and entrances."
+    )
 
     @model_validator(mode="after")
     def validate_queue(self) -> Self:
@@ -109,6 +112,21 @@ class Scene(Contract):
                         raise ValueError(f"Target {target.id}: queue/service hits {obstacle_id}")
             if not all(Polygon(target.poly).covers(Point(p)) for p in target.service_positions):
                 raise ValueError(f"Target {target.id}: service positions must lie in target")
+            if target.overflow_area is not None:
+                overflow = Polygon(target.overflow_area)
+                if not floor.covers(overflow):
+                    raise ValueError(f"Target {target.id}: overflow area lies outside room")
+                for obstacle_id, solid in solids:
+                    if overflow.intersection(solid).area > 0:
+                        raise ValueError(f"Target {target.id}: overflow area hits {obstacle_id}")
+                for entrance in self.entrances:
+                    if overflow.intersects(Polygon(entrance.poly)):
+                        raise ValueError(f"Target {target.id}: overflow area hits entrance {entrance.id}")
+                for other_target in self.targets:
+                    if overflow.intersects(LineString(other_target.queue_polyline)):
+                        raise ValueError(f"Target {target.id}: overflow area hits queue {other_target.id}")
+                    if any(overflow.covers(Point(p)) for p in other_target.service_positions):
+                        raise ValueError(f"Target {target.id}: overflow area hits service position")
         return self
 
 
@@ -147,6 +165,9 @@ class Result(Contract):
     density_grid: DensityGrid
     events: dict[str, list[dict[str, JsonValue]]] = Field(
         description="Ordered events keyed by person ID."
+    )
+    diagnostics: list[dict[str, JsonValue]] = Field(
+        default_factory=list, description="Deterministic queue and spawn diagnostics every 10 s."
     )
     scene_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     scenario_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

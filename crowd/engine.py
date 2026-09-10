@@ -22,7 +22,7 @@ from crowd.schema import DensityGrid, Result, Scenario, Scene
 DT = 0.05
 FRAME_DT = 0.1
 RADIUS = 0.2
-REACHED_M = 0.25
+REACHED_M = 0.35
 QUEUE_SPACING_M = 0.5
 CELL_SIZE_M = 0.5
 
@@ -113,6 +113,15 @@ class _Server:
     journeys: dict[str, int]
     agent: int | None = None
     end_s: float | None = None
+    dispatched_s: float | None = None
+
+
+@dataclass
+class _Holding:
+    position: tuple[float, float]
+    stage: int
+    journey: int
+    agent: int | None = None
 
 
 @dataclass
@@ -122,6 +131,9 @@ class _Queue:
     stage: int
     journey: int
     servers: list[_Server] = field(default_factory=list)
+    assigned: set[int] = field(default_factory=set)
+    holding: list[_Holding] = field(default_factory=list)
+    overflow_fifo: list[int] = field(default_factory=list)
 
 
 class _Density:
@@ -205,19 +217,54 @@ def _build_queues(sim: jps.Simulation, scene: Scene, safe_floor: Polygon, seats:
                 description.set_transition_for_stage(service_stage, jps.Transition.create_fixed_transition(seat_stage))
                 journeys[destination] = sim.add_journey(description)
             queue.servers.append(_Server(position, service_stage, journeys))
+        if target.overflow_area is None:
+            raise ValueError(f"Target {target.id}: explicit overflow_area is required")
+        area = Polygon(target.overflow_area).buffer(-RADIUS - 0.05).intersection(safe_floor)
+        x0, y0, x1, y1 = area.bounds
+        candidates = [(float(x), float(y)) for y in np.arange(y0, y1 + 1e-9, 0.65)
+                      for x in np.arange(x0, x1 + 1e-9, 0.65) if area.covers(Point(x, y))]
+        # Fill nearest the overflow exit first, leaving later arrivals behind.
+        candidates.sort(key=lambda p: (math.dist(p, positions[-1]), p))
+        if not candidates:
+            raise ValueError(f"Target {target.id}: overflow_area has no safe holding positions")
+        for position in candidates:
+            holding_stage = sim.add_queue_stage([position])
+            description = jps.JourneyDescription([holding_stage, approach])
+            description.set_transition_for_stage(holding_stage, jps.Transition.create_fixed_transition(approach))
+            queue.holding.append(_Holding(position, holding_stage, sim.add_journey(description)))
         queues[target.id] = queue
     return queues
+
+
+
+def _handoff_waypoints(floor: Polygon, start: tuple, goal: tuple, waiting: list) -> list | None:
+    """Clearanced native route around the current queue, never a position edit.
+
+    A distant native head can be assigned ahead of agents it has not physically
+    passed. Routing directly to service can then pin it against a solid corner
+    behind those agents. Treat their current bodies as temporary route exclusions.
+    JuPedSim still integrates movement/collisions on the unchanged scene floor.
+    """
+    bodies = unary_union([Point(p).buffer(2 * RADIUS + 0.03, quad_segs=3) for p in waiting])
+    route_floor = floor.buffer(-RADIUS - 0.01, quad_segs=3).difference(bodies)
+    parts = [route_floor] if route_floor.geom_type == "Polygon" else list(route_floor.geoms)
+    component = next((p for p in parts if p.geom_type == "Polygon"
+                      and p.contains(Point(start)) and p.contains(Point(goal))), None)
+    if component is None:
+        return None
+    return jps.RoutingEngine(component).compute_waypoints(start, goal)[1:-1]
 
 
 def run(scene: Scene, scenario: Scenario) -> Result:
     """Rehearse at dt=0.05, saving frames at t=0, 0.1, ... <= horizon.
 
-    Agents enter via the tail waypoint (0.6 m tolerance), then fill the native
-    queue head first. Overflow remains physically at the tail. Each explicit
-    service position has a single-slot native queue. Dispatch requires arrival
-    within 0.25 m of the waiting head; service starts only within 0.25 m of the
-    reserved service position. pop(1) at service end routes that person toward
-    their destination centroid; arrival within 0.25 m despawns them.
+    Main queue capacity is reserved before entry; native slots run head to tail.
+    A free server releases the assigned head immediately, then service begins
+    only on physical arrival within 0.35 m. Queue pop is applied by iterate before
+    switching journeys, preventing stale queue membership and re-queueing.
+    Overflow reserves explicit, separated holding slots off the queue/entrance;
+    promotion follows arrival order. Full holding capacity delays spawning outside
+    the room; every step retries pending arrivals without dropping anyone.
 
     Waits include queue movement and travel to service. Mean/max cover started
     services only; censored waits and total waiting exposure are separate.
@@ -259,6 +306,8 @@ def run(scene: Scene, scenario: Scenario) -> Result:
     delayed = set()
     spawn_delay = 0.0
     native_spawn_rejections = 0
+    spawn_reasons = {"occupied": 0, "native_collision": 0, "capacity": 0}
+    diagnostics = []
     conflict_person_s = 0.0
     queue_wait_person_s = 0.0
     arrival_order = sorted(range(n), key=lambda i: (people[i]["arrival_s"], i))
@@ -276,9 +325,8 @@ def run(scene: Scene, scenario: Scenario) -> Result:
         time_s = round(step * DT, 9)
         interval = min(DT, max(0.0, scenario.horizon_s - time_s))
         agents = {agent.id: agent for agent in sim.agents()}
-        for agent_id, server in pending_dispatch.items():
-            person = agent_person[agent_id]
-            sim.switch_agent_journey(agent_id, server.journeys[people[person]["destination_id"]], server.stage)
+        for agent_id, (journey, stage) in pending_dispatch.items():
+            sim.switch_agent_journey(agent_id, journey, stage)
         pending_dispatch.clear()
 
         for queue in queues.values():
@@ -318,6 +366,20 @@ def run(scene: Scene, scenario: Scenario) -> Result:
         while next_arrival < n and people[arrival_order[next_arrival]]["arrival_s"] <= time_s + 1e-9:
             awaiting_spawn.append(arrival_order[next_arrival])
             next_arrival += 1
+        # Promote at most one FIFO overflow occupant per target per step. A pop
+        # must pass through iterate before switching out of a native queue.
+        for queue in queues.values():
+            if queue.overflow_fifo and len(queue.assigned) < len(queue.positions):
+                first = queue.overflow_fifo[0]
+                hold = next(h for h in queue.holding if h.agent == first)
+                native = sim.get_stage(hold.stage)
+                if agent_person[first] in joined and first in native.enqueued() and math.dist(agents[first].position, hold.position) <= REACHED_M:
+                    native.pop(1)
+                    pending_dispatch[first] = (queue.journey, queue.approach)
+                    queue.assigned.add(first)
+                    queue.overflow_fifo.pop(0)
+                    hold.agent = None
+                    event(agent_person[first], "overflow_end", time_s)
         occupied = [agent.position for agent in agents.values()]
         remaining = []
         for person in awaiting_spawn:
@@ -325,21 +387,31 @@ def run(scene: Scene, scenario: Scenario) -> Result:
             candidates = spawn_positions[p["entrance_id"]]
             offset = min(int(p["spawn_choice"] * len(candidates)), len(candidates) - 1)
             queue = queues[p["target_id"]]
+            main_slot = len(queue.assigned) < len(queue.positions) and not queue.overflow_fifo
+            holding = None if main_slot else next((h for h in queue.holding if h.agent is None), None)
+            if not main_slot and holding is None:
+                remaining.append(person)
+                delayed.add(person)
+                spawn_reasons["capacity"] += 1
+                continue
             admitted = None
             for j in range(len(candidates)):
                 position = candidates[(offset + j) % len(candidates)]
                 if any(math.dist(position, other) <= 2 * RADIUS + 0.02 for other in occupied):
+                    spawn_reasons["occupied"] += 1
                     continue
                 try:
                     agent_id = sim.add_agent(jps.CollisionFreeSpeedModelAgentParameters(
                         position=position, desired_speed=p["preferred_speed_m_s"], radius=RADIUS,
-                        journey_id=queue.journey, stage_id=queue.approach,
+                        journey_id=queue.journey if main_slot else holding.journey,
+                        stage_id=queue.approach if main_slot else holding.stage,
                     ))
                 except RuntimeError as exc:
                     # JuPedSim's neighbour index can still reflect the previous
                     # step. A native collision rejection is a blocked candidate,
                     # not permission to overlap it or swallow other model errors.
                     if "Model constraint violation:" in str(exc) and "too close to agent" in str(exc):
+                        spawn_reasons["native_collision"] += 1
                         native_spawn_rejections += 1
                         continue
                     raise RuntimeError(f"Failed to spawn {p['id']} at {position} at t={time_s}: {exc}") from exc
@@ -350,6 +422,12 @@ def run(scene: Scene, scenario: Scenario) -> Result:
                 delayed.add(person)
                 continue
             agent_id, position = admitted
+            if main_slot:
+                queue.assigned.add(agent_id)
+            else:
+                holding.agent = agent_id
+                queue.overflow_fifo.append(agent_id)
+                overflow.add(person)
             agent_person[agent_id] = person
             agents[agent_id] = sim.agent(agent_id)
             occupied.append(position)
@@ -357,6 +435,8 @@ def run(scene: Scene, scenario: Scenario) -> Result:
             delay = max(0.0, time_s - p["arrival_s"])
             spawn_delay += delay
             event(person, "spawned", time_s, position=list(position), delay_s=delay)
+            if not main_slot:
+                event(person, "overflow_requested", time_s, holding_position=list(holding.position))
         awaiting_spawn = remaining
         # add_agent can reallocate native agent storage, invalidating old handles.
         agents = {agent.id: agent for agent in sim.agents()}
@@ -372,26 +452,99 @@ def run(scene: Scene, scenario: Scenario) -> Result:
                     joined[person] = time_s
                     states[person] = "queued"
                     event(person, "joined_queue", time_s, position=list(agent.position))
-            # Native enqueued contains assigned slots, not overflow agents.
-            waiting = sorted((a for a in requesting if a.id not in enqueued), key=lambda a: (joined[agent_person[a.id]], agent_person[a.id]))
-            free = max(0, len(queue.positions) - len(enqueued))
-            for agent in waiting[free:]:
-                person = agent_person[agent.id]
-                if person not in overflow:
-                    overflow.add(person)
-                    event(person, "queue_overflow", time_s, position=list(agent.position))
-            free_server = next((s for s in queue.servers if s.agent is None), None)
-            if free_server is not None and enqueued:
-                head = enqueued[0]
-                if math.dist(agents[head].position, queue.positions[0]) <= REACHED_M:
-                    native.pop(1)
-                    free_server.agent = head
-                    pending_dispatch[head] = free_server
+            for hold in queue.holding:
+                if hold.agent is None:
+                    continue
+                person = agent_person[hold.agent]
+                target = next(t for t in scene.targets if queues[t.id] is queue)
+                if person not in joined and Polygon(target.overflow_area).covers(Point(agents[hold.agent].position)):
+                    joined[person] = time_s
+                    states[person] = "queued"
+                    event(person, "joined_queue", time_s, position=list(agents[hold.agent].position))
+                    event(person, "queue_overflow", time_s, position=list(agents[hold.agent].position))
+            free_servers = [s for s in queue.servers if s.agent is None]
+            dispatch = list(zip(enqueued, free_servers))
+            if dispatch:
+                native.pop(len(dispatch))
+            for head, free_server in dispatch:
+                # The native head is the first assigned person, who may be
+                # blocked short of its waiting coordinate. Dispatch must unblock
+                # them; only SERVICE arrival is distance-gated.
+                queue.assigned.remove(head)
+                free_server.agent = head
+                free_server.dispatched_s = time_s
+                person = agent_person[head]
+                pending_dispatch[head] = (free_server.journeys[people[person]["destination_id"]], free_server.stage)
+                if math.dist(agents[head].position, queue.positions[0]) > 3:
+                    waypoints = _handoff_waypoints(
+                        floor, tuple(agents[head].position), free_server.position,
+                        [a.position for a in agents.values() if a.id != head and states[agent_person[a.id]] == "queued"],
+                    )
+                    if waypoints is None:
+                        event(person, "handoff_route_unavailable", time_s,
+                              reason="No connected clearanced route around current queued people; native routing retained")
+                    elif waypoints:
+                        stages = [sim.add_waypoint_stage(tuple(p), 0.15) for p in waypoints]
+                        stages.extend([free_server.stage, seats[people[person]["destination_id"]][0]])
+                        description = jps.JourneyDescription(stages)
+                        for current, following in zip(stages, stages[1:]):
+                            description.set_transition_for_stage(current, jps.Transition.create_fixed_transition(following))
+                        pending_dispatch[head] = (sim.add_journey(description), stages[0])
+                        event(person, "handoff_routed", time_s, waypoints=[list(p) for p in waypoints])
 
         active = [(agent_person[a.id], a.position) for a in agents.values() if states[agent_person[a.id]] != "done"]
         if step % 2 == 0:
             for person, position in active:
                 frames[step // 2, person] = position
+        if step % 200 == 0:
+            stuck = []
+            if step >= 600:
+                history = frames[step // 2 - 300:step // 2 + 1]
+                for person, position in active:
+                    track = history[:, person]
+                    if np.isfinite(track).all() and np.max(np.linalg.norm(track - position, axis=1)) < 0.1:
+                        stuck.append({"id": people[person]["id"], "state": states[person],
+                                      "position": [round(v, 3) for v in position]})
+            stalled_approaches = []
+            if step >= 600:
+                for queue in queues.values():
+                    for server in queue.servers:
+                        if server.agent is None or server.end_s is not None or time_s - server.dispatched_s < 30:
+                            continue
+                        person = agent_person[server.agent]
+                        old = frames[step // 2 - 300, person]
+                        current = agents[server.agent].position
+                        progress = math.dist(old, server.position) - math.dist(current, server.position)
+                        if np.isfinite(old).all() and progress < 0.1:
+                            stalled_approaches.append({"id": people[person]["id"], "state": states[person],
+                                "position": list(current), "service_position": list(server.position),
+                                "progress_30s_m": round(progress, 3)})
+            clusters = {}
+            for row in stuck:
+                x, y = row["position"]
+                key = f"{row['state']}@{math.floor(x / 2) * 2},{math.floor(y / 2) * 2}"
+                clusters[key] = clusters.get(key, 0) + 1
+            diagnostics.append({
+                "time_s": time_s, "queue_length": states.count("queued"),
+                "in_service": states.count("in_service"), "done": states.count("done"),
+                "not_arrived": states.count("not_arrived"), "stuck_count": len(stuck),
+                "stuck": stuck, "stuck_clusters_2m": clusters,
+                "stalled_service_approaches": stalled_approaches,
+                "spawn_rejection_units": {"occupied": "candidate positions blocked by people",
+                    "native_collision": "native add_agent collision rejections", "capacity": "person-step retries with no waiting reservation"},
+                "spawn_rejections": dict(spawn_reasons),
+                "heads": {key: {"position": list(q.positions[0]),
+                    "occupancy": sum(math.dist(a.position, q.positions[0]) <= REACHED_M for a in agents.values()),
+                    "native_length": len(sim.get_stage(q.stage).enqueued()),
+                    "main_reserved": len(q.assigned), "main_capacity": len(q.positions),
+                    "overflow_reserved": len(q.overflow_fifo), "overflow_capacity": len(q.holding),
+                    "reserved_services": sum(s.agent is not None for s in q.servers),
+                    "services": [{"position": list(s.position), "id": people[agent_person[s.agent]]["id"] if s.agent else None,
+                        "agent_position": list(agents[s.agent].position) if s.agent else None,
+                        "state": states[agent_person[s.agent]] if s.agent else "free"} for s in q.servers],
+                    "head_distance_m": (math.dist(agents[sim.get_stage(q.stage).enqueued()[0]].position, q.positions[0])
+                        if sim.get_stage(q.stage).enqueued() else None)} for key, q in queues.items()},
+            })
         positions = np.asarray([position for _, position in active], dtype=float).reshape(-1, 2)
         if interval > 0:
             density.update(positions, interval)
@@ -427,7 +580,7 @@ def run(scene: Scene, scenario: Scenario) -> Result:
         metrics=metrics, accounting=accounting, people=people,
         frames=base64.b64encode(frames.tobytes()).decode("ascii"),
         frame_shape=list(frames.shape), frame_dt_s=FRAME_DT, horizon_s=scenario.horizon_s,
-        density_grid=grid, events=events, scene_hash=_hash(scene), scenario_hash=_hash(scenario),
+        density_grid=grid, events=events, diagnostics=diagnostics, scene_hash=_hash(scene), scenario_hash=_hash(scenario),
     )
 
 

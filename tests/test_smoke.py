@@ -66,7 +66,9 @@ def test_schema_round_trip(scene, scenario):
         assert type(model).model_validate_json(model.model_dump_json()) == model
         assert json.loads(json.dumps(schema)) == type(model).model_json_schema()
         assert schema["additionalProperties"] is False
-        assert set(schema["required"]) == set(schema["properties"])
+        assert set(schema["required"]) == {
+            name for name, field in type(model).model_fields.items() if field.is_required()
+        }
     assert struct.unpack("<ff", base64.b64decode(result.frames)) == (1.25, 2.5)
 
 
@@ -101,6 +103,26 @@ def test_scene_rejects_invalid_input(scene, defect):
         data["unrecognized"] = True
     with pytest.raises(ValidationError):
         Scene.model_validate(data)
+
+
+@pytest.mark.parametrize("overflow,message", [
+    ([[-1, 9], [2, 9], [2, 11], [-1, 11]], "outside room"),
+    ([[6, 2], [8, 2], [8, 4], [6, 4]], "hits dining_1"),
+    ([[0.5, 6.5], [2, 6.5], [2, 7.5], [0.5, 7.5]], "hits entrance"),
+    ([[11, 6.5], [14, 6.5], [14, 7.5], [11, 7.5]], "hits queue"),
+    ([[7.7, 9.2], [8.3, 9.2], [8.3, 9.8], [7.7, 9.8]], "hits service position"),
+])
+def test_overflow_area_rejects_conflicting_geometry(scene, overflow, message):
+    data = scene.model_dump()
+    data["targets"][0]["overflow_area"] = overflow
+    with pytest.raises(ValidationError, match=message):
+        Scene.model_validate(data)
+
+
+def test_overflow_area_legacy_schema_compatibility(scene):
+    data = scene.model_dump()
+    del data["targets"][0]["overflow_area"]
+    assert Scene.model_validate(data).targets[0].overflow_area is None
 
 
 @pytest.mark.parametrize("field,value", [
