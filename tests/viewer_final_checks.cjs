@@ -407,6 +407,88 @@ async function runChecks() {
     assert.equal(viewer.evaluate('volunteerLabel(2)'), '2 volunteers');
     assert.equal(viewer.evaluate("humanName('dining_table_left')"), 'Dining Table Left');
   });
+  await check('repeat candidate tabs restore exact measured playback and explanation without API calls', async () => {
+    const viewer = createViewer(), baseline = plain(viewer.evaluate('pinnedBaseline'));
+    viewer.evaluate(`candidates=[{...clone(lastRun),index:0,kind:'layout',rationale:'Move queue'}];candidates[0].scene.targets[0].queue_polyline[1][0]+=.25;renderComparison();`);
+    const candidate = plain(viewer.evaluate('candidates[0]'));
+    mockMeasuredRun(viewer, candidate);
+    await viewer.evaluate('selectCandidate(0)');
+    assert.equal(viewer.network.length, 2);
+    viewer.evaluate(`new DataView(frames.buffer).setUint32(0,0x7fc01234,true);$('explanation').textContent='Measured candidate explanation.';rememberPlayback();`);
+    const bytes = viewer.evaluate('encodeFrames(frames)');
+    await viewer.evaluate('selectCandidate(-1)');
+    assert.deepEqual(plain(viewer.evaluate('scene')), baseline.scene);
+    await viewer.evaluate('selectCandidate(0)');
+    assert.equal(viewer.network.length, 2, 'repeated tabs must not call the engine or Astra');
+    assert.equal(viewer.evaluate('encodeFrames(frames)'), bytes);
+    assert.equal(viewer.elements.get('explanation').textContent, 'Measured candidate explanation.');
+    assert.deepEqual(plain(viewer.evaluate('pinnedBaseline')), baseline);
+    viewer.evaluate(`for(let i=0;i<5;i++){scene.targets[0].queue_polyline[1][0]+=.1;lastRun.scene=clone(scene);rememberPlayback();}`);
+    assert.equal(viewer.evaluate('measuredPlayback.size'), 3, 'playback memory must remain bounded');
+  });
+  await check('expired cohort never retries automatically; explicit Run samples anew and explicit baseline accepts it', async () => {
+    const viewer = createViewer();
+    viewer.sandbox.fetch = async (url, options) => {viewer.network.push({url, options});return {ok:false,status:410,json:async()=>({detail:'Cohort expired'})};};
+    await viewer.evaluate('runScene({preventDefault(){}})');
+    assert.equal(viewer.network.length, 1, 'HTTP 410 must not trigger an automatic retry');
+    assert.equal(viewer.evaluate(`expiredCohorts.has('cohort-original')`), true);
+    viewer.evaluate(`previewOperation('one_volunteer','Use one volunteer')`);
+    assert.equal(viewer.evaluate('pendingOperation'), null);
+    assert.equal(viewer.network.length, 1);
+    mockMeasuredRun(viewer, {cohort_id:'cohort-fresh'});
+    await viewer.evaluate('runScene({preventDefault(){}})');
+    assert.equal(JSON.parse(viewer.network[1].options.body).cohort_id, null);
+    assert.equal(viewer.evaluate('pinnedBaseline.cohort_id'), 'cohort-original');
+    assert.equal(viewer.elements.get('make-baseline').hidden, false);
+    viewer.evaluate('makeBaseline()');
+    assert.equal(viewer.evaluate('pinnedBaseline.cohort_id'), 'cohort-fresh');
+  });
+  await check('dirty rehearsal keeps a grey completed tick and exact rerun caption', async () => {
+    const viewer = createViewer(), tick = viewer.sandbox.document.createElement('i'), button = viewer.sandbox.document.createElement('button');
+    button.dataset.step='rehearse';button.querySelector=()=>tick;
+    viewer.sandbox.document.querySelectorAll=selector=>selector==='[data-step]'?[button]:[];
+    viewer.evaluate(`completedSteps.add('rehearse');edited('scenario')`);
+    assert.equal(viewer.elements.get('rehearsal-dirty').textContent, 'Room changed, run again');
+    assert.equal(tick.textContent, '✓');
+    assert.equal(tick.classList.contains('dirty'), true);
+  });
+  await check('slow API owners show Measuring after one second without changing proposal stages', async () => {
+    for (const [url, body, owner] of [
+      ['/api/run', {}, 'run'], ['/api/propose', {}, 'propose'],
+      ['/api/interpret', {brief:'Example'}, 'interpret'],
+      ['/api/explain', {rationale:'Write a concise setup note'}, 'setup-note'],
+      ['/api/scene/validate', {}, 'confirm-event'], ['/api/operations', {}, 'operation-confirm'],
+    ]) {
+      const viewer = createViewer(), timers = [];
+      viewer.evaluate(`currentStep='event';$('revise-run').disabled=false;$('proposal-stage').textContent='Asking Astra';`);
+      viewer.elements.get(owner).textContent='Original action';viewer.elements.get(owner).disabled=false;
+      viewer.sandbox.setTimeout=(fn,delay)=>{timers.push({fn,delay});return timers.length;};viewer.sandbox.clearTimeout=()=>{};
+      let resolveFetch;viewer.sandbox.fetch=()=>new Promise(resolve=>{resolveFetch=resolve;});
+      viewer.sandbox.apiFixture={url,body};
+      const pending=viewer.evaluate('api(apiFixture.url,apiFixture.body,revision)');
+      assert.equal(viewer.elements.get(owner).disabled,true,url);
+      timers.find(timer=>timer.delay===1000).fn();
+      assert.equal(viewer.elements.get(owner).textContent,'Measuring…',url);
+      assert.equal(viewer.elements.get('proposal-stage').textContent,'Asking Astra');
+      resolveFetch({ok:true,json:async()=>({ok:true})});await pending;
+      assert.equal(viewer.elements.get(owner).textContent,'Original action',url);
+      assert.equal(viewer.elements.get(owner).disabled,false,url);
+    }
+  });
+  await check('candidate tabs disable while measuring and stale completions cannot unlock a newer call', async () => {
+    const viewer=createViewer(), descendants=element=>[element,...element.children.flatMap(descendants)],timers=[];
+    viewer.sandbox.document.querySelectorAll=selector=>selector==='[data-candidate-index]'?descendants(viewer.elements.get('candidate-tabs')).filter(element=>element.dataset.candidateIndex!==undefined):[];
+    viewer.evaluate(`candidates=[{...clone(lastRun),index:0,kind:'layout'}];renderComparison();`);
+    viewer.sandbox.setTimeout=(fn,delay)=>{timers.push({fn,delay});return timers.length;};viewer.sandbox.clearTimeout=()=>{};
+    const old=viewer.evaluate('revision');viewer.evaluate('setCandidateMeasuring(0,revision)');
+    assert.equal(viewer.sandbox.document.querySelectorAll('[data-candidate-index]').every(button=>button.disabled),true);
+    timers.find(timer=>timer.delay===1000).fn();
+    assert.equal(viewer.sandbox.document.querySelectorAll('[data-candidate-index]').find(button=>button.dataset.candidateIndex==='0').textContent,'Measuring…');
+    viewer.evaluate('invalidate();setCandidateMeasuring(0,revision)');viewer.sandbox.oldRevision=old;viewer.evaluate('stopCandidateMeasuring(oldRevision)');
+    assert.equal(viewer.sandbox.document.querySelectorAll('[data-candidate-index]').every(button=>button.disabled),true);
+    viewer.evaluate('stopCandidateMeasuring(revision)');
+    assert.equal(viewer.sandbox.document.querySelectorAll('[data-candidate-index]').every(button=>!button.disabled),true);
+  });
   return passed;
 }
 
