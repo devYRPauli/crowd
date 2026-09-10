@@ -49,6 +49,9 @@ built; use Open scene for additional or updated files. Plan exports a PNG with
 measured overlays and a JSON bundle containing assumptions, results, candidate
 patches, usage totals and replay frames. Import restores that replay without
 calling the engine. Advice caches are labeled and keyed to the exact inputs.
+Rehearse also has a presentation-only **Watch in 3D** toggle with Door, Buffet
+and Overhead cameras. It reuses the same frames, heatmap and playback controls;
+2D remains the default and the place to edit furniture.
 
 Run tests with `.venv/bin/python -m pytest -q -k 'not live' --tb=short`.
 The `test_astra_live_tiny_object` test makes a billable
@@ -89,7 +92,11 @@ The throughput check remains unresolved: the west-wall candidate's service
 positions were busy 85.9% / 50.9% during nonempty-queue time, and its mean wait
 was 2.04 times the baseline's. Some generated layouts can still stall; incomplete
 runs are reported and never rewarded for lower waits or fewer completions.
-Measured redraw cost is low, but sustained playback FPS has not been certified.
+A bounded Chrome 152 check on an Apple M1 Pro measured 120.3 fps across 360
+frames with 150 person instances and loaded furniture; this is a local test,
+not a performance guarantee. The supplied wide character uses capsule fallback.
+Three.js is loaded lazily from a pinned CDN version; if unavailable, 2D remains
+usable. Decorative asset bounding boxes approximate the supplied polygons.
 
 Proposal jobs and server caches are in-process and disappear on restart. Astra
 latency and connectivity vary; a 28.436 s proposal result is one observed test,
@@ -99,7 +106,7 @@ not a latency guarantee. Simulation results depend on the displayed assumptions.
 
 Assets: Kenney and KayKit, CC0. See [asset attribution](static/assets/ATTRIBUTION.md).
 
-JuPedSim (LGPL), FastAPI, a single-file canvas viewer, OpenAI Responses
+JuPedSim (LGPL), FastAPI, a plain-JS canvas viewer, Three.js r180, OpenAI Responses
 API with structured outputs. Development in Codex with GPT-6 Astra; see
 ASTRA_BUILD.md for the build log including the engine deadlock Astra
 diagnosed from traces.
@@ -115,5 +122,8 @@ diagnosed from traces.
 - `d99feab`: furnished room-plan presentation.
 - `c2b62f9`: CC0 furniture sprites and models.
 - `79d6bde`: five-step guided flow, room palette and sprite fallbacks.
+- `6d26641`: replay/export hardening, advice recovery, clean-start verification.
+- `58a2199`: live Astra work panel, correction notices and canvas rule feedback.
+- Watch view: shared 3D replay, CC0 furniture models and capsule fallback (this milestone).
 
 Crowd code is MIT licensed; JuPedSim remains LGPLv3-or-later. See LICENSE.
