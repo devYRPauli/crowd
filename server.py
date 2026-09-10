@@ -10,6 +10,7 @@ from uuid import uuid4
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError
 from shapely.geometry import Polygon
 
@@ -24,6 +25,7 @@ from crowd.schema import Result, Scenario, Scene
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Crowd", version="0.1.0")
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 _run_lock = Lock()
 _runs: dict[str, tuple[dict, bytes, dict[str, str]]] = {}
 _last_result: tuple[dict, dict, Result] | None = None
