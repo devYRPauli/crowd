@@ -3,7 +3,7 @@
 const THREE_URL = 'https://esm.sh/three@0.180.0';
 const ORBIT_URL = 'https://esm.sh/three@0.180.0/examples/jsm/controls/OrbitControls.js';
 const GLTF_URL = 'https://esm.sh/three@0.180.0/examples/jsm/loaders/GLTFLoader.js';
-const STATE_COLORS = {walking:'#4479b4',queued:'#cf9d31',in_service:'#8a60ae',overflow:'#d25242',done:'#3e926d'};
+const STATE_COLORS = {seated:'#78939e',walking:'#4479b4',queued:'#cf9d31',in_service:'#8a60ae',overflow:'#d25242',done:'#3e926d'};
 const FOOTPRINTS = {round_table:[1.6,1.6],chair:[.5,.5],banquette:[2,.8],buffet:[1.5,.8],screen:[2.4,.6],plant:[.5,.5]};
 
 export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=>{},onError=()=>{}}={}) {
@@ -320,12 +320,13 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
       transform.rotation.y=person.state==='queued'&&head?Math.atan2(head[0]-p[0],-(head[1]-p[1])):0;
       let phase=personPhases.get(person.id);
       if(phase===undefined){phase=0;for(const char of String(person.id))phase+=char.charCodeAt(0);personPhases.set(person.id,phase);}
+      const seated=person.state==='seated'&&person.placement_kind!=='standing',posture=seated?.65:1;
       const bob=person.state==='walking'?.012*(1+Math.sin(lastTime*8+phase)):0;
-      transform.position.set(p[0],bob,-p[1]);transform.scale.set(1,1,1);transform.updateMatrix();
+      transform.position.set(p[0],bob,-p[1]);transform.scale.set(1,posture,1);transform.updateMatrix();
       for(const mesh of personAssetMeshes){mesh.setMatrixAt(index,transform.matrix);mesh.setColorAt(index,color);}
-      transform.position.y=bob+(cylindersOnly?.85:.675);transform.scale.set(1,cylindersOnly?1.7/1.35:1,1);transform.updateMatrix();
+      transform.position.y=bob+(cylindersOnly?.85:.675)*posture;transform.scale.set(1,(cylindersOnly?1.7/1.35:1)*posture,1);transform.updateMatrix();
       bodies.setMatrixAt(index,transform.matrix);bodies.setColorAt(index,color);
-      transform.position.y=bob+1.525;transform.scale.set(1,1,1);transform.updateMatrix();
+      transform.position.y=bob+1.525*posture;transform.scale.set(1,1,1);transform.updateMatrix();
       heads.setMatrixAt(index,transform.matrix);heads.setColorAt(index,color);index++;
     }
     instancePeople.length=index;for(const mesh of [bodies,heads,...personAssetMeshes]){mesh.count=index;mesh.instanceMatrix.needsUpdate=true;mesh.instanceColor.needsUpdate=true;}

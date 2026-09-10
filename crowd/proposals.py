@@ -122,7 +122,8 @@ def apply_candidate(
 def apply_operations(scene: Scene, scenario: Scenario, patch: list[dict]) -> tuple[Scene, Scenario]:
     """Validate an operations preview; only explicit confirmation permits running it.
 
-    Arrival pattern/window may change. Staffing edits add/remove positions while
+    Arrival/release pattern/window or dinner-call wave count/gap may change.
+    Staffing edits add/remove positions while
     preserving the coordinates of the retained servers; geometry moves stay in
     layout proposals. All other Scene and Scenario fields remain protected.
     """
@@ -139,7 +140,11 @@ def apply_operations(scene: Scene, scenario: Scenario, patch: list[dict]) -> tup
         if path in seen:
             raise ValueError(f"Duplicate operation path: {path}")
         seen.add(path)
-        if path in {"/scenario/arrival_pattern", "/scenario/arrival_window_s"}:
+        permitted_schedule = ({"/scenario/wave_count", "/scenario/wave_gap_s",
+                               "/scenario/arrival_pattern", "/scenario/arrival_window_s"}
+                              if scenario.mode == "dinner_call" else
+                              {"/scenario/arrival_pattern", "/scenario/arrival_window_s"})
+        if path in permitted_schedule:
             schedule[path.rsplit("/", 1)[1]] = operation["value"]
             continue
         match = re.fullmatch(r"/scene/targets/(0|[1-9]\d*)/service_positions", path)
@@ -168,9 +173,13 @@ def apply_operations(scene: Scene, scenario: Scenario, patch: list[dict]) -> tup
     return updated_scene, updated_scenario
 
 
-def operations_preset(scene: Scene, preset: str) -> list[dict]:
+def operations_preset(scene: Scene, preset: str, scenario: Scenario | None = None) -> list[dict]:
     """Deterministic judge controls for the scene's first service target."""
     if preset == "waves_15min":
+        if scenario is not None and scenario.mode == "dinner_call":
+            return [{"op": "replace", "path": "/scenario/arrival_pattern", "value": "waves"},
+                    {"op": "replace", "path": "/scenario/wave_count", "value": 3},
+                    {"op": "replace", "path": "/scenario/wave_gap_s", "value": 300}]
         return [{"op": "replace", "path": "/scenario/arrival_pattern", "value": "waves"},
                 {"op": "replace", "path": "/scenario/arrival_window_s", "value": 900}]
     target = scene.targets[0]

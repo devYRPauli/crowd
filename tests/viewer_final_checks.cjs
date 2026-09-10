@@ -489,6 +489,61 @@ async function runChecks() {
     viewer.evaluate('stopCandidateMeasuring(revision)');
     assert.equal(viewer.sandbox.document.querySelectorAll('[data-candidate-index]').every(button=>!button.disabled),true);
   });
+  await check('Dinner call controls preserve mode and wave settings; legacy Arrival scenarios get defaults', async () => {
+    const viewer=createViewer();
+    viewer.evaluate(`fillScenario({n_people:2,arrival_window_s:600,arrival_pattern:'front_loaded',seed:1,horizon_s:.2,mode:'dinner_call',wave_count:4,wave_gap_s:120})`);
+    assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');
+    assert.equal(viewer.evaluate('currentScenario().wave_count'),4);
+    assert.equal(viewer.evaluate('currentScenario().wave_gap_s'),120);
+    assert.equal(viewer.evaluate('scenarioTiming(currentScenario())'),'dinner releases over 600 s in front_loaded');
+    const dinnerNote=viewer.evaluate(`setupNoteData({...lastRun,scenario:currentScenario(),events:result.events})`);
+    assert.match(dinnerNote,/Dinner releases: front loaded over 600 s/);
+    assert.doesNotMatch(dinnerNote,/4 table calls/);
+    viewer.evaluate('validScenario(currentScenario())');
+    viewer.evaluate(`fillScenario({n_people:2,arrival_window_s:600,arrival_pattern:'front_loaded',seed:1,horizon_s:.2,mode:'queue'})`);
+    assert.equal(viewer.evaluate('currentScenario().wave_count'),3);
+    assert.equal(viewer.evaluate('currentScenario().wave_gap_s'),300);
+    assert.throws(()=>viewer.evaluate('validScenario({...currentScenario(),wave_count:0})'),/table call count/);
+    assert.throws(()=>viewer.evaluate('validScenario({...currentScenario(),wave_gap_s:0})'),/table call gap/);
+  });
+  await check('Dinner call bundle restores waiting and released anchors, seated accounting and posture metadata', async () => {
+    const viewer=createViewer(),bundle=plain(viewer.evaluate('buildBundle()'));
+    bundle.scenario={...bundle.scenario,mode:'dinner_call',wave_count:3,wave_gap_s:300};bundle.original=null;
+    bundle.accounting={seated:1,walking:1,queued:0,in_service:0,done:0};
+    bundle.playback.events={
+      p0:[{kind:'initially_seated',time_s:0,position:[2,3],placement_kind:'seat',seat_group:'table_a'},{kind:'released',time_s:.1,position:[2,3],seat_group:'table_a'}],
+      p1:[{kind:'initially_seated',time_s:0,position:[4,5],placement_kind:'standing',seat_group:'table_b'}],
+    };
+    bundle.playback.frames_base64=Buffer.from(new Float32Array([2,3,4,5,2,3,4,5]).buffer).toString('base64');bundle.playback.time_s=.15;
+    viewer.sandbox.dinnerFixture=bundle;await viewer.evaluate('restoreBundle(dinnerFixture)');
+    assert.equal(viewer.evaluate('stateAt(people[0],.05)'),'seated');
+    assert.equal(viewer.evaluate('stateAt(people[0],.15)'),'walking','released people stay visible before native admission');
+    assert.equal(viewer.evaluate('stateAt(people[1],.15)'),'seated');
+    assert.deepEqual(plain(viewer.evaluate("personPosition(0,'walking')")),[2,3]);
+    assert.match(viewer.elements.get('accounting').textContent,/seated 1/);
+    assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');
+    const roundTrip=plain(viewer.evaluate('buildBundle()'));
+    assert.deepEqual(roundTrip.accounting,bundle.accounting);
+    assert.deepEqual(roundTrip.playback,bundle.playback);
+    viewer.evaluate(`watchActive=true;watchView={setScene(){},setEditingEnabled(){},update(value){watchPayload=value;},render(){}};drawn=[{i:0,state:'seated'},{i:1,state:'seated'}];renderWatch();`);
+    assert.equal(viewer.evaluate('watchPayload.people[0].placement_kind'),'seat');
+    assert.equal(viewer.evaluate('watchPayload.people[1].placement_kind'),'standing');
+    assert.equal(viewer.network.length,0);
+    await viewer.elements.get('judge-waves').click();
+    assert.equal(viewer.evaluate('pendingOperation.label'),'Three table calls, 300 seconds apart');
+    const invalid=plain(bundle);invalid.playback.events.p0=[...invalid.playback.events.p0].reverse();viewer.sandbox.badDinner=invalid;
+    const before=viewer.state();await assert.rejects(viewer.evaluate('restoreBundle(badDinner)'),/event kind\/time\/order|out-of-order lifecycle/);assert.deepEqual(viewer.state(),before);
+  });
+  await check('legacy Arrival operating snapshots never emit forbidden dinner-wave patches', async () => {
+    const viewer=createViewer();
+    viewer.evaluate(`legacyCandidate=clone(original);delete legacyCandidate.scenario.wave_count;delete legacyCandidate.scenario.wave_gap_s;legacyCandidate.scene.targets[0].service_positions=legacyCandidate.scene.targets[0].service_positions.slice(0,1);`);
+    const patch=plain(viewer.evaluate('operationPatch(legacyCandidate)'));
+    assert.deepEqual(patch.map(operation=>operation.path),['/scene/targets/0/service_positions']);
+    viewer.evaluate(`original.scenario.mode='dinner_call';legacyCandidate.scenario.mode='dinner_call';`);
+    assert.deepEqual(plain(viewer.evaluate('operationPatch(legacyCandidate)')).map(operation=>operation.path),['/scene/targets/0/service_positions']);
+    viewer.evaluate('legacyCandidate.scenario.wave_count=4');
+    assert.equal(plain(viewer.evaluate('operationPatch(legacyCandidate)')).find(operation=>operation.path==='/scenario/wave_count').value,4);
+  });
   return passed;
 }
 

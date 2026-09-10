@@ -174,7 +174,9 @@ class Scenario(Contract):
     arrival_pattern: Literal["front_loaded", "uniform", "waves"]
     seed: Annotated[int, Field(ge=0, strict=True)]
     horizon_s: Annotated[FiniteFloat, Field(gt=0)]
-    mode: Literal["queue"]
+    mode: Literal["queue", "dinner_call"]
+    wave_count: Annotated[int, Field(ge=1, strict=True)] = 3
+    wave_gap_s: Annotated[FiniteFloat, Field(gt=0)] = 300
 
 
 class DensityGrid(Contract):

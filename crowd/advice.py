@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, FiniteFloat
 
+from crowd.engine import dinner_seat_positions
 from crowd.schema import Contract, Coordinate, Scenario, Scene
 
 
@@ -97,10 +98,24 @@ def strict_schema(model: type[Contract]) -> dict:
     return schema
 
 
-def assumption_receipt(output: Interpretation) -> list[str]:
+def assumption_receipt(output: Interpretation, active_scene: Scene | None = None) -> list[str]:
     """Every chosen parameter is shown for confirmation, even if Astra omits it."""
     notes = list(output.assumptions)
+    if output.scenario.mode == "dinner_call":
+        # Seating claims are derived from the engine geometry, never model prose.
+        notes = [note for note in notes if not re.search(r"\b(?:seat\w*|standing|sit\w*|tables?)\b", note, re.I)]
     notes.extend(f"{key} = {value}" for key, value in output.scenario.model_dump().items())
+    if output.scenario.mode == "dinner_call":
+        room = output.scene or active_scene
+        if room is not None:
+            configured = len(dinner_seat_positions(room))
+            seated = min(output.scenario.n_people, configured)
+            standing = output.scenario.n_people - seated
+            notes.append(f"Engine-derived initial placement: {seated} people seated at configured positions; {standing} people in the standing zone ({configured} configured seats).")
+        else:
+            notes.append("Initial placement uses configured seats; excess people begin in a standing zone. Seat and standing counts require a room.")
+        notes.append("The release schedule calls people to the buffet; they disperse to the destination after service.")
+        notes.append("Arrival pattern/window control the release schedule; when arrival_pattern is waves, wave_count and wave_gap_s set the table calls.")
     if output.scene is None:
         notes.append("Service time and staffing remain those in the currently loaded scene.")
     else:
