@@ -33,18 +33,46 @@ def west_wall_candidate(scene: dict) -> dict:
     return candidate
 
 
+
+def rush_utilization(trace: list[dict]) -> dict:
+    """Estimate busy/rush fractions using left-endpoint 10 s trace intervals.
+
+    Rush means the target has queued people (including overflow), not merely a
+    reserved server. This is trace sampling, not exact dt=0.05 integration.
+    """
+    totals = {}
+    for row, following in zip(trace, trace[1:]):
+        dt = following["time_s"] - row["time_s"]
+        for target_id, head in row["heads"].items():
+            if head.get("queued_count", row["queue_length"]) <= 0:
+                continue
+            for service in head["services"]:
+                key = f"{target_id}@{service['position'][0]:g},{service['position'][1]:g}"
+                value = totals.setdefault(key, {"rush_s": 0.0, "busy_s": 0.0, "reserved_s": 0.0})
+                value["rush_s"] += dt
+                value["busy_s"] += dt * (service["state"] == "in_service")
+                value["reserved_s"] += dt * (service["state"] != "free")
+    return {"method": "left-endpoint trace sampling (10 s)", "positions": {
+        key: {**value, "busy_fraction": value["busy_s"] / value["rush_s"]}
+        for key, value in totals.items()
+    }}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", default="engine_trace")
+    parser.add_argument("--scene", type=Path, default=ROOT / "data/venue.json")
+    parser.add_argument("--candidate", type=Path, help="Use an explicit candidate JSON instead of the v1 west-wall transform")
     args = parser.parse_args()
     if not args.prefix or Path(args.prefix).name != args.prefix:
         parser.error("--prefix must be a filename prefix, not a path")
-    raw = json.loads((ROOT / "data/venue.json").read_text())
+    raw = json.loads(args.scene.read_text())
     scenario = Scenario(
         n_people=150, arrival_window_s=600, arrival_pattern="front_loaded",
         seed=1, horizon_s=1800, mode="queue",
     )
-    for name, layout in [("baseline", raw), ("candidate", west_wall_candidate(raw))]:
+    candidate = json.loads(args.candidate.read_text()) if args.candidate else west_wall_candidate(raw)
+    for name, layout in [("baseline", raw), ("candidate", candidate)]:
         print(f"Running {name} ...", flush=True)
         started = time.perf_counter()
         result = run(Scene.model_validate(layout), scenario)
@@ -57,6 +85,7 @@ def main() -> None:
         worst = max(trace, key=lambda record: record["stuck_count"])
         summary = {
             "trace_file": str(path.relative_to(ROOT)),
+            "rush_utilization": rush_utilization(trace),
             "trace_samples": len(trace),
             "max_queue_length": max(record["queue_length"] for record in trace),
             "max_in_service": max(record["in_service"] for record in trace),
