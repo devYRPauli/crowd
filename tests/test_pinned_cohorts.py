@@ -143,7 +143,10 @@ def test_operations_uses_pinned_baseline_after_other_selection(pinned):
                                                   'preset': 'waves_15min', 'confirmed': True})
     assert response.status_code == 200, response.text
     assert response.json()['baseline_metrics'] == baseline['metrics']
-    assert response.json()['comparison']['status'] == 'operations_trade_off'
+    # Later arrival waves fall beyond this fixture's 100 s observation horizon.
+    assert response.json()['comparison']['status'] == 'incomplete'
+    assert response.json()['comparison']['valid'] is False
+    assert response.json()['comparison']['better'] is None
 
 
 @pytest.mark.parametrize('endpoint', ['/api/propose', '/api/operations'])

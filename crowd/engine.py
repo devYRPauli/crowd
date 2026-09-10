@@ -782,16 +782,35 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
     )
 
 
+def _incomplete_comparison(a: Result, b: Result) -> dict | None:
+    if all(result.accounting["done"] == len(result.people) for result in (a, b)):
+        return None
+    return {
+        "valid": False, "better": None, "status": "incomplete",
+        "reason": "Both rehearsals must complete every person before their trade-offs can be compared.",
+        "label": "Incomplete rehearsal; measured deltas are provisional.",
+        "deltas_b_minus_a": {
+            key: b.metrics[key] - value if value is not None and b.metrics[key] is not None else None
+            for key, value in a.metrics.items() if key in b.metrics
+        },
+        "completed": {"a": a.accounting["done"], "b": b.accounting["done"]},
+    }
+
+
 def compare(a: Result, b: Result) -> dict:
     """Better means Pareto improvement including completions; deltas are b minus a.
 
     Reject different people/scenarios. Fewer completions can never win, and lower
     observed waits cannot hide fewer service starts. Null waits are not gains.
+    Either incomplete population makes the comparison invalid, after identity checks.
     """
     if a.people != b.people:
         raise ValueError("Cannot compare results with different presampled people")
     if a.scenario_hash != b.scenario_hash or a.horizon_s != b.horizon_s:
         raise ValueError("Cannot compare results from different scenarios or horizons")
+    incomplete = _incomplete_comparison(a, b)
+    if incomplete is not None:
+        return incomplete
     lower_is_better = (
         "mean_wait_s", "max_wait_s", "queue_wait_person_s", "walkway_conflict_person_s",
         "overflow_count", "spawn_delayed_count", "bottleneck_cell_count",
@@ -833,6 +852,7 @@ def compare_operations(a: Result, b: Result) -> dict:
     Every non-arrival person field and the observation horizon must match.
     Scene changes are allowed for staffing; permitted changes are checked by the
     caller against the original scene. Unchanged arrivals use strict compare().
+    Both runs must complete their populations for a valid comparison.
     """
     if a.horizon_s != b.horizon_s:
         raise ValueError("Cannot compare operations across different horizons")
@@ -845,6 +865,9 @@ def compare_operations(a: Result, b: Result) -> dict:
     candidate = [{key: value for key, value in person.items() if key != "arrival_s"} for person in b.people]
     if original != candidate:
         raise ValueError("Cannot compare operations with different non-arrival person fields")
+    incomplete = _incomplete_comparison(a, b)
+    if incomplete is not None:
+        return incomplete
     if a.people == b.people and a.scenario_hash == b.scenario_hash:
         return compare(a, b)
     return {

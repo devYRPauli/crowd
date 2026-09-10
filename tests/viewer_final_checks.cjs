@@ -73,6 +73,9 @@ function createViewer() {
   // normal event listeners execute unchanged, including operation confirmation gates.
   const source = inline.slice(0, startup).replace(/\binitializeGuide\(\);/, '');
   vm.runInContext(source, sandbox, {filename: 'static/index.html'});
+  const confirmEvent = inline.split('\n').find(line => line.trim().startsWith("$('confirm-event').addEventListener"));
+  assert.ok(confirmEvent, 'real Confirm Event handler must exist');
+  vm.runInContext(confirmEvent, sandbox, {filename: 'static/index.html:confirm-event'});
   const evaluate = code => vm.runInContext(code, sandbox);
   sandbox.fixtureScene = plain(sample);
   evaluate(`
@@ -329,6 +332,49 @@ async function runChecks() {
     assert.equal(timeout, 3000);
     callback();
     assert.equal(viewer.evaluate('ruleCallout'), null);
+  });
+  await check('both Event confirmations report invalid fields without silently mutating or requesting', async () => {
+    const viewer = createViewer();
+    let validityCalls = 0;
+    viewer.elements.get('scenario').reportValidity = () => {validityCalls++; return false;};
+    viewer.evaluate(`interpreted={scene:clone(scene),scenario:currentScenario(),assumptions:['Review this assumption']};`);
+    const before = viewer.state();
+    await viewer.elements.get('confirm').click();
+    assert.match(viewer.elements.get('scenario-error').textContent, /highlighted Event fields/);
+    await viewer.elements.get('confirm-event').click();
+    assert.equal(validityCalls, 2);
+    assert.deepEqual(viewer.state(), before);
+    assert.equal(viewer.network.length, 0);
+  });
+  await check('incomplete run notice uses displayed run population and survives local import', async () => {
+    const viewer = createViewer();
+    mockMeasuredRun(viewer);
+    viewer.evaluate(`$('n-people').value='7';`);
+    await viewer.evaluate('executeRun(scene,pinnedBaseline.scenario,revision)');
+    assert.equal(viewer.elements.get('truncated-notice').textContent, 'Only 0 of 2 people finished before the horizon; these numbers are not comparable');
+    const bundle = plain(viewer.evaluate('buildBundle()'));
+    viewer.evaluate(`clearRun();$('n-people').value='7';`);
+    assert.equal(viewer.elements.get('truncated-notice').hidden, true);
+    viewer.sandbox.importFixture = bundle;
+    await viewer.evaluate('restoreBundle(importFixture)');
+    assert.equal(viewer.elements.get('truncated-notice').hidden, false);
+    assert.equal(viewer.elements.get('truncated-notice').textContent, 'Only 0 of 2 people finished before the horizon; these numbers are not comparable');
+    assert.equal(viewer.network.length, 2, 'only the earlier manual run and frames request are allowed; import must not call the engine');
+  });
+  await check('either incomplete comparison suppresses green deltas and Astra explanations', async () => {
+    const viewer = createViewer();
+    viewer.evaluate(`original.metrics.max_wait_s=20;original.accounting.done=1;original.accounting.not_arrived=1;candidates=[{...clone(original),index:0,kind:'layout',rationale:'Move queue'}];candidates[0].accounting.done=2;candidates[0].accounting.not_arrived=0;candidates[0].metrics.max_wait_s=10;explainCalls=0;cachedExplanation=async()=>{explainCalls++;return {explanation:'Should not be called'};};`);
+    const cells = element => [element, ...element.children.flatMap(cells)];
+    for (const incomplete of ['original', 'candidates[0]']) {
+      viewer.evaluate(`original.accounting.done=2;candidates[0].accounting.done=2;${incomplete}.accounting.done=1;renderComparison();`);
+      assert.equal(cells(viewer.elements.get('metric-comparison')).some(cell => cell.className === 'better'), false);
+      await viewer.evaluate('explainCandidate(candidates[0],revision)');
+      assert.equal(viewer.evaluate('explainCalls'), 0);
+      assert.match(viewer.elements.get('explanation').textContent, /these numbers are not comparable/);
+    }
+    viewer.evaluate('original.accounting.done=2;candidates[0].accounting.done=2;renderComparison()');
+    assert.equal(cells(viewer.elements.get('metric-comparison')).some(cell => cell.className === 'better'), true, 'complete comparisons retain meaningful delta colors');
+    assert.equal(viewer.network.length, 0);
   });
   return passed;
 }

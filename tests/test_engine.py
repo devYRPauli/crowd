@@ -6,7 +6,7 @@ import pytest
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
-from crowd.engine import DT, _Density, compare, fifo_schedule, presample_people, run, waiting_positions
+from crowd.engine import DT, _Density, compare, compare_operations, fifo_schedule, presample_people, run, waiting_positions
 from crowd.schema import Result, Scenario, Scene
 
 
@@ -265,3 +265,46 @@ def test_compare_never_rewards_fewer_completions(result):
     improvement = result.model_copy(deep=True)
     improvement.metrics["walkway_conflict_person_s"] = 0
     assert compare(result, improvement)["better"] == "b"
+
+
+@pytest.mark.parametrize("operation", [False, True])
+@pytest.mark.parametrize("completed", [(2, 3), (2, 5), (5, 2), (2, 2)])
+def test_incomplete_runs_never_form_valid_comparisons(result, operation, completed):
+    baseline, candidate = result.model_copy(deep=True), result.model_copy(deep=True)
+    for value, done in zip((baseline, candidate), completed):
+        value.accounting.update(done=done, queued=len(value.people) - done)
+        value.metrics["completed"] = done
+    candidate.metrics["mean_wait_s"] = 0
+    candidate.metrics["max_wait_s"] = 0
+    if operation:
+        candidate.people[0]["arrival_s"] += .1
+        candidate.scenario_hash = "f" * 64
+    output = (compare_operations if operation else compare)(baseline, candidate)
+    assert output["valid"] is False
+    assert output["status"] == "incomplete"
+    assert output["better"] is None
+    assert output["completed"] == {"a": completed[0], "b": completed[1]}
+    assert output["deltas_b_minus_a"]["completed"] == completed[1] - completed[0]
+    assert output["deltas_b_minus_a"]["max_wait_s"] == -baseline.metrics["max_wait_s"]
+    assert "complete every person" in output["reason"]
+
+
+@pytest.mark.parametrize("operation", [False, True])
+@pytest.mark.parametrize("mismatch", ["people", "horizon"])
+def test_incomplete_comparison_still_refuses_mismatched_inputs(result, operation, mismatch):
+    candidate = result.model_copy(deep=True)
+    candidate.accounting.update(done=0, queued=len(candidate.people))
+    if mismatch == "people":
+        candidate.people[0]["service_s"] += 1
+    else:
+        candidate.horizon_s += 1
+    with pytest.raises(ValueError):
+        (compare_operations if operation else compare)(result, candidate)
+
+
+def test_incomplete_layout_comparison_still_refuses_changed_scenario(result):
+    candidate = result.model_copy(deep=True)
+    candidate.accounting.update(done=0, queued=len(candidate.people))
+    candidate.scenario_hash = "f" * 64
+    with pytest.raises(ValueError, match="different scenarios"):
+        compare(result, candidate)
