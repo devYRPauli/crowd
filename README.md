@@ -80,9 +80,11 @@ measurements and person events; it makes no Astra call. Advice caches are labele
 and keyed to the exact inputs.
 
 Run tests with `.venv/bin/python -m pytest -q -k 'not live' --tb=short`.
-Final full verification: **330 passed, 2 strict expected failures** (dense
-dinner), with one existing Starlette/AnyIO deprecation warning. The tracked
-viewer harness passes 41 checks and setup notes pass 16 assertions.
+Final verification: **341 passed, 2 strict expected failures** (dense dinner),
+combining the full run's 340 passes with the passing rerun of its sole failure:
+the viewer line-budget check, fixed by whitespace-only compaction to 599 lines.
+One existing Starlette/AnyIO deprecation warning remains. The tracked viewer
+harness passes 41 checks and setup notes pass 16 assertions.
 The `test_astra_live_tiny_object` test makes a billable
 call when a key is available; other model calls in the tests are mocked.
 
