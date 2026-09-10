@@ -24,7 +24,8 @@ def test_run_and_binary_frames_match_engine(monkeypatch):
         response = client.post("/api/run", json={"scene": scene.model_dump(), "scenario": scenario.model_dump()})
         assert response.status_code == 200
         summary = response.json()
-        assert set(summary) == {"run_id", "metrics", "accounting", "events", "scene_hash", "scenario_hash"}
+        assert set(summary) == {"run_id", "metrics", "accounting", "events", "scene_hash", "scenario_hash",
+                                "cohort_id", "people_hash"}
         assert summary["scene_hash"] == expected.scene_hash
         assert summary["scenario_hash"] == expected.scenario_hash
         assert summary["metrics"] == expected.metrics

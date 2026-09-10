@@ -59,6 +59,7 @@ const paletteFootprints={round_table:[1.6,1.6],chair:[.5,.5],banquette:[2,.8],bu
 const clone=value=>JSON.parse(JSON.stringify(value));
 function currentScenario(){return {n_people:Number($('n-people').value),arrival_window_s:Number($('arrival').value),arrival_pattern:$('pattern').value,seed:Number($('seed').value),horizon_s:Number($('horizon').value),mode:'queue'};}
 function displayScenario(){return result&&lastRun?lastRun.scenario:currentScenario();}
+function matchingCohort(room,scenario){if(!pinnedBaseline?.cohort_id)return null;const before=pinnedBaseline.scenario;if(['n_people','seed','horizon_s','mode'].some(key=>scenario[key]!==before[key]))return null;const service=target=>[target.id,target.service_s];return canonical(room.targets.map(service))===canonical(pinnedBaseline.scene.targets.map(service))?pinnedBaseline.cohort_id:null;}
 function baselineSnapshot(){return pinnedBaseline?clone(pinnedBaseline):null;}
 function pinBaseline(){if(!lastRun||!result)return;pinnedBaseline=clone(lastRun);original=baselineSnapshot();confirmedRoom=clone(lastRun.scene);confirmedScenario=clone(lastRun.scenario);fillScenario(confirmedScenario);$('event-service').value=confirmedRoom.targets[0].service_s;activeCandidate=-1;rehearsalDirty=false;updatePreviewNote();}
 function makeBaseline(){if(!hasCurrentRun()){$('api-error').textContent='Run this setup before making it your baseline.';return;}pinBaseline();clearCandidates();$('explanation').textContent='';status('Your room is now the comparison baseline.');updateRail();requestRender();}
@@ -168,7 +169,7 @@ async function responseError(response) { let data;try{data=await response.json()
 async function executeRun(runScene,scenario,token,label,request=null) {
   playing=false;lastStamp=null;setBusy(true);requestRender();status('Rehearsing the room. Previous playback remains available.');
   try{
-    const next=await api(request?.url||'/api/run',request?.body||{scene:runScene,scenario},token);if(token!==revision)throw Error('Request superseded by a newer edit.');runScene=next.scene||runScene;scenario=next.scenario||scenario;
+    const next=await api(request?.url||'/api/run',request?.body||{scene:runScene,scenario,cohort_id:matchingCohort(runScene,scenario)},token);if(token!==revision)throw Error('Request superseded by a newer edit.');runScene=next.scene||runScene;scenario=next.scenario||scenario;
     const binary=await api(`/api/frames/${encodeURIComponent(next.run_id)}`,undefined,token,true);if(token!==revision)throw Error('Request superseded by a newer edit.');
     const nextCount=Number(binary.headers.get('X-Frame-Count')), n=Number(binary.headers.get('X-Person-Count')), dt=Number(binary.headers.get('X-Frame-Dt-S'));
     const nextIds=JSON.parse(binary.headers.get('X-Person-Ids')||'null'), buffer=binary.data;
@@ -177,7 +178,7 @@ async function executeRun(runScene,scenario,token,label,request=null) {
     const nextPeople=nextIds.map(id=>{if(!Array.isArray(next.events[id]))throw Error(`Missing events for ${id}.`);const timeline=Object.fromEntries(next.events[id].map(e=>[e.kind,e]));return {id,events:next.events[id],timeline};});
     scene=clone(runScene);if(label)$('scene-title').textContent=label;resize();
     result=next;frames=nextFrames;frameCount=nextCount;frameDt=dt;ids=nextIds;people=nextPeople;duration=scenario.horizon_s;time=0;selected=-1;heatBucket=-1;playing=false;lastStamp=null;
-    lastRun={scene:clone(runScene),scenario:clone(scenario),metrics:next.metrics,accounting:next.accounting,scene_hash:next.scene_hash,scenario_hash:next.scenario_hash,run_id:next.run_id};rehearsalDirty=false;updatePreviewNote();
+    lastRun={scene:clone(runScene),scenario:clone(scenario),metrics:next.metrics,accounting:next.accounting,scene_hash:next.scene_hash,scenario_hash:next.scenario_hash,run_id:next.run_id,cohort_id:next.cohort_id,people_hash:next.people_hash};rehearsalDirty=false;updatePreviewNote();
     $('scrubber').max=String(duration);$('scrubber').disabled=false;$('play').disabled=false;$('person-select').disabled=false;
     $('person-select').replaceChildren(new Option('Choose a person',''),...ids.map((id,i)=>new Option(`Person ${id.slice(1)}`,String(i))));
     $('max-wait').textContent=fmt(result.metrics.max_wait_s);$('conflict').textContent=fmt(result.metrics.walkway_conflict_person_s);
@@ -214,9 +215,9 @@ async function selectCandidate(index,confirmed=false){
   if(!original)return;const chosen=index===-1?original:candidates.find(c=>c.index===index);if(!chosen)return;
   if(chosen.kind==='operations'&&!confirmed&&!chosen.confirmed){invalidate();activeCandidate=index;renderComparison();$('explanation').textContent='Confirm the operating assumption before running this candidate.';return;}
   const token=invalidate();$('api-error').textContent='';const scenario={...chosen.scenario,seed:original.scenario.seed};
-  try{const request=proposalJob?{url:`/api/propose/${encodeURIComponent(proposalJob)}/run`,body:{index,confirmed:confirmed||!!chosen.confirmed}}:chosen.kind==='operations'?{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,patch:operationPatch(chosen),confirmed:true}}:null;
+  try{const request=proposalJob?{url:`/api/propose/${encodeURIComponent(proposalJob)}/run`,body:{index,confirmed:confirmed||!!chosen.confirmed}}:chosen.kind==='operations'?{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,cohort_id:original.cohort_id||null,patch:operationPatch(chosen),confirmed:true}}:null;
     const next=await executeRun(chosen.scene,scenario,token,index===-1?'Your room':`Candidate ${String.fromCharCode(65+index)}`,request);
-    if(index!==-1)Object.assign(chosen,{scene:next.scene||chosen.scene,scenario:next.scenario||scenario,metrics:next.metrics,accounting:next.accounting,comparison:next.comparison,confirmed:confirmed||chosen.confirmed});
+    if(index!==-1)Object.assign(chosen,{scene:next.scene||chosen.scene,scenario:next.scenario||scenario,metrics:next.metrics,accounting:next.accounting,comparison:next.comparison,cohort_id:next.cohort_id,people_hash:next.people_hash,confirmed:confirmed||chosen.confirmed});
     activeCandidate=index;renderComparison();const candidate=index===-1?candidates.find(c=>c.metrics):chosen;if(candidate)await explainCandidate(candidate,token);
   }catch(error){fail(error,token);}
 }
@@ -243,7 +244,7 @@ async function pollProposal(jobId,token){
 $('propose').addEventListener('click',async()=>{
   if(!pinnedBaseline){$('api-error').textContent='Run your confirmed room before finding a better setup.';return;}
   const baseline=baselineSnapshot(),token=invalidate();$('api-error').textContent='';$('propose').disabled=true;$('proposal-stage').textContent='Starting proposal…';shownRejections.clear();renderProposalProgress({constraints:$('constraints').value,allowed_operations:[],candidates:[]});
-  try{const {data,jobId}=await proposalResponse({scene:baseline.scene,scenario:baseline.scenario,baseline_metrics:baseline.metrics,baseline_accounting:baseline.accounting,constraints:$('constraints').value},token);if(token!==revision)return;renderProposalProgress(data.progress);original=baselineSnapshot();proposalJob=jobId;candidates=(data.candidates||[]).map(c=>({...c,confirmed:false}));activeCandidate=-1;completedSteps.add('improve');updateRail();$('candidate-rejections').replaceChildren();for(const rejected of data.rejected||[]){const line=document.createElement('div');line.className='rejected';line.textContent=`Candidate ${String.fromCharCode(65+rejected.index)} rejected: ${rejected.reason}`;$('candidate-rejections').append(line);}renderComparison();const measured=candidates.find(c=>c.metrics);if(measured)await explainCandidate(measured,token);else if(!$('explanation').textContent)$('explanation').textContent=candidates.length?'Operating changes require confirmation before measurement.':'No permitted candidate was returned.';$('proposal-stage').textContent=jobId?'Candidate measurements ready.':'Cached candidates ready.';}
+  try{const {data,jobId}=await proposalResponse({scene:baseline.scene,scenario:baseline.scenario,cohort_id:baseline.cohort_id||null,baseline_metrics:baseline.metrics,baseline_accounting:baseline.accounting,constraints:$('constraints').value},token);if(token!==revision)return;renderProposalProgress(data.progress);original=baselineSnapshot();proposalJob=jobId;candidates=(data.candidates||[]).map(c=>({...c,confirmed:false}));activeCandidate=-1;completedSteps.add('improve');updateRail();$('candidate-rejections').replaceChildren();for(const rejected of data.rejected||[]){const line=document.createElement('div');line.className='rejected';line.textContent=`Candidate ${String.fromCharCode(65+rejected.index)} rejected: ${rejected.reason}`;$('candidate-rejections').append(line);}renderComparison();const measured=candidates.find(c=>c.metrics);if(measured)await explainCandidate(measured,token);else if(!$('explanation').textContent)$('explanation').textContent=candidates.length?'Operating changes require confirmation before measurement.':'No permitted candidate was returned.';$('proposal-stage').textContent=jobId?'Candidate measurements ready.':'Cached candidates ready.';}
   catch(error){if(token===revision)$('proposal-stage').textContent='Proposal stopped. Manual rehearsal remains available.';fail(error,token);}finally{if(token===revision)$('propose').disabled=false;}
 });
 function hasCurrentRun(){return !!result&&!rehearsalDirty&&lastRun&&canonical(lastRun.scene)===canonical(scene);}
@@ -253,8 +254,8 @@ function previewOperation(preset,label){
 }
 async function confirmOperation(){
   if(!pendingOperation)return;const pending=pendingOperation,token=invalidate();clearCandidates();original=baselineSnapshot();$('api-error').textContent='';
-  try{const next=await executeRun(original.scene,original.scenario,token,pending.label,{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,preset:pending.preset,confirmed:true}});
-    if(token!==revision)return;candidates=[{index:0,kind:'operations',confirmed:true,scene:next.scene,scenario:next.scenario,metrics:next.metrics,accounting:next.accounting,comparison:next.comparison,rationale:pending.label,operationRequest:{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,preset:pending.preset,confirmed:true}}}];activeCandidate=0;renderComparison();await explainCandidate(candidates[0],token);
+  try{const next=await executeRun(original.scene,original.scenario,token,pending.label,{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,cohort_id:original.cohort_id||null,preset:pending.preset,confirmed:true}});
+    if(token!==revision)return;candidates=[{index:0,kind:'operations',confirmed:true,scene:next.scene,scenario:next.scenario,metrics:next.metrics,accounting:next.accounting,comparison:next.comparison,cohort_id:next.cohort_id,people_hash:next.people_hash,rationale:pending.label,operationRequest:{url:'/api/operations',body:{scene:original.scene,scenario:original.scenario,cohort_id:original.cohort_id||null,preset:pending.preset,confirmed:true}}}];activeCandidate=0;renderComparison();await explainCandidate(candidates[0],token);
   }catch(error){fail(error,token);}
 }
 $('judge-one').addEventListener('click',()=>previewOperation('one_volunteer','Use one volunteer'));

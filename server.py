@@ -1,6 +1,7 @@
 """Local rehearsal API. Keep only the last completed run in this worker's memory."""
 
 import base64
+from collections import OrderedDict
 from copy import deepcopy
 import hashlib
 import json
@@ -41,12 +42,53 @@ _MAX_ADVICE_CACHE = 16
 _advice_cache_lock = Lock()
 _proposal_cache: dict[str, dict] = {}
 _explanation_cache: dict[str, dict] = {}
+_cohorts: OrderedDict[str, dict] = OrderedDict()
+_cohorts_lock = Lock()
+_MAX_COHORTS = 64
 
 
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scene: Scene
     scenario: Scenario
+    cohort_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+def _cohort_receipt(result: Result, scene: Scene, scenario: Scenario) -> dict:
+    """Retain immutable person records independently of the single frame cache."""
+    people_hash = _cache_key(result.people)
+    identity = {"people_hash": people_hash, "scenario": scenario.model_dump(mode="json"),
+                "service_s": {target.id: target.service_s for target in scene.targets}}
+    cohort_id = _cache_key(identity)
+    with _cohorts_lock:
+        if cohort_id not in _cohorts:
+            _cohorts[cohort_id] = {"people": deepcopy(result.people),
+                                   "scene": scene.model_dump(mode="json"),
+                                   "scenario": scenario.model_dump(mode="json")}
+        _cohorts.move_to_end(cohort_id)
+        while len(_cohorts) > _MAX_COHORTS:
+            _cohorts.popitem(last=False)
+    return {"cohort_id": cohort_id, "people_hash": people_hash}
+
+
+def _cohort_people(cohort_id: str, scene: Scene, scenario: Scenario) -> list[dict]:
+    with _cohorts_lock:
+        saved = _cohorts.get(cohort_id)
+        if saved is None:
+            raise HTTPException(status_code=410, detail="Pinned cohort expired or is unavailable; run and pin a new baseline")
+        _cohorts.move_to_end(cohort_id)
+        saved = deepcopy(saved)
+    original = saved["scenario"]
+    for field in ("seed", "n_people", "horizon_s", "mode"):
+        if original[field] != getattr(scenario, field):
+            raise ValueError(f"Pinned cohort requires unchanged {field}; run and pin a new baseline")
+    service_s = {target["id"]: target["service_s"] for target in saved["scene"]["targets"]}
+    if service_s != {target.id: target.service_s for target in scene.targets}:
+        raise ValueError("Pinned cohort requires unchanged target IDs and service_s; run and pin a new baseline")
+    if (original["arrival_pattern"] != scenario.arrival_pattern
+            or original["arrival_window_s"] != scenario.arrival_window_s):
+        return reschedule_people(scene, scenario, saved["people"])
+    return saved["people"]
 
 
 def _viewer_events(result, scene: Scene) -> dict:
@@ -100,7 +142,7 @@ def _publish_run(result: Result, scene: Scene, scenario: Scenario) -> dict:
     run_id = uuid4().hex
     summary = {"run_id": run_id, "metrics": result.metrics, "accounting": result.accounting,
                "events": _viewer_events(result, scene), "scene_hash": result.scene_hash,
-               "scenario_hash": result.scenario_hash}
+               "scenario_hash": result.scenario_hash, **_cohort_receipt(result, scene, scenario)}
     headers = {
         "X-Frame-Count": str(len(frames)), "X-Person-Count": str(len(result.people)), "X-Frame-Dt-S": "0.2",
         "X-Person-Ids": json.dumps([p["id"] for p in result.people], separators=(",", ":")),
@@ -117,7 +159,7 @@ def run(request: RunRequest) -> dict:
         raise HTTPException(status_code=409, detail="A rehearsal is already running")
     try:
         try:
-            result = simulate(request.scene, request.scenario)
+            result = _measured(request.scene, request.scenario, cohort_id=request.cohort_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _publish_run(result, request.scene, request.scenario)
@@ -182,7 +224,7 @@ class OperationsRequest(RunRequest):
 
 
 
-def _cache_key(value: dict) -> str:
+def _cache_key(value: dict | list) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
@@ -225,13 +267,18 @@ def _validation_errors(exc: ValidationError) -> list[str]:
             for error in exc.errors(include_input=False, include_context=False)]
 
 
-def _measured(scene: Scene, scenario: Scenario, *, cached=False, people=None) -> Result:
+def _measured(scene: Scene, scenario: Scenario, *, cached=False, people=None, cohort_id=None) -> Result:
     # Each background rehearsal owns its JuPedSim instance. Snapshot the manual
     # cache atomically; neither model work nor candidate movement takes its lock.
+    if cohort_id is not None:
+        if people is not None:
+            raise ValueError("Use either a pinned cohort or supplied people")
+        people = _cohort_people(cohort_id, scene, scenario)
     previous = _last_result
-    if (cached and people is None and previous is not None
+    if (cached and previous is not None
             and previous[0] == scene.model_dump(mode="json")
-            and previous[1] == scenario.model_dump(mode="json")):
+            and previous[1] == scenario.model_dump(mode="json")
+            and (people is None or people == previous[2].people)):
         return previous[2]
     return simulate(scene, scenario, people=people)
 
@@ -322,7 +369,7 @@ def _proposal_progress(constraints: str) -> dict:
 def _proposal_work(job_id: str, request: ProposeRequest) -> dict:
     progress = _proposal_progress(request.constraints)
     _proposal_update(job_id, status="running", stage="validating", detail="Measuring the original layout")
-    baseline = _measured(request.scene, request.scenario, cached=True)
+    baseline = _measured(request.scene, request.scenario, cached=True, cohort_id=request.cohort_id)
     cache_key = _cache_key({"scene": request.scene.model_dump(mode="json"),
                             "scenario": request.scenario.model_dump(mode="json"),
                             "constraints": request.constraints, "metrics": baseline.metrics,
@@ -414,7 +461,7 @@ def _proposal_work(job_id: str, request: ProposeRequest) -> dict:
         try:
             result = _measured(scene, scenario, people=baseline.people)
             candidates.append({**preview, "metrics": result.metrics, "accounting": result.accounting,
-                               "comparison": compare(baseline, result)})
+                               "comparison": compare(baseline, result), **_cohort_receipt(result, scene, scenario)})
             record.update(status="completed", simulation={"status": "completed", "n_people": len(result.people),
                                                            "completed": result.accounting["done"]})
         except (ValueError, RuntimeError) as exc:
@@ -460,6 +507,11 @@ def _proposal_worker(job_id: str, request: ProposeRequest) -> None:
 
 @app.post("/api/propose")
 def propose(request: ProposeRequest) -> dict:
+    if request.cohort_id is not None:
+        try:
+            _cohort_people(request.cohort_id, request.scene, request.scenario)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
     if not _proposal_slots.acquire(blocking=False):
         raise HTTPException(status_code=429, detail="Proposal workers are busy; retry after a job finishes")
     job_id = uuid4().hex
@@ -547,7 +599,7 @@ def run_operations(request: OperationsRequest) -> dict:
     if not _run_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="A rehearsal is already running")
     try:
-        baseline = _measured(request.scene, request.scenario, cached=True)
+        baseline = _measured(request.scene, request.scenario, cached=True, cohort_id=request.cohort_id)
         return _matched_run(baseline, request.scenario, scene, scenario, operations=True)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None

@@ -79,14 +79,14 @@ function createViewer() {
     loadScene(clone(fixtureScene),'Test room');
     fillScenario({n_people:2,arrival_window_s:600,arrival_pattern:'front_loaded',seed:1,horizon_s:.2,mode:'queue'});
     result={run_id:'test-run',metrics:{mean_wait_s:null,max_wait_s:null,walkway_conflict_person_s:0,completed:0},accounting:{not_arrived:2,walking:0,queued:0,in_service:0,done:0},events:{p0:[],p1:[]}};
-    lastRun={scene:clone(scene),scenario:currentScenario(),metrics:clone(result.metrics),accounting:clone(result.accounting)};
+    lastRun={scene:clone(scene),scenario:currentScenario(),metrics:clone(result.metrics),accounting:clone(result.accounting),cohort_id:'cohort-original',people_hash:'people-original'};
     frames=new Float32Array(8).fill(NaN);frameCount=2;ids=['p0','p1'];people=ids.map(id=>({id,events:[],timeline:{}}));duration=.2;time=.1;
     $('run').disabled=false;$('play').disabled=false;
     if(typeof pinBaseline==='function')pinBaseline();
   `);
   return {
     sandbox, elements, network, evaluate,
-    state: () => plain(evaluate(`({scene,scenario:currentScenario(),lastRun,original,result,frames:encodeFrames(frames),time,confirmedAssumptions})`)),
+    state: () => plain(evaluate(`({scene,scenario:currentScenario(),eventService:$('event-service').value,lastRun,original,result,frames:encodeFrames(frames),time,confirmedAssumptions})`)),
   };
 }
 
@@ -159,7 +159,7 @@ async function runChecks() {
     const viewer = createViewer();
     assert.equal(viewer.evaluate("typeof pinBaseline"), 'function');
     const baseline = plain(viewer.evaluate('pinnedBaseline'));
-    const controls = viewer.state().scenario;
+    const controls = viewer.state().scenario, eventService = viewer.state().eventService;
     const candidateScene = plain(baseline.scene);
     candidateScene.targets[0].service_positions = candidateScene.targets[0].service_positions.slice(0, 1);
     const candidateScenario = {...baseline.scenario, arrival_pattern: 'waves', arrival_window_s: 900};
@@ -168,6 +168,7 @@ async function runChecks() {
     viewer.sandbox.candidateScenario = candidateScenario;
     await viewer.evaluate('executeRun(candidateScene,candidateScenario,revision)');
     assert.deepEqual(viewer.state().scenario, controls, 'a preview must not overwrite Event controls');
+    assert.equal(viewer.state().eventService, eventService, 'service-time Event field must remain confirmed');
     assert.deepEqual(plain(viewer.evaluate('displayScenario()')), candidateScenario);
     assert.deepEqual(plain(viewer.evaluate('pinnedBaseline')), baseline);
     assert.deepEqual(plain(viewer.evaluate('original')), baseline);
@@ -212,6 +213,69 @@ async function runChecks() {
     await viewer.evaluate('makeBaseline()');
     assert.deepEqual(plain(viewer.evaluate('pinnedBaseline.scene')), candidateScene);
     assert.deepEqual(plain(viewer.evaluate('original')), plain(viewer.evaluate('pinnedBaseline')));
+  });
+  await check('matching cohort survives layout, staffing and arrival changes', async () => {
+    const viewer = createViewer();
+    assert.equal(viewer.evaluate('matchingCohort(scene,currentScenario())'), 'cohort-original');
+    viewer.evaluate(`
+      fixtureCandidate=clone(scene);
+      fixtureCandidate.targets[0].service_positions=fixtureCandidate.targets[0].service_positions.slice(0,1);
+      fixtureCandidate.targets[0].queue_polyline[1][0]+=.25;
+    `);
+    assert.equal(viewer.evaluate(`matchingCohort(fixtureCandidate,{...currentScenario(),arrival_pattern:'waves',arrival_window_s:900})`), 'cohort-original');
+  });
+  await check('population, seed, horizon or service-time changes intentionally start a new cohort', async () => {
+    const viewer = createViewer();
+    for (const [key, value] of [['n_people', 3], ['seed', 2], ['horizon_s', 10]]) {
+      viewer.sandbox.changed = {[key]: value};
+      assert.equal(viewer.evaluate('matchingCohort(scene,{...currentScenario(),...changed})'), null, key);
+    }
+    viewer.evaluate(`fixtureCandidate=clone(scene);fixtureCandidate.targets[0].service_s+=1;`);
+    assert.equal(viewer.evaluate('matchingCohort(fixtureCandidate,currentScenario())'), null);
+    viewer.evaluate('delete pinnedBaseline.cohort_id');
+    assert.equal(viewer.evaluate('matchingCohort(scene,currentScenario())'), null, 'older imported bundles need a fresh cohort');
+  });
+  await check('ordinary Run forwards the pinned cohort and retains response provenance', async () => {
+    const viewer = createViewer();
+    mockMeasuredRun(viewer);
+    await viewer.evaluate('runScene({preventDefault(){}})');
+    const run = viewer.network.find(call => call.url === '/api/run');
+    assert.equal(JSON.parse(run.options.body).cohort_id, 'cohort-original');
+    assert.equal(viewer.evaluate('lastRun.cohort_id'), 'cohort-original');
+    assert.equal(viewer.evaluate('lastRun.people_hash'), 'people-original');
+  });
+  await check('selected operations use original cohort rather than selected candidate handle', async () => {
+    const viewer = createViewer();
+    viewer.evaluate(`
+      candidates=[{...clone(lastRun),index:0,kind:'operations',cohort_id:'cohort-preview',people_hash:'people-preview',requires_confirmation:true,rationale:'Use one volunteer',patch:[{op:'replace',path:'/scene/targets/0/service_positions',value:scene.targets[0].service_positions.slice(0,1)}]}];
+      candidates[0].scene.targets[0].service_positions=candidates[0].scene.targets[0].service_positions.slice(0,1);
+    `);
+    const candidate = plain(viewer.evaluate('candidates[0]'));
+    mockMeasuredRun(viewer, candidate);
+    await viewer.evaluate('selectCandidate(0,true)');
+    const operation = viewer.network.find(call => call.url === '/api/operations');
+    assert.equal(JSON.parse(operation.options.body).cohort_id, 'cohort-original');
+    assert.equal(viewer.evaluate('lastRun.cohort_id'), 'cohort-preview');
+    assert.equal(viewer.evaluate('original.cohort_id'), 'cohort-original');
+    assert.equal(viewer.evaluate('pinnedBaseline.people_hash'), 'people-original');
+    viewer.evaluate('makeBaseline()');
+    assert.equal(viewer.evaluate('pinnedBaseline.cohort_id'), 'cohort-preview');
+    viewer.network.length = 0;
+    await viewer.evaluate('runScene({preventDefault(){}})');
+    const run = viewer.network.find(call => call.url === '/api/run');
+    assert.equal(JSON.parse(run.options.body).cohort_id, 'cohort-preview', 'repinned run must reuse the accepted cohort');
+  });
+  await check('operating chip and proposal use pinned cohort after another preview', async () => {
+    const viewer = createViewer();
+    viewer.evaluate(`lastRun.cohort_id='cohort-other-preview';previewOperation('third_volunteer','Use a third volunteer');`);
+    mockMeasuredRun(viewer, {cohort_id: 'cohort-original'});
+    await viewer.evaluate('confirmOperation()');
+    const operation = viewer.network.find(call => call.url === '/api/operations');
+    assert.equal(JSON.parse(operation.options.body).cohort_id, 'cohort-original');
+    viewer.evaluate(`proposalResponse=async body=>{capturedProposal=clone(body);return {jobId:null,data:{candidates:[],rejected:[]}};};`);
+    await viewer.elements.get('propose').click();
+    assert.equal(viewer.evaluate('capturedProposal.cohort_id'), 'cohort-original');
+    assert.deepEqual(plain(viewer.evaluate('capturedProposal.scenario')), plain(viewer.evaluate('pinnedBaseline.scenario')));
   });
   return passed;
 }
