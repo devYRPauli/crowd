@@ -17,7 +17,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
   let renderer;
   try { renderer = new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'}); }
   catch (error) { throw new Error('Watch requires WebGL2. The 2D rehearsal remains available.', {cause:error}); }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor('#edf1eb');
   renderer.shadowMap.enabled = false;
   renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;touch-action:none';
@@ -40,9 +40,9 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
   let visible = false, disposed = false, currentScene = null, currentBounds = [0,0,24,14];
   let preset = 'plan', mode='plan', capacity = 0, bodies, heads, cylindersOnly = false;
   let editingEnabled=false,tool='move',selected=null,drag=null,pendingEdit=null,editEpoch=0;
-  let renderRequest=0,renderCalls=0,cameraTransition=null,viewWidth=800,viewHeight=500;
+  let renderRequest=0,renderCalls=0,cameraTransition=null,layoutTransition=null,viewWidth=800,viewHeight=500;
   let vertexLayer=null,gridMesh=null,ghost=null,hoverOutline=null,selectionOutline=null,ghostModel=null,ghostKind=null,ghostGeneration=0;
-  const obstacleVisuals=new Map(),queueVisuals=[],ownedTextures=new Set(),instancePeople=[];
+  const obstacleVisuals=new Map(),queueVisuals=[],queueTails=[],overflowVisuals=[],ownedTextures=new Set(),instancePeople=[];
   const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2(),floorPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0),floorHit=new THREE.Vector3();
   let heatMesh = null, heatTexture = null, lastHeatVersion = Symbol(), lastHeatBounds = '';
   let lastPeople = [], lastTime = 0, sceneGeneration = 0, loaderPromise;
@@ -63,8 +63,15 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
       controls.target.lerpVectors(cameraTransition.fromTarget,cameraTransition.toTarget,eased);
       controls.update();if(fraction===1)cameraTransition=null;
     }
+    if(layoutTransition){
+      if(layoutTransition.started===null)layoutTransition.started=now;
+      const elapsed=now-layoutTransition.started,fraction=Math.min(1,elapsed/1200),eased=fraction*fraction*(3-2*fraction),fade=Math.min(1,elapsed/3000);
+      for(const step of layoutTransition.moves)step(eased);
+      for(const highlight of layoutTransition.highlights)highlight.material.opacity=highlight.userData.opacity*(1-fade);
+      if(fade===1)endLayoutTransition();
+    }
     renderer.render(world,camera);renderCalls++;
-    if(cameraTransition)render();
+    if(cameraTransition||layoutTransition)render();
   }
   controls.addEventListener('change', render);
 
@@ -183,7 +190,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
     });
     room.clear(); geometries.forEach(item=>item.dispose()); materials.forEach(item=>item.dispose());
     heatTexture?.dispose(); heatTexture=null; heatMesh=null;
-    ownedTextures.forEach(texture=>texture.dispose());ownedTextures.clear();obstacleVisuals.clear();queueVisuals.length=0;
+    ownedTextures.forEach(texture=>texture.dispose());ownedTextures.clear();obstacleVisuals.clear();queueVisuals.length=0;queueTails.length=0;overflowVisuals.length=0;layoutTransition=null;
     lastHeatVersion=Symbol(); lastHeatBounds='';
   }
   function center(poly) {
@@ -206,6 +213,68 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
     if(attr&&attr.count===coordinates.length){coordinates.forEach((p,i)=>attr.setXYZ(i,p.x,p.y,p.z));attr.needsUpdate=true;mesh.geometry.computeBoundingSphere();}
     else{mesh.geometry.dispose();mesh.geometry=new THREE.BufferGeometry().setFromPoints(coordinates);}
     if(mesh.material.isLineDashedMaterial)mesh.computeLineDistances();
+  }
+  function queueTailPosition(polyline) {
+    const tail=polyline.at(-1),previous=polyline.at(-2)||[tail[0]-1,tail[1]],length=Math.hypot(tail[0]-previous[0],tail[1]-previous[1])||1;
+    return [tail[0]+(tail[0]-previous[0])/length*.85,tail[1]+(tail[1]-previous[1])/length*.85,.3];
+  }
+  function resample(points,count) {
+    const lengths=[0];for(let i=1;i<points.length;i++)lengths.push(lengths[i-1]+Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]));
+    const total=lengths.at(-1),result=[];
+    for(let k=0;k<count;k++){
+      const d=total*k/(count-1);let i=1;while(i<lengths.length-1&&lengths[i]<d)i++;
+      if(points.length===1){result.push([...points[0]]);continue;}
+      const span=lengths[i]-lengths[i-1],t=span?Math.min(1,Math.max(0,(d-lengths[i-1])/span)):0;
+      result.push([points[i-1][0]+(points[i][0]-points[i-1][0])*t,points[i-1][1]+(points[i][1]-points[i-1][1])*t]);
+    }
+    return result;
+  }
+  function endCameraTransition() {
+    if(!cameraTransition)return;camera.position.copy(cameraTransition.to);controls.target.copy(cameraTransition.toTarget);cameraTransition=null;controls.update();
+  }
+  function endLayoutTransition() {
+    if(!layoutTransition)return;const finished=layoutTransition;layoutTransition=null;
+    for(const step of finished.moves)step(1);
+    for(const highlight of finished.highlights){highlight.parent?.remove(highlight);highlight.geometry.dispose();highlight.material.dispose();}
+    render();
+  }
+  // Presentation only: the new scene is already in place; this glides changed pieces from where they were.
+  function animateLayout(previous,scene) {
+    const moves=[],highlights=[];
+    const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+    const glow=(mesh,opacity)=>{mesh.material.transparent=true;mesh.material.depthTest=false;mesh.material.opacity=opacity;mesh.userData.opacity=opacity;mesh.renderOrder=11;highlights.push(mesh);return mesh;};
+    const reparent=(child,group)=>{child.position.sub(group.position);group.add(child);};
+    const glide=(mesh,fromPoints,toPoints,height,closed)=>{
+      const count=Math.max(24,fromPoints.length,toPoints.length),wrap=points=>closed?[...points,points[0]]:points;
+      const a=resample(wrap(fromPoints),count),b=resample(wrap(toPoints),count);
+      moves.push(f=>{if(f===1)updateLine(mesh,toPoints,height,closed);else updateLine(mesh,a.map((p,k)=>[p[0]+(b[k][0]-p[0])*f,p[1]+(b[k][1]-p[1])*f]),height,false);});
+    };
+    for(const obstacle of scene.obstacles){
+      const before=previous.obstacles.find(o=>o.id===obstacle.id);
+      if(before&&same(before.poly,obstacle.poly))continue;
+      const {group,origin}=obstacleVisuals.get(obstacle.id),to=new THREE.Vector3(origin[0],0,-origin[1]);
+      if(before){const start=center(before.poly),from=new THREE.Vector3(start[0],0,-start[1]);moves.push(f=>group.position.lerpVectors(from,to,f));}
+      else moves.push(f=>group.scale.setScalar(.01+.99*f));
+      reparent(glow(line(obstacle.poly,'#f1a832',.12,false,true),1),group);
+      reparent(glow(flat(obstacle.poly,'#f1a832',.02,.35),.35),group);
+    }
+    scene.targets.forEach((target,i)=>{
+      const before=previous.targets[i];if(!before)return;
+      if(!same(before.queue_polyline,target.queue_polyline)){
+        glide(queueVisuals[i],before.queue_polyline,target.queue_polyline,.04,false);
+        glide(glow(line(target.queue_polyline,'#f1a832',.05),1),before.queue_polyline,target.queue_polyline,.05,false);
+        const tail=queueTails[i],from=queueTailPosition(before.queue_polyline),to=queueTailPosition(target.queue_polyline);
+        moves.push(f=>tail.position.set(from[0]+(to[0]-from[0])*f,.3,-(from[1]+(to[1]-from[1])*f)));
+      }
+      if(target.overflow_area&&before.overflow_area&&!same(before.overflow_area,target.overflow_area)){
+        glide(overflowVisuals[i],before.overflow_area,target.overflow_area,.025,true);
+        glide(glow(line(target.overflow_area,'#f1a832',.05,false,true),1),before.overflow_area,target.overflow_area,.05,true);
+      }
+      for(const [x,y] of target.service_positions)if(!before.service_positions.some(p=>same(p,[x,y])))glow(line([[x-.35,y-.35],[x+.35,y-.35],[x+.35,y+.35],[x-.35,y+.35]],'#f1a832',.06,false,true),1);
+    });
+    if(!moves.length&&!highlights.length)return;
+    layoutTransition={started:null,moves,highlights};
+    for(const step of moves)step(0);
   }
   function makeEditor() {
     const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const context=canvas.getContext('2d');context.strokeStyle='#73917a';context.lineWidth=1;context.strokeRect(.5,.5,63,63);
@@ -274,7 +343,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
   function regionLabel(region,color){const [x0,y0,x1,y1]=bounds(region.poly);billboard(region.id.replaceAll('_',' '),[(x0+x1)/2,y1+.45,.3],{color,height:.42});}
   function setScene(scene) {
     if(disposed)throw new Error('Watch has been disposed.');
-    const firstScene=!currentScene||JSON.stringify(currentScene.walkable)!==JSON.stringify(scene.walkable);cancelEdit();currentScene=structuredClone(scene);currentBounds=bounds(scene.walkable);sceneGeneration++;clearError();clearRoom();assetStatus.furniture={};
+    const firstScene=!currentScene||JSON.stringify(currentScene.walkable)!==JSON.stringify(scene.walkable),previous=currentScene;cancelEdit();currentScene=structuredClone(scene);currentBounds=bounds(scene.walkable);sceneGeneration++;clearError();clearRoom();assetStatus.furniture={};
     flat(scene.walkable,'#f6f5ee',0);
     for(const walkway of scene.walkways){flat(walkway.poly,'#c4dfb6',.01,.7);regionLabel(walkway,'#4f7e4f');}
     for(const destination of scene.destinations){line(destination.poly,'#689c80',.025,true,true);regionLabel(destination,'#477b64');}
@@ -282,9 +351,8 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
     for(const exit of scene.exits){flat(exit.poly,'#adcad9',.018);line(exit.poly,'#568497',.023,false,true);regionLabel(exit,'#426d85');}
     for(const target of scene.targets){
       queueVisuals.push(line(target.queue_polyline,'#ad8540',.04,true));
-      const tail=target.queue_polyline.at(-1),previous=target.queue_polyline.at(-2)||[tail[0]-1,tail[1]],length=Math.hypot(tail[0]-previous[0],tail[1]-previous[1])||1;
-      billboard('Queue tail',[tail[0]+(tail[0]-previous[0])/length*.85,tail[1]+(tail[1]-previous[1])/length*.85,.3],{color:'#967139',height:.42});
-      if(target.overflow_area)line(target.overflow_area,'#be776d',.025,true,true);
+      queueTails.push(billboard('Queue tail',queueTailPosition(target.queue_polyline),{color:'#967139',height:.42}));
+      overflowVisuals.push(target.overflow_area?line(target.overflow_area,'#be776d',.025,true,true):null);
       const services=target.service_positions.length?target.service_positions:[target.queue_polyline[0]];
       for(const [x,y] of services)box(x,y,.3,.3,.045,'#9f83b8');
     }
@@ -293,7 +361,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
     heatMesh.material.dispose();
     heatMesh.material=new THREE.MeshBasicMaterial({transparent:true,opacity:1,depthWrite:false,side:THREE.DoubleSide});
     heatMesh.visible=false;
-    makeEditor();if(firstScene)setPreset(preset,{animate:false});refreshSelection();render();
+    makeEditor();if(firstScene)setPreset(preset,{animate:false});else animateLayout(previous,scene);refreshSelection();render();
   }
   function reservePeople(count) {
     if(count<=capacity)return;
@@ -362,7 +430,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
     clearGhost();refreshSelection();
   }
   function cancelEdit(){
-    editEpoch++;pendingEdit?.controller.abort();pendingEdit=null;drag=null;cameraTransition=null;
+    editEpoch++;pendingEdit?.controller.abort();pendingEdit=null;drag=null;endCameraTransition();endLayoutTransition();
     controls.enabled=visible;restorePreview();renderer.domElement.style.cursor='default';
   }
   function showError(message,position){
@@ -452,7 +520,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
       if(obstacle.locked){stopPointer(event);showError('Locked — use the lock tool to unlock.',center(obstacle.poly));return;}
       drag={...selected,start:point,point,draft:structuredClone(currentScene),original:obstacle.poly.map(p=>[...p]),origin:center(obstacle.poly),angle:0};
     }else{selected=null;refreshSelection();return;}
-    stopPointer(event);cameraTransition=null;controls.enabled=false;renderer.domElement.setPointerCapture(event.pointerId);renderer.domElement.style.cursor='grabbing';
+    stopPointer(event);endCameraTransition();endLayoutTransition();controls.enabled=false;renderer.domElement.setPointerCapture(event.pointerId);renderer.domElement.style.cursor='grabbing';
   }
   function previewObstacle(){
     const dx=snap(drag.point[0]-drag.start[0]),dy=snap(drag.point[1]-drag.start[1]),cos=Math.round(Math.cos(drag.angle)),sin=Math.round(Math.sin(drag.angle)),[cx,cy]=drag.origin;
@@ -526,11 +594,15 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
     const oldPosition=camera.position.clone(),oldTarget=controls.target.clone();preset=name;configureCamera(name==='plan'?'plan':'room');
     const [x0,y0,x1,y1]=currentBounds,cx=(x0+x1)/2,cy=(y0+y1)/2,span=Math.max(x1-x0,y1-y0),position=new THREE.Vector3(),target=new THREE.Vector3(cx,0,-cy);
     controls.maxDistance=span*3;camera.far=Math.max(100,span*8);camera.updateProjectionMatrix();
+    const entry=currentScene?.entrances[0],door=entry?center(entry.poly):[cx,y1];
+    const served=currentScene?.targets.find(t=>/buffet/i.test(t.id))||currentScene?.targets[0],desk=served?center(served.poly):[x1,cy];
     if(name==='door'){
-      const entries=currentScene?.entrances||[],north=entries.reduce((best,item)=>!best||bounds(item.poly)[3]>bounds(best.poly)[3]?item:best,null),e=north?bounds(north.poly):[cx,y1,cx,y1];
-      position.set((e[0]+e[2])/2,2.1,-Math.max(e[1],e[3])-.7);target.set(cx,1,-(y0+(y1-y0)*.35));
+      // From the end of the room opposite the service point, on the entrance side, so door, queue and desks all fit.
+      let ux=desk[0]-cx,uy=desk[1]-cy,u=Math.hypot(ux,uy)||1;ux/=u;uy/=u;
+      const side=Math.sign((door[0]-cx)*-uy+(door[1]-cy)*ux)||1,aside=Math.min(x1-x0,y1-y0)*.4*side,back=span*.38;
+      position.set(cx-ux*back-uy*aside,6,-(cy-uy*back+ux*aside));target.set(cx+ux*span*.22,.3,-(cy+uy*span*.22));
     }else if(name==='buffet'){
-      const t=currentScene?.targets.find(t=>/buffet/i.test(t.id))||currentScene?.targets[0],b=t?bounds(t.poly):[x1,cy,x1,cy];
+      const b=served?bounds(served.poly):[x1,cy,x1,cy];
       position.set(x1+1.3,2.8,-(b[1]+b[3])/2);target.set(x0+(x1-x0)*.4,.85,-(b[1]+b[3])/2);
     }else position.set(cx,span*(name==='plan'?2:1.12),-cy+(name==='plan'?.0001:span*.13));
     cameraTransition=animate?{from:oldPosition,to:position,fromTarget:oldTarget,toTarget:target,started:performance.now()}:null;
@@ -546,6 +618,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
   function setVisible(value) {visible=!!value;host.hidden=!visible;controls.enabled=visible&&!drag&&!pendingEdit;if(visible)render();}
   function capturePlan(){
     if(!currentScene)throw new Error('Load a room before capturing its plan.');
+    endLayoutTransition();
     const saved={camera,mode,preset,position:camera.position.clone(),target:controls.target.clone(),transition:cameraTransition,zoom:planCamera.zoom,heat:heatMesh?.visible};
     const hidden=[bodies,heads,...personAssetMeshes,vertexLayer,ghost,hoverOutline,selectionOutline].filter(Boolean).map(mesh=>[mesh,mesh.visible]);
     try{setPreset('plan',{animate:false});planCamera.zoom=1;planCamera.updateProjectionMatrix();hidden.forEach(([mesh])=>mesh.visible=false);if(heatMesh)heatMesh.visible=false;

@@ -186,9 +186,10 @@ def operations_preset(scene: Scene, preset: str, scenario: Scenario | None = Non
     positions = [list(p) for p in target.service_positions] or [list(target.queue_polyline[0])]
     if preset == "one_volunteer":
         positions = positions[:1]
-    elif preset == "third_volunteer":
-        if len(positions) >= 3:
-            raise ValueError("The target already has at least three service positions")
+    elif preset in ("third_volunteer", "fourth_volunteer"):
+        wanted = 3 if preset == "third_volunteer" else 4
+        if len(positions) >= wanted:
+            raise ValueError(f"The target already has at least {wanted} service positions")
         floor = Polygon(scene.walkable).difference(unary_union([Polygon(o.poly) for o in scene.obstacles])).buffer(-0.21)
         area = Polygon(target.poly).intersection(floor)
         queue = LineString(target.queue_polyline)
@@ -199,7 +200,7 @@ def operations_preset(scene: Scene, preset: str, scenario: Scenario | None = Non
                    for y in np.arange(y0, y1 + 1e-9, 0.25)
                    if area.covers(Point(x, y)) and Point(x, y).distance(queue) >= 0.45
                    and all(Point(x, y).distance(Point(p)) >= 0.45 for p in positions)]
-        while len(positions) < 3:
+        while len(positions) < wanted:
             choices = [p for p in choices if all(Point(p).distance(Point(old)) >= 0.45 for old in positions)]
             if not choices:
                 raise ValueError("The target has no clearanced position for an additional volunteer")

@@ -496,7 +496,7 @@ async function runChecks() {
     assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');
     assert.equal(viewer.evaluate('currentScenario().wave_count'),4);
     assert.equal(viewer.evaluate('currentScenario().wave_gap_s'),120);
-    assert.equal(viewer.evaluate('scenarioTiming(currentScenario())'),'dinner releases over 600 s in front_loaded');
+    assert.equal(viewer.evaluate('scenarioTiming(currentScenario())'),'front-loaded dinner releases over 600 s');
     const dinnerNote=viewer.evaluate(`setupNoteData({...lastRun,scenario:currentScenario(),events:result.events})`);
     assert.match(dinnerNote,/Dinner releases: front loaded over 600 s/);
     assert.doesNotMatch(dinnerNote,/4 table calls/);
@@ -649,6 +649,21 @@ async function runChecks() {
     viewer.evaluate("setStep('rehearse')");assert.equal(viewer.sandbox.document.body.dataset.step,'rehearse');
     assert.match(html,/body:not\(\.demo\)\[data-step="room"\] \.canvas-wrap\{height:max\(400px,calc\(100vh - 425px\)\)\}/);
     assert.match(html,/\.canvas-wrap,body\.demo \.canvas-wrap\{height:max\(400px,calc\(100vh - 340px\)\)\}/);
+  });
+  await check('Staffing labels use actual population and incomplete rows cannot justify wait or cost claims', async () => {
+    const viewer=createViewer();viewer.sandbox.staffRoom={n:60,width:18,depth:12,baseCount:2};
+    viewer.sandbox.staffRows=[{count:1,metrics:{completed:30,mean_wait_s:8,max_wait_s:15}},{count:2,metrics:{completed:60,mean_wait_s:100,max_wait_s:150}},{count:3,metrics:{completed:60,mean_wait_s:50,max_wait_s:90}},{count:4,metrics:{completed:59,mean_wait_s:10,max_wait_s:20}}];
+    viewer.evaluate('renderStaffing(staffRows,staffRoom)');
+    assert.match(viewer.elements.get('staffing-title').textContent,/60-person/);
+    const note=viewer.elements.get('staffing-note').textContent;assert.match(note,/30 of 60 guests completed/);assert.match(note,/59 of 60 guests completed/);assert.match(note,/not comparable/);assert.doesNotMatch(note,/pays|paying|cuts|fourth provides|serves|served/);assert.doesNotMatch(viewer.elements.get('staffing-rows').innerHTML,/class="chosen"/);
+    viewer.sandbox.staffRows[3].metrics={completed:60,mean_wait_s:70,max_wait_s:110};viewer.evaluate('renderStaffing(staffRows,staffRoom)');
+    assert.match(viewer.elements.get('staffing-note').textContent,/fourth increases mean wait by 20 s/);assert.doesNotMatch(viewer.elements.get('staffing-rows').innerHTML,/class="chosen"/);
+    assert.equal(viewer.network.length,0);
+  });
+  await check('Autoplay captions compare the measured operating run with Original and guard incomplete runs', async () => {
+    const viewer=createViewer();viewer.evaluate(`captionBase={scenario:{n_people:60},accounting:{done:60},metrics:{mean_wait_s:100,walkway_conflict_person_s:100}};captionCandidate={scenario:{n_people:60},accounting:{done:60},metrics:{mean_wait_s:120,walkway_conflict_person_s:50}};`);
+    const caption=viewer.evaluate('operationCaption(captionBase,captionCandidate)');assert.match(caption,/versus Original/);assert.match(caption,/20% higher/);assert.match(caption,/50% lower/);assert.doesNotMatch(caption,/beats/);
+    viewer.evaluate('captionCandidate.accounting.done=59');assert.match(viewer.evaluate('operationCaption(captionBase,captionCandidate)'),/Only 59 of 60.*not comparable/);assert.equal(viewer.network.length,0);
   });
   return passed;
 }

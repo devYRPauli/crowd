@@ -113,3 +113,19 @@ def test_assumption_receipt_includes_all_chosen_parameters(with_scene):
         assert any(note.startswith("scene.targets[0].service_positions = ") for note in receipt)
     else:
         assert "Service time and staffing remain those in the currently loaded scene." in receipt
+
+
+def test_rationale_is_plain_text_for_the_organizer():
+    assert qualitative_rationale(
+        "- **Move the `check_in_desk` east**\tso guests\u2019 walk \u2014 across central_walkway \u2014 is shorter."
+    ) == "Move the check in desk east so guests' walk - across central walkway - is shorter."
+    with pytest.raises(ValueError):
+        qualitative_rationale("**")
+
+
+def test_explanation_tolerates_markdown_and_spaced_tokens(context):
+    output = render_explanation(
+        "- `max_wait_s` fell from {{ baseline.max_wait_s }} to {{candidate. max_wait_s}} \u2013 "
+        "**walkway_conflict_person_s** changed by {{delta.walkway_conflict_person_s}}.", context,
+    )
+    assert output == "max_wait_s fell from 20 to 15 - walkway_conflict_person_s changed by -75."

@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 import pytest
 
 import server
@@ -181,6 +182,39 @@ def test_invalid_scene_request_does_not_destroy_previous_manual_run(context):
     invalid["scene"]["obstacles"][0]["poly"] = [[-1, 1], [1, 1], [1, 2], [-1, 2]]
     assert client.post("/api/propose", json=invalid).status_code == 422
     assert client.get(f'/api/frames/{before["run_id"]}').status_code == 200
+
+
+def test_nan_in_request_body_is_rejected_as_422(context):
+    scene, scenario, _ = context
+    body = json.dumps({"scene": scene.model_dump(mode="json"),
+                       "scenario": {**scenario.model_dump(mode="json"), "horizon_s": "NAN"}}).replace('"NAN"', "NaN")
+    response = TestClient(server.app).post("/api/run", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "scenario", "horizon_s"]
+    assert "finite" in error["msg"]
+
+
+def test_schema_rejections_are_one_plain_line(monkeypatch, context):
+    scene, scenario, _ = context
+    client = TestClient(server.app)
+    patch = [{"op": "replace", "path": "/scenario/arrival_window_s", "value": 9000}]
+    response = client.post("/api/operations", json={"scene": scene.model_dump(), "scenario": scenario.model_dump(),
+                                                    "patch": patch, "confirmed": True})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail.startswith("arrival_window_s: ") and "\n" not in detail and "pydantic" not in detail
+    reply = proposal_reply()
+    reply["candidates"][0]["patch"] = patch
+    mock_reply(monkeypatch, reply)
+    job = proposal_job(client, request_for(scene, scenario))
+    assert job["status"] == "completed"
+    assert job["rejected"][0]["reason"] == detail
+    assert job["progress"]["candidates"][0]["rejection_reason"] == detail
+    with pytest.raises(ValidationError) as failure:
+        Scene.model_validate({**scene.model_dump(), "walkable": [[0, 0], [1, 0], [1, 1], [0, 1]]})
+    reason = server._plain_error(failure.value)
+    assert reason.startswith("Region ") and "Value error" not in reason and "\n" not in reason
 
 
 def test_usage_aggregates_only_receipt_counters(monkeypatch, tmp_path):

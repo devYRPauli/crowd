@@ -1,5 +1,6 @@
 """Background proposal jobs preserve manual runs, bounded storage, and errors."""
 
+from collections import OrderedDict
 import json
 from pathlib import Path
 from threading import Event, Lock, current_thread
@@ -23,6 +24,7 @@ def rehearsal(monkeypatch):
     monkeypatch.setattr(server, "_proposal_jobs", {})
     monkeypatch.setattr(server, "_proposal_cache", {})
     monkeypatch.setattr(server, "_explanation_cache", {})
+    monkeypatch.setattr(server, "_simulations", OrderedDict())
     request = {"scene": scene.model_dump(mode="json"), "scenario": scenario.model_dump(mode="json"),
                "baseline_metrics": {"mean_wait_s": 999999}, "baseline_accounting": {"done": 999999},
                "constraints": "Keep two volunteers"}
@@ -100,7 +102,10 @@ def test_manual_run_during_each_candidate_simulation(monkeypatch, rehearsal, blo
     request, result = rehearsal
     entered, release = Event(), Event()
     calls = []
-    monkeypatch.setattr(server.astra, "ask_structured", lambda *args, **kwargs: {"candidates": [unchanged(), unchanged()]})
+    # The engine memo replays an identical candidate, so the second one nudges the desk to simulate again.
+    moved = dict(unchanged(), patch=[{"op": "replace", "path": "/scene/obstacles/0/poly",
+                                      "value": [[5, 10.5], [9, 10.5], [9, 11.5], [5, 11.5]]}])
+    monkeypatch.setattr(server.astra, "ask_structured", lambda *args, **kwargs: {"candidates": [unchanged(), moved]})
 
     def simulate(scene, scenario, **kwargs):
         if current_thread().name.startswith("crowd-proposal-"):

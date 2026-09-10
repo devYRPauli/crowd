@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import json
+from collections import OrderedDict
 from pathlib import Path
 import time
 
@@ -26,6 +27,7 @@ def baseline(monkeypatch):
     result = run(scene, scenario, people=people)
     monkeypatch.setattr(server, "_last_result", (scene.model_dump(mode="json"), scenario.model_dump(mode="json"), result))
     monkeypatch.setattr(server, "_proposal_jobs", {})
+    monkeypatch.setattr(server, "_simulations", OrderedDict())
     monkeypatch.setattr(server, "_proposal_cache", {})
     monkeypatch.setattr(server, "_explanation_cache", {})
     monkeypatch.setattr(server, "_proposal_private", {})
@@ -111,8 +113,11 @@ def test_layout_jobs_and_reruns_use_actual_baseline_people(monkeypatch, baseline
     job_id, job = job_for(client, scene, scenario)
     assert job["candidates"][0]["requires_confirmation"] is False
     assert passed_people == [original.people]
-    assert client.post(f"/api/propose/{job_id}/run", json={"index": 0}).status_code == 200
-    assert passed_people == [original.people, original.people]
+    rerun = client.post(f"/api/propose/{job_id}/run", json={"index": 0})
+    assert rerun.status_code == 200
+    # The confirmed rerun replays the memoised measurement of the same people.
+    assert passed_people == [original.people]
+    assert rerun.json()["metrics"] == job["candidates"][0]["metrics"]
 
 
 def test_staffing_cannot_be_smuggled_through_layout_kind(monkeypatch, baseline):
@@ -127,7 +132,7 @@ def test_staffing_cannot_be_smuggled_through_layout_kind(monkeypatch, baseline):
     assert client.post(f"/api/propose/{job_id}/run", json={"index": 0, "confirmed": True}).status_code == 404
 
 
-@pytest.mark.parametrize("preset", ["one_volunteer", "third_volunteer", "waves_15min"])
+@pytest.mark.parametrize("preset", ["one_volunteer", "third_volunteer", "fourth_volunteer", "waves_15min"])
 def test_judge_presets_are_gated_and_keep_nonarrival_people(monkeypatch, baseline, preset):
     scene, scenario, original = baseline
     client = TestClient(server.app)
@@ -146,7 +151,7 @@ def test_judge_presets_are_gated_and_keep_nonarrival_people(monkeypatch, baselin
         assert body["comparison"]["better"] is None
     else:
         assert changed.people == original.people
-        assert len(body["scene"]["targets"][0]["service_positions"]) == (1 if preset == "one_volunteer" else 3)
+        assert len(body["scene"]["targets"][0]["service_positions"]) == {"one_volunteer": 1, "third_volunteer": 3, "fourth_volunteer": 4}[preset]
 
 
 @pytest.mark.parametrize("path,value", [
@@ -214,3 +219,13 @@ def test_third_volunteer_preset_can_follow_one_volunteer_control(baseline):
     larger, _ = apply_operations(smaller, scenario, operations_preset(smaller, "third_volunteer"))
     assert len(larger.targets[0].service_positions) == 3
     assert smaller.targets[0].service_positions[0] in larger.targets[0].service_positions
+
+
+def test_fourth_volunteer_preset_adds_a_clearanced_position(baseline):
+    scene, scenario, _ = baseline
+    larger, _ = apply_operations(scene, scenario, operations_preset(scene, "fourth_volunteer"))
+    positions = larger.targets[0].service_positions
+    assert len(positions) == 4
+    assert all(p in positions for p in scene.targets[0].service_positions)
+    with pytest.raises(ValueError, match="at least 4"):
+        operations_preset(larger, "fourth_volunteer")

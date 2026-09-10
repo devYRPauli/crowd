@@ -144,12 +144,25 @@ def assumption_receipt(output: Interpretation, active_scene: Scene | None = None
 _NUMBER = re.compile(r"\d|\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|percent|half|halved|quarter|twice|double|doubled|triple|tripled)\b", re.I)
 _CLAIM = re.compile(r"\b((?:un)?safe(?:r|st|ly|ty)?|optim(?:al|ally|ality|um)|validat(?:e|ed|ion))\b", re.I)
 _TOKEN = re.compile(r"\{\{(baseline|candidate|delta)\.([A-Za-z_][A-Za-z_0-9]*)\}\}")
+_SPACED_TOKEN = re.compile(r"\{\{\s*(baseline|candidate|delta)\s*\.\s*([A-Za-z_][A-Za-z_0-9]*)\s*\}\}")
+_MARKDOWN = re.compile(r"[*`]+|^\s*(?:#+|>|[-+])\s+", re.M)
+_TYPOGRAPHY = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+                             "\u2013": "-", "\u2014": "-", "\u2026": "..."})
+_IDENTIFIER = re.compile(r"\b[a-z]+(?:_[a-z0-9]+)+\b")
+
+
+def plain_text(text: str) -> str:
+    """Model prose is shown verbatim, so markdown and typographic punctuation stop here."""
+    return " ".join(_MARKDOWN.sub("", text).translate(_TYPOGRAPHY).split())
 
 
 def qualitative_rationale(text: str) -> str:
-    if not text.strip() or "\n" in text or _NUMBER.search(text) or any(c.isnumeric() for c in text) or _CLAIM.search(text):
+    if "\n" in text:
         raise ValueError("Rationale must be one qualitative line without numeric or safety/optimality claims")
-    return text.strip()
+    text = _IDENTIFIER.sub(lambda match: match.group().replace("_", " "), plain_text(text))
+    if not text or _NUMBER.search(text) or any(c.isnumeric() for c in text) or _CLAIM.search(text):
+        raise ValueError("Rationale must be one qualitative line without numeric or safety/optimality claims")
+    return text
 
 
 def measurement_context(baseline: dict, candidate: dict, baseline_accounting: dict, candidate_accounting: dict) -> dict:
@@ -173,7 +186,7 @@ def materially_helped(context: dict) -> bool:
 
 def render_explanation(text: str, context: dict) -> str:
     """Only deterministic tokens supply numbers in the explanation shown in UI."""
-    text = " ".join(text.split())
+    text = _SPACED_TOKEN.sub(r"{{\1.\2}}", plain_text(text))
     prose = _TOKEN.sub("MEASUREMENT", text)
     if not text or _NUMBER.search(prose) or any(c.isnumeric() for c in prose) or _CLAIM.search(prose):
         raise ValueError("Explanation must use measurement tokens, not invented numbers or safety/optimality claims")

@@ -1,6 +1,24 @@
 # Crowd demo
 
-Open `http://127.0.0.1:8000/?demo=1` at 1920 × 1080.
+## Submitted demo
+
+[Watch the submitted video](https://drive.google.com/file/d/16EyIkHmOk2unT87y4pLUmtnSdRWW8VXG/view?usp=sharing)
+
+## Automatic walkthrough
+
+Open `http://127.0.0.1:8000/?demo=1` at 1920x1080 and press the Play the demo
+button (or the D key). The page drives itself: Event, Interpret, Confirm, Run
+with 3D playback, Find a better setup, Candidate A, the third-volunteer
+change, and a staffing sweep that rehearses 1, 2, 3 and 4 volunteers with the
+same 120 people, with a caption for each step. The full staffing sweep assumes a two-volunteer
+baseline, as used by the provided demos. It makes real Astra calls and stops with
+a visible error if a candidate is not measured. The manual click table below
+covers the same flow step by step. Run the demo once before recording: the first
+run makes the Astra calls (about 30 s for the proposal) and caches them in the
+browser, and the server retains a bounded cache of engine runs. Warm-cache playback
+can be faster; the automatic tour's total duration has not been independently
+measured in this review. Click anywhere on the page before using
+the D key so the page has keyboard focus.
 
 ## Demo strings
 
@@ -11,8 +29,6 @@ Brief:
 Constraints:
 
 > Keep two volunteers and the dining tables. Keep the central aisle clear.
-
-These defaults were written for this pass because no DEMO.md existed when demo mode was requested.
 
 Coffee example brief (open and furnished rooms):
 
@@ -39,6 +55,7 @@ queue, receive service, pass the destination and finish only at an exit.
 | Optional | Press R → Improve → Call tables in waves (15 min) → Confirm | Arrival preview uses five batches across 900 s. One extended recording received HTTP 409; its retained baseline was not a measured waves result. |
 | Optional | After a successful waves measurement, Rehearse → scrub to 175 s → Play at 10× | Watch the second arrival wave at 180 s. Pause, then restore Original with R. |
 | 11 | Improve → Add a third volunteer → Confirm | A three-volunteer preview compared with the same pinned baseline. |
+| 12 | Improve → Compare 1 to 4 volunteers | One, three and four volunteers rehearsed against the pinned two-volunteer baseline; a table of mean wait, max wait and people who finished. |
 
 If Astra or Wi-Fi fails, retain the last successful labeled cache or use Run
 and the deterministic what-if chips. Do not describe an unavailable candidate

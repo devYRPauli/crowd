@@ -1,15 +1,24 @@
 # Crowd
 
-Rehearse the event before the doors open.
+Real-world crowd simulation, powered by GPT-6 Astra. Rehearse the event
+before the doors open.
 
-Describe your event, watch simulated people move through your actual room,
-and ask GPT-6 Astra to find a better setup within your constraints. Layout candidates reuse the same presampled people. Operating changes require
+Describe your event in plain words, watch simulated people move through your
+actual room, and ask GPT-6 Astra to find a better setup within your
+constraints. The same loop applies wherever people queue and move: event
+venues, registration desks, polling stations, transit halls and street
+festivals. Layout candidates reuse the same presampled people. Operating changes require
 confirmation; changed arrivals retain people and service times and receive an
 explicitly qualified comparison. Built solo in one day at the OpenAI GPT-6 Astra Hackathon NYC.
 
-For the restricted presentation flow, open `http://127.0.0.1:8000/?demo=1`.
-Its Room selector offers open coffee, furnished coffee, and the Puck room.
-See [DEMO.md](DEMO.md) for the exact walkthrough and recording commands.
+## Demo
+
+[Watch the demo](https://drive.google.com/file/d/16EyIkHmOk2unT87y4pLUmtnSdRWW8VXG/view?usp=sharing)
+
+Open `http://127.0.0.1:8000/?demo=1` and press the Play the demo button (or
+the D key); the page drives itself through the whole flow with captions. Its
+Room selector offers open coffee, furnished coffee, and the Puck room. See
+[DEMO.md](DEMO.md) for the exact walkthrough and recording commands.
 
 ## What it does
 
@@ -48,6 +57,8 @@ python -m uvicorn server:app --host 127.0.0.1 --port 8000
 Open http://127.0.0.1:8000. The sample and its layout options work without
 `data/` or an API key. Set `OPENAI_API_KEY` in your environment or local `.env`
 for Astra; keep that file private. Local data and usage logs are gitignored.
+`?demo=1` needs `OPENAI_API_KEY`; without a key use the sample room and the
+deterministic what-if chips.
 The saved-room picker contains the room snapshots bundled when the page was
 built; use Open a room for additional or updated files. The primary 3D room view
 has Plan, Room and Buffet cameras and shares the measured replay, heatmap,
@@ -71,20 +82,22 @@ and keyed to the exact inputs.
 Run tests with `.venv/bin/python -m pytest -q -k 'not live' --tb=short`.
 Final full verification: **330 passed, 2 strict expected failures** (dense
 dinner), with one existing Starlette/AnyIO deprecation warning. The tracked
-viewer harness passes 39 checks and setup notes pass 16 assertions.
+viewer harness passes 41 checks and setup notes pass 16 assertions.
 The `test_astra_live_tiny_object` test makes a billable
 call when a key is available; other model calls in the tests are mocked.
 
 ## Results from the hackathon room (Puck Building, 3rd floor, 120 people, 2 volunteers)
 
-| Setup | Walkway conflict (person-s) | Mean wait (s) | Max wait (s) | Overflow | Completed |
-|---|---:|---:|---:|---:|---:|
-| Your room: line in the central aisle | 15,295.05 | 128.06 | 174.65 | 99 | 120 |
-| Line in the south corridor | 9,208.80 | 174.18 | 254.10 | 90 | 120 |
-| Third volunteer | 9,346.65 | 79.23 | 126.90 | 82 | 120 |
-| Five arrival waves over 15 min | 12,463.20 | 104.52 | 218.40 | 80 | 120 |
+| Setup | Walkway conflict (person-s) | Mean wait (s) | Max wait (s) | Completed |
+|---|---:|---:|---:|---:|
+| Your room: line in the central aisle | 15,295.05 | 128.06 | 174.65 | 120/120 |
+| Line in the south corridor | 9,208.80 | 174.18 | 254.10 | 120/120 |
+| Third volunteer | 9,346.65 | 79.23 | 126.90 | 120/120 |
+| Fourth volunteer | 3,216.10 | 28.35 | 77.80 | 120/120 |
+| Five arrival waves over 15 min | 12,463.20 | 104.52 | 218.40 | 120/120 |
 
-Measured after the physical exit correction (`1753837`): Arrival mode, 120
+Measured after the physical exit correction (`1753837`), with the fourth
+volunteer rechecked during the final user pass: Arrival mode, 120
 people, front-loaded arrivals over 600 s, seed 1, horizon 1800 s, service mean
 15 s. Every completion has a distinct person's exit event inside an exit
 polygon. Layout and staffing rows reuse the exact presampled people. The waves
@@ -92,10 +105,14 @@ row changes only their arrival times to five batches at 0/180/360/540/720 s;
 this is an operating assumption, not a dinner table-call simulation.
 
 The south-corridor layout reduces walkway conflict by about 40% but increases
-mean wait by about 36%. A third volunteer reduces both. Waves reduce mean wait
-and conflict but increase maximum wait. These are measured trade-offs, not
-safety or optimality claims. Astra's live candidate can differ; see
-[DEMO.md](DEMO.md) for the recorded proposal and API timings.
+mean wait by about 36%. A third volunteer cuts mean wait by 38% and walkway
+conflict by 39% versus Your room. The staffing sweep rehearses one to four
+volunteers with the same people: one volunteer serves only 113 of 120 before
+the horizon, and a fourth cuts mean wait to 28 s. Staffing materially
+constrains waits in this scenario; geometry and queue handoff also matter. Waves reduce mean wait and conflict but
+increase maximum wait. These are measured trade-offs, not safety or optimality
+claims. Astra's live candidate can differ; see [DEMO.md](DEMO.md) for the
+recorded proposal and API timings.
 
 The simpler examples also finish at exits: open coffee room 60/60, mean wait
 89.09 s and max 180.75 s; furnished coffee room 60/60, mean 87.36 s and max
@@ -141,6 +158,11 @@ diagnosed from traces.
 
 ## What was built today
 
+Crowd's original application code was built during today's hackathon.
+Third-party components include JuPedSim, FastAPI, Three.js, Shapely, NumPy,
+Pydantic, Uvicorn and the OpenAI SDK, plus CC0 assets from Kenney and KayKit.
+Pinned Python dependencies are listed in requirements.txt.
+
 - `a791aa6`: schema, synthetic sample, API scaffold, Astra usage receipts.
 - `90594ea`: deterministic queue rehearsal, presampling, accounting and tests.
 - `e6fa1f5`: canvas playback, binary frames and person-event inspection.
@@ -162,5 +184,6 @@ diagnosed from traces.
 - `6ba1e0b`: dinner release modes; subsequent physical occupancy exposed the documented experimental limit.
 - `c15098f`: focused demo and proportioned open/furnished coffee examples.
 - `1753837`: physical exit completion, persistent dinner occupancy and explicit experimental status.
+- `80189e1`: verified demo runs, measured numbers in the README and the DEMO.md recording guide.
 
 Crowd code is MIT licensed; JuPedSim remains LGPLv3-or-later. See LICENSE.
