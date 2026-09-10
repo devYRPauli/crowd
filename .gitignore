@@ -11,3 +11,6 @@ data/
 /static/assets/kenney-furniture/
 /static/assets/kaykit-furniture/
 /static/assets/kenney-characters/
+
+# Local demo recordings
+out/

@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(root, 'static/index.html'), 'utf8');
 const sample = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/sample_room.json'), 'utf8'));
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function createViewer() {
+function createViewer({search='?view=2d'}={}) {
   const elements = new Map(), network = [];
   const context = new Proxy({measureText: text => ({width: String(text).length * 6})}, {
     get(target, key) { return key in target ? target[key] : () => {}; },
@@ -42,7 +42,7 @@ function createViewer() {
   }
   for (const match of html.matchAll(/id="([^"]+)"/g)) elements.set(match[1], element());
   const sandbox = {
-    document: {
+    document: {body:element('body'),
       getElementById: id => elements.get(id), createElement: element,
       querySelector: selector => {
         if (!elements.has(selector)) elements.set(selector, element());
@@ -50,7 +50,7 @@ function createViewer() {
       },
       querySelectorAll: () => [], addEventListener() {},
     },
-    window: {devicePixelRatio: 1}, location:{search:'?view=2d'}, URLSearchParams, console, Image: class {},
+    window: {devicePixelRatio: 1}, location:{search}, URLSearchParams, console, Image: class {},
     Number, JSON, Math, Set, Uint8Array, Uint16Array, Float32Array, DataView,
     AbortController, AbortSignal, Blob, URL, TextEncoder, atob, btoa,
     crypto: require('node:crypto').webcrypto,
@@ -63,6 +63,7 @@ function createViewer() {
     },
     localStorage: {getItem: () => null, setItem() {}},
   };
+  for(const match of html.matchAll(/<script id="([^"]+)" type="application\/json">([\s\S]*?)<\/script>/g))elements.get(match[1]).textContent=match[2];
   vm.createContext(sandbox);
   const inline = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
     .map(match => match[1]).find(source => source.includes('function currentScenario'));
@@ -543,6 +544,111 @@ async function runChecks() {
     assert.deepEqual(plain(viewer.evaluate('operationPatch(legacyCandidate)')).map(operation=>operation.path),['/scene/targets/0/service_positions']);
     viewer.evaluate('legacyCandidate.scenario.wave_count=4');
     assert.equal(plain(viewer.evaluate('operationPatch(legacyCandidate)')).find(operation=>operation.path==='/scenario/wave_count').value,4);
+  });
+  await check('Demo preloads legal Puck layout and curated coffee examples reset their scenario and baseline', async () => {
+    const viewer=createViewer({search:'?demo=1&view=2d'});
+    viewer.evaluate('initializeDemo()');
+    assert.equal(viewer.elements.get('filename').textContent,'Puck Building, 3rd floor');
+    assert.deepEqual(plain(viewer.evaluate('scene.layout_options.map(option=>option.id)')),['line_in_aisle','line_south_corridor']);
+    assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');assert.equal(viewer.evaluate('currentScenario().n_people'),120);
+    assert.match(viewer.elements.get('brief').value,/120 guests are already seated/);
+    assert.match(viewer.elements.get('constraints').value,/central aisle clear/);
+    assert.equal(viewer.elements.get('run').disabled,true);
+    for(const id of ['open_coffee_room','furnished_coffee_room']){
+      viewer.sandbox.exampleId=id;viewer.evaluate('loadDemoRoom(exampleId)');
+      assert.equal(viewer.evaluate('pinnedBaseline'),null);assert.equal(viewer.evaluate('confirmedScenario'),null);
+      assert.equal(viewer.evaluate('currentScenario().mode'),'queue');assert.equal(viewer.evaluate('currentScenario().n_people'),60);
+      assert.equal(viewer.evaluate('currentScenario().arrival_pattern'),'uniform');assert.equal(viewer.evaluate('currentScenario().arrival_window_s'),300);
+      assert.equal(viewer.evaluate('scene.targets[0].service_s'),15);
+      assert.match(viewer.elements.get('brief').value,/60 guests arrive uniformly/);
+    }
+    const catalog=JSON.parse(viewer.elements.get('room-catalog').textContent);
+    assert.ok(catalog.some(room=>room.filename==='open_coffee_room.json'));
+    assert.ok(catalog.some(room=>room.filename==='furnished_coffee_room.json'));
+    assert.equal(viewer.network.length,0);
+  });
+  await check('Demo is read-only, hides Plan and Candidate B, and uses one visible Confirm', async () => {
+    const viewer=createViewer({search:'?demo=1&view=2d'});viewer.evaluate('initializeDemo()');
+    assert.equal(await viewer.evaluate('editIn3D({scene:null})'),false);
+    await viewer.elements.get('room').dispatch('pointerdown',{button:0,clientX:100,clientY:100});
+    await viewer.evaluate('mutateRoom(null,"Unwanted edit")');assert.equal(viewer.network.length,0);
+    viewer.evaluate(`original=clone(lastRun);candidates=[{...clone(lastRun),index:0,kind:'layout'},{...clone(lastRun),index:1,kind:'layout'}];renderComparison();`);
+    const descendants=element=>[element,...element.children.flatMap(descendants)];
+    const tabs=descendants(viewer.elements.get('candidate-tabs')).filter(element=>element.dataset.candidateIndex!==undefined);
+    assert.deepEqual(tabs.map(tab=>tab.dataset.candidateIndex),['-1','0']);assert.equal(tabs[0].textContent,'Original');
+    viewer.evaluate(`setStep('plan')`);assert.equal(viewer.evaluate('currentStep'),'improve');
+    viewer.evaluate(`setStep('event');interpreted={scene:null,scenario:currentScenario(),assumptions:['Confirm these dinner assumptions']};`);
+    viewer.sandbox.fetch=async(url,options)=>{viewer.network.push({url,options});return {ok:true,json:async()=>({scene:JSON.parse(options.body).scene})};};
+    await viewer.elements.get('confirm').click();for(let i=0;i<15;i++)await Promise.resolve();
+    assert.equal(viewer.evaluate('currentStep'),'rehearse');assert.equal(viewer.elements.get('run').disabled,false);
+    assert.equal(viewer.network.length,1);assert.equal(viewer.network[0].url,'/api/scene/validate');
+    assert.match(html,/body\.demo \[data-step="plan"\]/);assert.match(html,/body\.demo #comparison-provenance/);
+  });
+  await check('Demo R restores retained Original without requests and camera shortcuts work on focused buttons', async () => {
+    const viewer=createViewer({search:'?demo=1&view=2d'}),before=viewer.state();
+    viewer.evaluate(`scene.targets[0].service_positions=scene.targets[0].service_positions.slice(0,1);lastRun.scene=clone(scene);activeCandidate=0;time=.2;resetDemo();`);
+    assert.deepEqual(viewer.state().scene,before.scene);assert.equal(viewer.evaluate('time'),0);assert.equal(viewer.network.length,0);
+    const cameras=[];viewer.sandbox.watchViewMock={setPreset:value=>cameras.push(value)};viewer.evaluate('watchView=watchViewMock');
+    let prevented=0;for(const key of ['1','2','3']){viewer.sandbox.keyFixture={key,target:{tagName:'BUTTON'},preventDefault(){prevented++;},stopImmediatePropagation(){}};viewer.evaluate('demoShortcut(keyFixture)');}
+    assert.deepEqual(cameras,['plan','door','buffet']);assert.equal(prevented,3);
+    viewer.sandbox.keyFixture={key:'1',target:{tagName:'TEXTAREA'},preventDefault(){throw Error('Typing must not trigger shortcuts');},stopImmediatePropagation(){}};viewer.evaluate('demoShortcut(keyFixture)');
+    assert.equal(cameras.length,3);
+    viewer.sandbox.keyFixture={key:' ',code:'Space',target:{tagName:'BUTTON'},preventDefault(){},stopImmediatePropagation(){}};viewer.evaluate('demoShortcut(keyFixture)');assert.equal(viewer.evaluate('playing'),true);
+    assert.equal(viewer.network.length,0);
+  });
+  await check('Demo assumptions wrap in editable expanding textareas while normal mode keeps inputs', async () => {
+    for(const [search,tag] of [['?demo=1&view=2d','TEXTAREA'],['?view=2d','INPUT']]){
+      const viewer=createViewer({search});viewer.sandbox.assumptionFixture={assumptions:['A long receipt with service time and table release assumptions. '.repeat(12)]};
+      viewer.evaluate('renderAssumptions(assumptionFixture)');
+      const field=viewer.elements.get('assumptions').children[0].children[0];assert.equal(field.tagName,tag);
+      if(tag==='TEXTAREA'){assert.equal(field.rows,3);assert.equal(field.wrap,'soft');}
+      field.value='Edited assumption with a second line\nfor the confirmed plan.';await field.dispatch('input');
+      assert.equal(viewer.evaluate('assumptionFixture.assumptions[0]'),field.value);
+      if(tag==='TEXTAREA')assert.ok(parseFloat(field.style.height)>=64);
+    }
+  });
+  await check('Arrival completion requires exiting and removes exited people while preserving legacy playback', async () => {
+    const viewer=createViewer(),bundle=plain(viewer.evaluate('buildBundle()'));
+    bundle.original=null;bundle.metrics.completed=1;bundle.accounting={not_arrived:1,walking:0,queued:0,in_service:0,done:1};
+    const lifecycle=['spawned','joined_queue','service_start','service_end','reached_destination','exited'];
+    bundle.playback.events.p0=lifecycle.map((kind,i)=>({kind,time_s:i*.02,position:[2+i,3]}));bundle.playback.time_s=.15;
+    viewer.sandbox.lifecycleBundle=bundle;await viewer.evaluate('restoreBundle(lifecycleBundle)');
+    assert.equal(viewer.evaluate('stateAt(people[0],.09)'),'walking');
+    assert.equal(viewer.evaluate('stateAt(people[0],.15)'),'done');
+    assert.equal(viewer.evaluate("personPosition(0,'done')"),null);
+    assert.deepEqual(plain(viewer.evaluate('people[0].timeline.exited.position')),[7,3]);
+    assert.deepEqual(plain(viewer.evaluate('buildBundle().playback')),bundle.playback);
+    const before=viewer.state();const invalid=plain(bundle);invalid.playback.events.p0=invalid.playback.events.p0.filter(e=>e.kind!=='reached_destination');viewer.sandbox.badLifecycle=invalid;
+    await assert.rejects(viewer.evaluate('restoreBundle(badLifecycle)'),/exit before destination/);assert.deepEqual(viewer.state(),before);
+    const duplicate=plain(bundle);duplicate.playback.events.p0.push({kind:'exited',time_s:.15,position:[7,3]});viewer.sandbox.badLifecycle=duplicate;
+    await assert.rejects(viewer.evaluate('restoreBundle(badLifecycle)'),/duplicate terminal/);assert.deepEqual(viewer.state(),before);
+    const legacy=plain(bundle);legacy.playback.events.p0=legacy.playback.events.p0.slice(0,4).concat({kind:'seated',time_s:.1,position:[8,3]});viewer.sandbox.legacyLifecycle=legacy;await viewer.evaluate('restoreBundle(legacyLifecycle)');
+    assert.deepEqual(plain(viewer.evaluate("personPosition(0,'done')")),[8,3]);assert.equal(viewer.network.length,0);
+  });
+  await check('Dinner returns stay visible at measured seat positions and send seated or standing Watch poses', async () => {
+    const viewer=createViewer(),bundle=plain(viewer.evaluate('buildBundle()'));
+    bundle.original=null;bundle.scenario.mode='dinner_call';bundle.metrics.completed=2;bundle.accounting={seated:0,walking:0,queued:0,in_service:0,done:2};
+    for(let i=0;i<2;i++){
+      const placement_kind=i?'standing':'seat',seat_group='table_'+i,position=[2+i*2,3];
+      bundle.playback.events['p'+i]=[{kind:'initially_seated',time_s:0,position,placement_kind,seat_group},...['released','spawned','joined_queue','service_start','service_end'].map((kind,j)=>({kind,time_s:(j+1)*.01,position})),{kind:'returned_to_seat',time_s:.1,position:[position[0]+.1,3],seat_position:position,placement_kind,seat_group}];
+    }
+    bundle.playback.frames_base64=Buffer.from(new Float32Array([2,3,4,3,2.5,3.25,4.5,3.25]).buffer).toString('base64');bundle.playback.time_s=.15;
+    viewer.sandbox.returnFixture=bundle;await viewer.evaluate('restoreBundle(returnFixture)');
+    assert.equal(viewer.evaluate('stateAt(people[0],.08)'),'walking');assert.equal(viewer.evaluate('stateAt(people[0],.15)'),'done');
+    const measuredPosition=plain(viewer.evaluate("personPosition(0,'done')"));
+    assert.ok(Math.abs(measuredPosition[0]-2.375)<1e-7);assert.ok(Math.abs(measuredPosition[1]-3.1875)<1e-7,'returned guests follow subsequent measured frames');
+    viewer.evaluate(`watchActive=true;watchView={setScene(){},setEditingEnabled(){},update(value){watchPayload=value;},render(){}};drawn=[{i:0,state:'done'},{i:1,state:'done'}];renderWatch();`);
+    assert.equal(viewer.evaluate('watchPayload.people[0].seated'),true);assert.equal(viewer.evaluate('watchPayload.people[1].seated'),false);
+    assert.deepEqual(plain(viewer.evaluate('buildBundle().playback')),bundle.playback);
+    viewer.evaluate('savedFrames=frames.slice();frames.fill(NaN)');assert.deepEqual(plain(viewer.evaluate("personPosition(0,'done')")),[2.1,3]);viewer.evaluate('frames=savedFrames');
+    const before=viewer.state(),invalid=plain(bundle);delete invalid.playback.events.p0.at(-1).seat_position;viewer.sandbox.badReturn=invalid;
+    await assert.rejects(viewer.evaluate('restoreBundle(badReturn)'),/returned seat metadata/);assert.deepEqual(viewer.state(),before);assert.equal(viewer.network.length,0);
+  });
+  await check('Room viewport reserves palette and transport space without changing Demo palette visibility', async () => {
+    const viewer=createViewer();viewer.evaluate("setStep('room')");assert.equal(viewer.sandbox.document.body.dataset.step,'room');
+    viewer.evaluate("setStep('rehearse')");assert.equal(viewer.sandbox.document.body.dataset.step,'rehearse');
+    assert.match(html,/body:not\(\.demo\)\[data-step="room"\] \.canvas-wrap\{height:max\(400px,calc\(100vh - 425px\)\)\}/);
+    assert.match(html,/\.canvas-wrap,body\.demo \.canvas-wrap\{height:max\(400px,calc\(100vh - 340px\)\)\}/);
   });
   return passed;
 }

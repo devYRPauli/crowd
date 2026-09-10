@@ -320,7 +320,7 @@ export async function createWatch(host,{onEdit=async()=>false,onSelectPerson=()=
       transform.rotation.y=person.state==='queued'&&head?Math.atan2(head[0]-p[0],-(head[1]-p[1])):0;
       let phase=personPhases.get(person.id);
       if(phase===undefined){phase=0;for(const char of String(person.id))phase+=char.charCodeAt(0);personPhases.set(person.id,phase);}
-      const seated=person.state==='seated'&&person.placement_kind!=='standing',posture=seated?.65:1;
+      const seated=(person.state==='seated'||person.seated)&&person.placement_kind!=='standing',posture=seated?.65:1;
       const bob=person.state==='walking'?.012*(1+Math.sin(lastTime*8+phase)):0;
       transform.position.set(p[0],bob,-p[1]);transform.scale.set(1,posture,1);transform.updateMatrix();
       for(const mesh of personAssetMeshes){mesh.setMatrixAt(index,transform.matrix);mesh.setColorAt(index,color);}
