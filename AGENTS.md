@@ -8,7 +8,7 @@
 - Validate every model output with schema checks and validate all resulting
   scene geometry with Shapely before use. Validate proposals against the original
   scene, preserve locked obstacles, and reject changes outside permitted scope.
-- 3D is presentation-only playback of the existing measured frames; no 3D physics,
+- 3D edits the same validated scene and displays existing measured frames; no 3D physics,
   no photo reconstruction, and no per-person model calls.
 - Do not claim native steering unless it is actually implemented.
 - Keep secrets out of source control and logs; never log prompts or image bytes.

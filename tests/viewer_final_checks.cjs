@@ -50,7 +50,7 @@ function createViewer() {
       },
       querySelectorAll: () => [], addEventListener() {},
     },
-    window: {devicePixelRatio: 1}, console, Image: class {},
+    window: {devicePixelRatio: 1}, location:{search:'?view=2d'}, URLSearchParams, console, Image: class {},
     Number, JSON, Math, Set, Uint8Array, Uint16Array, Float32Array, DataView,
     AbortController, AbortSignal, Blob, URL, TextEncoder, atob, btoa,
     crypto: require('node:crypto').webcrypto,
