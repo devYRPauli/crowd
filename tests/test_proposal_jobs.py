@@ -21,6 +21,8 @@ def rehearsal(monkeypatch):
     result = run(scene, scenario)
     monkeypatch.setattr(server, "_last_result", (scene.model_dump(mode="json"), scenario.model_dump(mode="json"), result))
     monkeypatch.setattr(server, "_proposal_jobs", {})
+    monkeypatch.setattr(server, "_proposal_cache", {})
+    monkeypatch.setattr(server, "_explanation_cache", {})
     request = {"scene": scene.model_dump(mode="json"), "scenario": scenario.model_dump(mode="json"),
                "baseline_metrics": {"mean_wait_s": 999999}, "baseline_accounting": {"done": 999999},
                "constraints": "Keep two volunteers"}

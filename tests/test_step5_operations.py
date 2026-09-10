@@ -26,6 +26,8 @@ def baseline(monkeypatch):
     result = run(scene, scenario, people=people)
     monkeypatch.setattr(server, "_last_result", (scene.model_dump(mode="json"), scenario.model_dump(mode="json"), result))
     monkeypatch.setattr(server, "_proposal_jobs", {})
+    monkeypatch.setattr(server, "_proposal_cache", {})
+    monkeypatch.setattr(server, "_explanation_cache", {})
     monkeypatch.setattr(server, "_proposal_private", {})
     return scene, scenario, result
 

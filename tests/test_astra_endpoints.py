@@ -12,6 +12,12 @@ from crowd.engine import run
 from crowd.schema import Scenario, Scene
 
 
+@pytest.fixture(autouse=True)
+def isolate_advice_cache(monkeypatch):
+    monkeypatch.setattr(server, "_proposal_cache", {})
+    monkeypatch.setattr(server, "_explanation_cache", {})
+
+
 @pytest.fixture
 def scene_data():
     return Scene.model_validate_json(
