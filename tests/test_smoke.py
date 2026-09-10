@@ -133,7 +133,7 @@ def test_http_scaffold(scene):
         assert response.status_code == 200
         assert Scene.model_validate(response.json()) == scene
         assert client.post("/api/scene", json=scene.model_dump()).status_code == 501
-        for action in ("run", "interpret", "propose", "explain"):
+        for action in ("interpret", "propose", "explain"):
             response = client.post(f"/api/{action}", json={})
             assert response.status_code == 501
             assert response.json()["detail"]

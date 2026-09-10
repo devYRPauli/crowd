@@ -1,37 +1,199 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Crowd — Event layout rehearsal</title>
-    <style>
-      body { max-width: 56rem; margin: 4rem auto; padding: 0 1.5rem; font: 1rem/1.5 system-ui, sans-serif; color: #19302a; background: #f5f7f4; }
-      pre { padding: 1.5rem; background: white; border: 1px solid #d6dfd9; overflow: auto; }
-    </style>
-  </head>
-  <body>
-    <h1>Crowd</h1>
-    <p>Rehearse an event layout. Compare measured trade-offs.</p>
-    <p>This is the scaffold. Simulation and layout editing are coming next.</p>
-    <p id="status" role="status">Loading the sample scene…</p>
-    <details>
-      <summary>Inspect sample scene</summary>
-      <pre id="scene"></pre>
-    </details>
-    <script>
-      async function loadScene() {
-        const status = document.getElementById('status');
-        try {
-          const response = await fetch('/api/scene');
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const scene = await response.json();
-          document.getElementById('scene').textContent = JSON.stringify(scene, null, 2);
-          status.textContent = 'Sample scene loaded. No simulation has been run.';
-        } catch (error) {
-          status.textContent = `Could not load scene: ${error.message}`;
-        }
-      }
-      loadScene();
-    </script>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crowd — Rehearse the room</title>
+<style>
+:root{font:14px/1.5 system-ui,-apple-system,sans-serif;color:#20362f;background:#f2f4ef;--green:#176b50;--line:#d6dfd5;--muted:#68786c}
+*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button,select,input[type=file]{cursor:pointer}button{border:1px solid var(--line);border-radius:7px;background:white;color:inherit;padding:9px 15px;font-weight:600}button:hover:not(:disabled){background:#eaf1e9}button:disabled{opacity:.45;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible,canvas:focus-visible{outline:3px solid #53a98d;outline-offset:3px}
+header{padding:22px 32px;display:flex;align-items:center;gap:18px;border-bottom:1px solid var(--line);background:#fcfdf9}h1{font-size:27px;letter-spacing:-1px;margin:0}h1 span{color:var(--green)}.eyebrow{font-size:10px;font-weight:700;letter-spacing:1.7px;text-transform:uppercase;color:var(--muted)}header p{margin:0;color:var(--muted)}header .files{margin-left:auto;display:flex;align-items:center;gap:10px}.filename{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
+main{padding:22px 32px;max-width:1800px;margin:auto}.scenario{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:18px}.scenario label{display:grid;gap:4px;color:var(--muted);font-size:11px;font-weight:600}.scenario input,.scenario select{width:100px;border:1px solid var(--line);padding:8px 10px;border-radius:6px;background:#fcfdf9;color:#20362f}.scenario select{width:154px}.scenario button{margin-left:auto;min-width:145px;padding:11px 18px;background:var(--green);border-color:var(--green);color:white}.scenario button:hover:not(:disabled){background:#10533e}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 268px;gap:18px}.stage{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#eaf0e7}.canvas-wrap{height:clamp(410px,calc(100vh - 280px),760px);min-width:0}canvas{display:block;width:100%;height:100%;touch-action:none}.scene-tag{position:absolute;top:20px;left:22px;pointer-events:none}.scene-tag strong{display:block;font-size:15px;margin-top:4px}.metrics{position:absolute;right:18px;top:16px;background:#fffffff0;border:1px solid #dce4d9;border-radius:9px;padding:12px 16px;max-width:350px;pointer-events:none}.metric-pair{display:flex;gap:26px}.metric-pair span{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);display:block}.metric-pair strong{font-size:27px;letter-spacing:-.8px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.2}.accounting{font-size:10px;color:var(--muted);margin-top:8px;max-width:310px}.legend{display:flex;gap:13px;flex-wrap:wrap;align-items:center;padding:10px 18px;border-top:1px solid var(--line);background:#fcfdf9;font-size:10px;color:var(--muted)}.legend span{white-space:nowrap}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}.ramp{margin-left:auto;display:flex;align-items:center;gap:6px}.ramp i{width:65px;height:6px;border-radius:3px;background:linear-gradient(90deg,#79be76,#edca61,#cc4f44)}
+.transport{display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid var(--line);background:white}.transport select{border:1px solid var(--line);border-radius:6px;padding:8px;background:white}.transport input[type=range]{min-width:60px;flex:1;accent-color:var(--green)}.clock{min-width:116px;text-align:right}.clock output{display:block;font-size:29px;line-height:1.1;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-1px}.clock small{font-size:10px;color:var(--muted)}.heat-label{font-size:11px;display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer}.heat-label input{accent-color:var(--green)}
+aside{background:#fcfdf9;border:1px solid var(--line);border-radius:12px;padding:20px;align-self:start;min-height:350px}aside h2{font-size:19px;margin:7px 0 4px;letter-spacing:-.4px}aside p{font-size:12px;color:var(--muted)}#person-select{width:100%;padding:8px;margin:12px 0;border:1px solid var(--line);border-radius:6px;background:white;color:inherit}#person-state{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--green)}.events{list-style:none;padding:0;margin:12px 0}.events li{position:relative;margin-left:4px;padding:0 0 18px 18px;border-left:1px solid var(--line);font-size:12px}.events li:before{content:'';position:absolute;left:-4px;top:5px;width:7px;height:7px;border-radius:50%;background:#789684}.events li:last-child{border:0}.events li.future{opacity:.4}.events strong{display:block;font-size:12px;font-weight:600}.events time{font-variant-numeric:tabular-nums;color:var(--muted)}.events small{display:block;color:var(--muted);font-size:11px}.note{border-top:1px solid var(--line);padding-top:14px;font-size:10px!important}.status-row{display:flex;justify-content:space-between;gap:16px;margin-top:12px;font-size:11px;color:var(--muted)}#status{margin:0}#status.error{color:#a6332d}.status-row span{white-space:nowrap}
+@media(max-width:1000px){header,main{padding:18px}.workspace{grid-template-columns:minmax(0,1fr) 230px}.metrics{padding:10px;max-width:265px}.metric-pair{gap:16px}.metric-pair strong{font-size:23px}.scene-tag strong{font-size:12px}.heat-label{display:none}}
+@media(max-width:760px){header p,.filename{display:none}.workspace{grid-template-columns:1fr}.canvas-wrap{height:460px}.scenario{gap:8px}.scenario label{flex:1}.scenario input,.scenario select{width:100%;min-width:70px}.scenario button{margin:0;flex:1}.transport{gap:7px;padding:12px}.transport button{padding:8px}.clock{min-width:92px}.clock output{font-size:23px}.scene-tag{top:18px;left:14px}.scene-tag strong{max-width:110px}.metrics{right:10px;max-width:245px}.legend{gap:9px}.ramp{margin-left:0}.status-row span{display:none}aside{min-height:180px}}
+</style>
+</head>
+<body>
+<header><h1>Crowd<span>·</span></h1><div><div class="eyebrow">Layout rehearsal</div><p>See how the room moves.</p></div><div class="files"><span id="filename" class="filename">Sample room</span><button id="open-file" title="Preview a file in this tab. Run sends the scene to the local simulator.">Open scene</button><input id="file" type="file" accept=".json,application/json" hidden></div></header>
+<main>
+<form id="scenario" class="scenario">
+<label>People<input id="n-people" type="number" min="1" max="1000" step="1" value="150" required></label>
+<label>Arrivals · seconds<input id="arrival" type="number" min="0.1" step="0.1" value="600" required></label>
+<label>Arrival pattern<select id="pattern"><option value="front_loaded">Front-loaded</option><option value="uniform">Uniform</option></select></label>
+<label>Horizon · seconds<input id="horizon" type="number" min="0.1" step="0.1" value="1200" required></label>
+<label>Seed<input id="seed" type="number" min="0" step="1" value="1" required></label>
+<button id="run" type="submit" disabled>Run rehearsal ↗</button>
+</form>
+<div class="workspace">
+<section class="stage" aria-label="Layout and playback">
+<div class="canvas-wrap"><canvas id="room" tabindex="0" aria-label="Top-down event room. Click a person to inspect their events; the person selector is a keyboard alternative."></canvas></div>
+<div class="scene-tag"><div class="eyebrow">Top-down · metres</div><strong id="scene-title">The sample room</strong></div>
+<div class="metrics" aria-label="Engine measurements for the full run"><div class="metric-pair"><div><span>Max wait · s</span><strong id="max-wait">—</strong></div><div><span>Walkway conflict · person-s</span><strong id="conflict">—</strong></div></div><div id="accounting" class="accounting">Run a rehearsal to see measured trade-offs.</div></div>
+<div class="legend"><span><i class="dot" style="background:#4479b4"></i>Walking</span><span><i class="dot" style="background:#cf9d31"></i>Queued</span><span><i class="dot" style="background:#8a60ae"></i>In service</span><span><i class="dot" style="background:#d25242"></i>Overflow</span><span><i class="dot" style="background:#3e926d"></i>Done</span><span class="ramp">Density <i></i> high</span></div>
+<div class="transport"><button id="play" disabled aria-label="Play rehearsal">▶ Play</button><select id="speed" aria-label="Playback speed"><option value="1">1×</option><option value="10" selected>10×</option></select><input id="scrubber" aria-label="Simulation time" type="range" min="0" max="1200" value="0" step="0.05" disabled><label class="heat-label"><input id="heat" type="checkbox" checked>Density</label><div class="clock"><output id="clock">00:00.0</output><small id="clock-label">SIM TIME · 10×</small></div></div>
+</section>
+<aside><div class="eyebrow">Follow a person</div><h2 id="person-title">Every wait has a story.</h2><div id="person-state"></div><select id="person-select" aria-label="Inspect a person" disabled><option value="">Choose a person</option></select><p id="person-hint">Run the room, then click a person to see when they joined the queue and reached service.</p><ol id="events" class="events"></ol><p class="note">People ahead counts earlier queue joins still awaiting service. Density averages the preceding ten seconds of measured positions. Completed people remain marked at their destination.</p></aside>
+</div>
+<div class="status-row"><p id="status" role="status" aria-live="polite">Loading the sample room…</p><span>2D rehearsal · deterministic measurements</span></div>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id), canvas = $('room'), ctx = canvas.getContext('2d');
+const colors = {walking:'#4479b4',queued:'#cf9d31',in_service:'#8a60ae',overflow:'#d25242',done:'#3e926d'};
+const base = document.createElement('canvas'), ink = document.createElement('canvas'), heat = document.createElement('canvas');
+const bg = base.getContext('2d'), fg = ink.getContext('2d'), hg = heat.getContext('2d');
+let scene = null, result = null, frames = null, people = [], ids = [], frameCount = 0, frameDt = .2;
+let time = 0, duration = 0, playing = false, busy = false, selected = -1, drawn = [], raf = 0, lastStamp = null;
+let width = 1, height = 1, dpr = 1, fit = {scale:1,x:0,y:0}, bounds, heatBucket = -1, sceneVersion = 0;
+const fmt = value => value == null ? '—' : Number(value).toLocaleString(undefined,{maximumFractionDigits:1});
+function clock(value) { const tenths=Math.round(value*10+1e-8), minutes=Math.floor(tenths/600), seconds=((tenths%600)/10).toFixed(1).padStart(4,'0'); return `${String(minutes).padStart(2,'0')}:${seconds}`; }
+function status(message, error=false) { $('status').textContent=message; $('status').classList.toggle('error',error); }
+function point(p) { return [fit.x+p[0]*fit.scale,fit.y-p[1]*fit.scale]; }
+function path(context, poly, close=true) { context.beginPath(); poly.forEach((p,i)=>{const [x,y]=point(p); if(i)context.lineTo(x,y);else context.moveTo(x,y);}); if(close)context.closePath(); }
+function label(context, text, poly, color='#536558') { const xs=poly.map(p=>p[0]),ys=poly.map(p=>p[1]); const [x,y]=point([(Math.min(...xs)+Math.max(...xs))/2,(Math.min(...ys)+Math.max(...ys))/2]); context.fillStyle=color;context.font='10px system-ui';context.textAlign='center';context.textBaseline='middle';context.fillText(text,x,y); }
+function name(id) { return id.replaceAll('_',' ').replaceAll('-',' '); }
+function hatch(context, poly, color, spacing=9) { context.save();path(context,poly);context.clip();context.strokeStyle=color;context.lineWidth=1;context.beginPath();for(let x=-height;x<width+height;x+=spacing){context.moveTo(x,0);context.lineTo(x+height,height);}context.stroke();context.restore(); }
+function region(context, item, fill, stroke) { path(context,item.poly);if(fill){context.fillStyle=fill;context.fill();}if(stroke){context.strokeStyle=stroke;context.lineWidth=1.2;context.stroke();} }
+function resize() {
+  width=canvas.clientWidth;height=canvas.clientHeight;dpr=Math.min(window.devicePixelRatio||1,2);
+  for(const c of [canvas,base,ink]){c.width=Math.round(width*dpr);c.height=Math.round(height*dpr);}
+  for(const c of [ctx,bg,fg])c.setTransform(dpr,0,0,dpr,0,0);
+  if(scene){const xs=scene.walkable.map(p=>p[0]),ys=scene.walkable.map(p=>p[1]);bounds=[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
+    const [x0,y0,x1,y1]=bounds, top=120, bottom=40, pad=36;
+    const scale=Math.min((width-2*pad)/(x1-x0),(height-top-bottom)/(y1-y0));
+    fit={scale,x:(width-(x1-x0)*scale)/2-x0*scale,y:top+(height-top-bottom-(y1-y0)*scale)/2+y1*scale};
+    rebuildRoom();}
+  requestRender();
+}
+function rebuildRoom() {
+  bg.clearRect(0,0,width,height);fg.clearRect(0,0,width,height);
+  path(bg,scene.walkable);bg.fillStyle='#fcfdf8';bg.fill();bg.strokeStyle='#a9baaa';bg.lineWidth=2;bg.stroke();
+  for(const w of scene.walkways){region(bg,w,'#edf3e8');hatch(bg,w.poly,'#d3dfcb',12);}
+  for(const d of scene.destinations){fg.setLineDash([5,4]);region(fg,d,null,'#699a83');fg.setLineDash([]);label(fg,name(d.id),d.poly,'#56806b');}
+  for(const o of scene.obstacles){region(fg,o,'#dce3d9','#829784');if(o.locked)hatch(fg,o.poly,'#b5c3b1',7);label(fg,`${o.locked?'⊠ ':''}${name(o.id)}`,o.poly);}
+  for(const e of scene.entrances){region(fg,e,'#cae6d4','#539775');label(fg,'IN',e.poly,'#285f44');}
+  for(const e of scene.exits){region(fg,e,'#e0ebf0','#8aa9ba');label(fg,'EXIT',e.poly,'#4c778b');}
+  for(const target of scene.targets){path(fg,target.queue_polyline,false);fg.strokeStyle='#b3965c';fg.lineWidth=2;fg.setLineDash([2,5]);fg.stroke();fg.setLineDash([]);
+    const services=target.service_positions?.length?target.service_positions:[target.queue_polyline[0]];
+    for(const p of services){const [x,y]=point(p),side=.3*fit.scale;fg.fillStyle='#9479b6';fg.fillRect(x-side/2,y-side/2,side,side);fg.strokeStyle='white';fg.strokeRect(x-side/2,y-side/2,side,side);}
+    const [tx,ty]=point(target.queue_polyline.at(-1));fg.fillStyle='#9b8356';fg.font='9px system-ui';fg.textAlign='left';fg.fillText('queue tail',tx+8,ty-9);}
+  const [x0,y0,x1]=bounds;fg.fillStyle='#8b9c8b';fg.font='9px system-ui';fg.textAlign='center';
+  for(let x=Math.ceil(x0/2)*2;x<=x1;x+=2){const [px,py]=point([x,y0]);fg.fillText(`${x} m`,px,py+19);}
+}
+function validateScene(data) {
+  if(!data||data.units!=='m')throw Error('Scene units must be "m".');
+  const ring=poly=>Array.isArray(poly)&&poly.length>=3&&poly.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite));
+  if(!ring(data.walkable))throw Error('Walkable must be a polygon of finite [x, y] coordinates.');
+  const xs=data.walkable.map(p=>p[0]),ys=data.walkable.map(p=>p[1]);
+  if(Math.max(...xs)<=Math.min(...xs)||Math.max(...ys)<=Math.min(...ys))throw Error('Walkable polygon has no area.');
+  const seen=new Set();
+  for(const key of ['obstacles','entrances','exits','targets','walkways','destinations']){
+    if(!Array.isArray(data[key]))throw Error(`Scene needs a ${key} list.`);
+    for(const item of data[key]){if(typeof item.id!=='string'||!item.id||seen.has(item.id)||!ring(item.poly))throw Error(`Invalid or duplicate region in ${key}.`);seen.add(item.id);}
+  }
+  for(const key of ['entrances','exits','targets','destinations'])if(!data[key].length)throw Error(`Scene needs at least one ${key} region.`);
+  for(const t of data.targets){if(!Array.isArray(t.queue_polyline)||t.queue_polyline.length<2||!t.queue_polyline.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite)))throw Error('Invalid queue polyline.');
+    if(t.service_positions!==undefined&&(!Array.isArray(t.service_positions)||!t.service_positions.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite))))throw Error('Invalid service positions.');}
+  return data;
+}
+function clearRun() {
+  playing=false;lastStamp=null;result=null;frames=null;people=[];ids=[];drawn=[];time=0;selected=-1;heatBucket=-1;
+  $('play').disabled=true;$('scrubber').disabled=true;$('person-select').disabled=true;
+  $('person-select').replaceChildren(new Option('Choose a person',''));$('max-wait').textContent='—';$('conflict').textContent='—';
+  $('accounting').textContent='Run a rehearsal to see measured trade-offs.';showPerson();
+}
+function loadScene(data, filename) { scene=validateScene(data);clearRun();$('filename').textContent=filename;$('scene-title').textContent=filename==='Sample room'?'The sample room':filename;$('run').disabled=false;resize(); }
+function setBusy(value) { busy=value;for(const el of $('scenario').elements)el.disabled=value;$('open-file').disabled=value;$('file').disabled=value;$('run').disabled=value||!scene;$('run').textContent=value?'Rehearsing…':'Run rehearsal ↗'; }
+async function responseError(response) { let data;try{data=await response.json();}catch{return `HTTP ${response.status}`;}return typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||data); }
+async function runScene(event) {
+  event.preventDefault();if(busy||!scene||!$('scenario').reportValidity())return;
+  playing=false;lastStamp=null;setBusy(true);requestRender();status('Rehearsing the room. You can inspect the previous playback while this runs.');
+  const scenario={n_people:Number($('n-people').value),arrival_window_s:Number($('arrival').value),arrival_pattern:$('pattern').value,seed:Number($('seed').value),horizon_s:Number($('horizon').value),mode:'queue'};
+  try{
+    const response=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene,scenario})});
+    if(!response.ok)throw Error(await responseError(response));const next=await response.json();
+    const binary=await fetch(`/api/frames/${encodeURIComponent(next.run_id)}`);if(!binary.ok)throw Error(await responseError(binary));
+    const nextCount=Number(binary.headers.get('X-Frame-Count')), n=Number(binary.headers.get('X-Person-Count')), dt=Number(binary.headers.get('X-Frame-Dt-S'));
+    const nextIds=JSON.parse(binary.headers.get('X-Person-Ids')||'null'), buffer=await binary.arrayBuffer();
+    if(!Number.isInteger(nextCount)||nextCount<1||n!==scenario.n_people||dt!==.2||!Array.isArray(nextIds)||nextIds.length!==n||buffer.byteLength!==nextCount*n*2*4)throw Error('Frame data does not match its metadata.');
+    const nextFrames=new Float32Array(buffer);if(new Uint8Array(new Uint16Array([1]).buffer)[0]!==1){const view=new DataView(buffer);for(let i=0;i<nextFrames.length;i++)nextFrames[i]=view.getFloat32(i*4,true);}
+    const nextPeople=nextIds.map(id=>{if(!Array.isArray(next.events[id]))throw Error(`Missing events for ${id}.`);const timeline=Object.fromEntries(next.events[id].map(e=>[e.kind,e]));return {id,events:next.events[id],timeline};});
+    result=next;frames=nextFrames;frameCount=nextCount;frameDt=dt;ids=nextIds;people=nextPeople;duration=scenario.horizon_s;time=0;selected=-1;heatBucket=-1;playing=false;lastStamp=null;
+    $('scrubber').max=String(duration);$('scrubber').disabled=false;$('play').disabled=false;$('person-select').disabled=false;
+    $('person-select').replaceChildren(new Option('Choose a person',''),...ids.map((id,i)=>new Option(`Person ${id.slice(1)}`,String(i))));
+    $('max-wait').textContent=fmt(result.metrics.max_wait_s);$('conflict').textContent=fmt(result.metrics.walkway_conflict_person_s);
+    $('accounting').textContent='At horizon · '+['not_arrived','walking','queued','in_service','done'].map(key=>`${key.replaceAll('_',' ')} ${result.accounting[key]}`).join(' · ');
+    status('Rehearsal ready. Play, scrub, or click a person.');showPerson();requestRender();
+  }catch(error){status(`Could not run rehearsal: ${error.message}`,true);}finally{setBusy(false);}
+}
+function stateAt(person, t) {
+  const e=person.timeline, passed=kind=>e[kind]&&e[kind].time_s<=t+1e-8;
+  if(!passed('spawned'))return 'not_arrived';if(passed('seated'))return 'done';if(passed('service_end'))return 'walking';
+  if(passed('service_start'))return 'in_service';if(passed('queue_overflow'))return 'overflow';if(passed('joined_queue'))return 'queued';return 'walking';
+}
+function personPosition(index, state) {
+  const p=people[index];if(state==='done')return p.timeline.seated.position;
+  const f=Math.min(Math.floor(time/frameDt),frameCount-1), next=Math.min(f+1,frameCount-1), fraction=Math.min(1,time/frameDt-f);
+  const offset=(f*people.length+index)*2, nextOffset=(next*people.length+index)*2;
+  if(Number.isFinite(frames[offset])&&Number.isFinite(frames[nextOffset]))return [frames[offset]+(frames[nextOffset]-frames[offset])*fraction,frames[offset+1]+(frames[nextOffset+1]-frames[offset+1])*fraction];
+  if(Number.isFinite(frames[offset]))return [frames[offset],frames[offset+1]];
+  if(Number.isFinite(frames[nextOffset]))return [frames[nextOffset],frames[nextOffset+1]];
+  // Never discard an overflow person because a sample is absent: retain the native tail.
+  if(state==='overflow'){const target=scene.targets.find(t=>t.id===p.timeline.queue_overflow.target_id);if(target)return target.queue_polyline.at(-1);}
+  return p.timeline.spawned?.position;
+}
+function updateHeat(frame) {
+  const bucket=Math.floor(frame/5)*5;if(bucket===heatBucket)return;heatBucket=bucket;
+  const [x0,y0,x1,y1]=bounds, cols=Math.ceil((x1-x0)/.5), rows=Math.ceil((y1-y0)/.5), counts=new Float32Array(cols*rows);
+  const first=Math.max(0,bucket-49), last=Math.min(bucket,frameCount-1), samples=last-first+1;
+  for(let f=first;f<=last;f++)for(let p=0;p<people.length;p++){const i=(f*people.length+p)*2,x=frames[i],y=frames[i+1];if(!Number.isFinite(x)||!Number.isFinite(y))continue;const col=Math.floor((x-x0)/.5),row=Math.floor((y-y0)/.5);if(col>=0&&col<cols&&row>=0&&row<rows)counts[row*cols+col]++;}
+  heat.width=cols;heat.height=rows;const pixels=hg.createImageData(cols,rows);
+  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){const density=counts[row*cols+col]/(samples*.25);if(!density)continue;const value=Math.min(density/3,1),a=value<.5?[103,182,105]:[232,191,79],b=value<.5?[232,191,79]:[201,63,52],mix=value<.5?value*2:(value-.5)*2,j=((rows-1-row)*cols+col)*4;for(let c=0;c<3;c++)pixels.data[j+c]=a[c]+(b[c]-a[c])*mix;pixels.data[j+3]=Math.round(55+value*90);}
+  hg.putImageData(pixels,0,0);
+}
+function showPerson() {
+  const p=people[selected];$('events').replaceChildren();$('person-select').value=p?String(selected):'';
+  $('person-title').textContent=p?`Person ${p.id.slice(1)}`:'Every wait has a story.';$('person-state').textContent=p?stateAt(p,time).replaceAll('_',' '):'';
+  $('person-hint').hidden=!!p;if(!p)return;
+  const names={spawned:'Entered the room',joined_queue:'Joined queue',queue_overflow:'Queue overflow',service_start:'Service started',service_end:'Service ended',seated:'Reached destination'};
+  for(const event of p.events){const li=document.createElement('li'),title=document.createElement('strong'),when=document.createElement('time');li.dataset.time=event.time_s;title.textContent=names[event.kind]||name(event.kind);when.textContent=`${clock(event.time_s)} · ${fmt(event.time_s)} s`;li.append(title,when);
+    if(event.kind==='joined_queue'){const ahead=document.createElement('small');ahead.textContent=`People ahead at join: ${event.people_ahead??'unavailable'}`;li.append(ahead);}$('events').append(li);}
+}
+function draw() {
+  ctx.clearRect(0,0,width,height);drawn=[];if(!scene)return;
+  ctx.drawImage(base,0,0,width,height);
+  if(frames&&$('heat').checked){updateHeat(Math.min(Math.floor(time/frameDt),frameCount-1));ctx.save();path(ctx,scene.walkable);ctx.clip();ctx.imageSmoothingEnabled=false;const [x,y]=point([bounds[0],bounds[1]+heat.height*.5]);ctx.drawImage(heat,x,y,heat.width*.5*fit.scale,heat.height*.5*fit.scale);ctx.restore();}
+  ctx.drawImage(ink,0,0,width,height);
+  const radius=.175*fit.scale;
+  for(let i=0;i<people.length;i++){const state=stateAt(people[i],time);if(state==='not_arrived')continue;const position=personPosition(i,state);if(!position||!position.every(Number.isFinite))continue;const [x,y]=point(position);drawn.push({i,x,y,state});}
+  drawn.sort((a,b)=>(a.state!=='done')-(b.state!=='done'));
+  for(const p of drawn){ctx.beginPath();ctx.arc(p.x,p.y,radius,0,Math.PI*2);ctx.fillStyle=colors[p.state];ctx.fill();ctx.strokeStyle='#ffffffb0';ctx.lineWidth=.7;ctx.stroke();}
+  const chosen=drawn.find(p=>p.i===selected);if(chosen){ctx.beginPath();ctx.arc(chosen.x,chosen.y,radius+3,0,Math.PI*2);ctx.strokeStyle='#163b2c';ctx.lineWidth=2;ctx.stroke();}
+  $('clock').textContent=clock(time);$('clock-label').textContent=`SIM TIME · ${$('speed').value}×`;$('scrubber').value=String(time);$('scrubber').setAttribute('aria-valuetext',`${time.toFixed(1)} simulation seconds`);
+  $('play').textContent=playing?'❚❚ Pause':time>=duration&&frames?'↻ Replay':'▶ Play';$('play').setAttribute('aria-label',playing?'Pause rehearsal':'Play rehearsal');
+  if(selected>=0){$('person-state').textContent=stateAt(people[selected],time).replaceAll('_',' ');for(const li of $('events').children)li.classList.toggle('future',Number(li.dataset.time)>time);}
+}
+function tick(stamp) {
+  raf=0;if(playing&&lastStamp!==null)time=Math.min(duration,time+(stamp-lastStamp)/1000*Number($('speed').value));lastStamp=stamp;
+  if(time>=duration)playing=false;draw();if(playing)raf=requestAnimationFrame(tick);
+}
+function requestRender() { if(!raf)raf=requestAnimationFrame(tick); }
+function seek(value) { playing=false;lastStamp=null;time=Math.max(0,Math.min(duration,value));requestRender(); }
+$('scenario').addEventListener('submit',runScene);
+$('play').addEventListener('click',()=>{if(!frames)return;if(time>=duration)time=0;playing=!playing;lastStamp=null;requestRender();});
+$('speed').addEventListener('change',()=>{lastStamp=null;requestRender();});$('heat').addEventListener('change',requestRender);
+$('scrubber').addEventListener('input',event=>seek(Number(event.target.value)));
+$('person-select').addEventListener('change',event=>{selected=event.target.value===''?-1:Number(event.target.value);showPerson();requestRender();});
+canvas.addEventListener('click',event=>{const rect=canvas.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;const hits=drawn.filter(p=>Math.hypot(p.x-x,p.y-y)<=Math.max(8,.175*fit.scale+3)).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y));selected=hits.length?hits[(hits.findIndex(p=>p.i===selected)+1)%hits.length].i:-1;showPerson();requestRender();});
+canvas.addEventListener('keydown',event=>{if(event.code==='Space'&&frames){event.preventDefault();$('play').click();}if(event.key==='ArrowRight'){event.preventDefault();seek(time+1);}if(event.key==='ArrowLeft'){event.preventDefault();seek(time-1);}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){playing=false;lastStamp=null;requestRender();}});
+$('open-file').addEventListener('click',()=>$('file').click());
+$('file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;const version=++sceneVersion;try{const data=JSON.parse(await file.text());if(version!==sceneVersion)return;loadScene(data,file.name);status('Scene opened locally. Ready to rehearse.');}catch(error){status(`Could not open scene: ${error.message}`,true);}finally{event.target.value='';}});
+new ResizeObserver(resize).observe(canvas);
+(async()=>{const version=++sceneVersion;try{const response=await fetch('/api/scene');if(!response.ok)throw Error(await responseError(response));const data=await response.json();if(version!==sceneVersion)return;loadScene(data,'Sample room');status('Sample room ready. Run a rehearsal to see where the queue spills into the walkway.');}catch(error){if(version===sceneVersion)status(`Could not load sample: ${error.message}. Open a scene file to continue.`,true);}})();
+</script>
+</body>
 </html>
