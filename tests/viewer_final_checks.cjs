@@ -376,6 +376,37 @@ async function runChecks() {
     assert.equal(cells(viewer.elements.get('metric-comparison')).some(cell => cell.className === 'better'), true, 'complete comparisons retain meaningful delta colors');
     assert.equal(viewer.network.length, 0);
   });
+  await check('room names are human-readable in the header, title and saved-room display helper', async () => {
+    const viewer = createViewer();
+    for (const [filename, expected] of [
+      ['venue_v3.json', 'Puck Building, 3rd floor'],
+      ['Venue_V3_alternative.json', 'Puck Building, 3rd floor'],
+      ['sample_room.json', 'Sample room'],
+      ['Sample room', 'Sample room'],
+      ['venue_v1_west.json', 'Venue V1 West'],
+    ]) {
+      viewer.sandbox.nameFixture = filename;
+      viewer.evaluate('loadScene(clone(fixtureScene),nameFixture)');
+      assert.equal(viewer.elements.get('filename').textContent, expected);
+      assert.equal(viewer.evaluate('roomName()'), expected);
+      assert.equal(viewer.evaluate('displayRoomName(nameFixture)'), expected);
+      assert.match(viewer.elements.get('scene-title').textContent, new RegExp(expected));
+    }
+    assert.match(html, /id="open-file"[^>]*>Open a room</);
+  });
+  await check('object labels show readable names and Locked while plan staffing uses correct plurals', async () => {
+    const viewer = createViewer(), labels = [];
+    viewer.elements.get('room').getContext('2d').fillText = text => labels.push(text);
+    const before = plain(viewer.evaluate('scene'));
+    viewer.evaluate('rebuildRoom()');
+    assert.ok(labels.includes('Dining 1 · Locked'));
+    assert.ok(labels.includes('Check In Desk'));
+    assert.deepEqual(plain(viewer.evaluate('scene')), before, 'display labels must not rename JSON object IDs');
+    viewer.evaluate('scene.targets[0].service_positions=scene.targets[0].service_positions.slice(0,1);updatePlanTitle()');
+    assert.match(viewer.elements.get('scene-title').textContent, /1 volunteer$/);
+    assert.equal(viewer.evaluate('volunteerLabel(2)'), '2 volunteers');
+    assert.equal(viewer.evaluate("humanName('dining_table_left')"), 'Dining Table Left');
+  });
   return passed;
 }
 
