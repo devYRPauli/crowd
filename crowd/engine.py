@@ -67,8 +67,8 @@ def dinner_seat_positions(scene: Scene) -> list[dict]:
     """Schematic anchors: six at radius .9 m per table; two per 2 m sofa segment.
 
     Round tables remain their supplied impassable polygons in native physics.
-    Anchors can therefore overlap square table corners; only release positions
-    must have native clearance. Banquettes are split along their long axis using
+    Anchors can overlap square table corners; actual assigned positions are
+    adjusted onto distinct clear floor before native initialization. Banquettes are split along their long axis using
     max(1, floor(length / 2 m)) segments because scenes contain no segment metadata.
     """
     anchors = []
@@ -112,7 +112,7 @@ def _dinner_waves(people: list[dict], scenario: Scenario) -> None:
     def group_position(group):
         members = groups[group]
         seated = [p for p in members if p["placement_kind"] == "seat"] or members
-        return (float(np.mean([p["seat_position"][0] for p in seated])), group)
+        return (float(np.mean([p.get("seat_anchor", p["seat_position"])[0] for p in seated])), group)
     ordered = sorted(groups, key=group_position)
     for wave, group_ids in enumerate(np.array_split(ordered, scenario.wave_count)):
         for group in group_ids:
@@ -125,16 +125,19 @@ def _dinner_people(scene: Scene, scenario: Scenario, people: list[dict]) -> list
     rng = np.random.default_rng(np.random.SeedSequence([scenario.seed, 0xD199E]))
     assignments = rng.permutation(len(people))
     zone = dinner_standing_zone(scene)
-    if len(people) > len(anchors) and zone.is_empty:
-        raise ValueError("Dinner call has no standing zone outside table buffers, walkways and queue")
+    anchor_zone = zone
+    if anchor_zone.is_empty:
+        anchor_zone = Polygon(scene.walkable).difference(unary_union([Polygon(o.poly) for o in scene.obstacles])).buffer(-RADIUS - .01)
+    if len(people) > len(anchors) and anchor_zone.is_empty:
+        raise ValueError("Dinner call has no free floor for standing positions")
     for offset, person_index in enumerate(assignments):
         if offset < len(anchors):
             anchor = anchors[offset]
         else:
-            x0, y0, x1, y1 = zone.bounds
+            x0, y0, x1, y1 = anchor_zone.bounds
             for _ in range(100000):
                 position = [float(rng.uniform(x0, x1)), float(rng.uniform(y0, y1))]
-                if zone.contains(Point(position)):
+                if anchor_zone.contains(Point(position)):
                     break
             else:
                 raise ValueError("Could not sample a dinner standing position inside the standing zone")
@@ -142,6 +145,27 @@ def _dinner_people(scene: Scene, scenario: Scenario, people: list[dict]) -> list
             anchor = {"seat_position": position, "seat_group": nearest["seat_group"] if nearest else f"standing_{person_index}",
                       "placement_kind": "standing"}
         people[int(person_index)].update({**anchor, "seat_position": list(anchor["seat_position"])})
+    floor = Polygon(scene.walkable).difference(unary_union([Polygon(o.poly) for o in scene.obstacles]))
+    excluded = [Polygon(w.poly).buffer(RADIUS + .01) for w in scene.walkways]
+    excluded += [LineString(t.queue_polyline).buffer(2 * RADIUS + .03) for t in scene.targets]
+    excluded += [Point(position).buffer(2 * RADIUS + .03) for t in scene.targets for position in t.service_positions]
+    excluded += [Polygon(opening.poly).buffer(RADIUS + .01) for opening in [*scene.entrances, *scene.exits]]
+    route_floor = floor.buffer(-RADIUS - .0001, join_style=2)
+    parts = [route_floor] if route_floor.geom_type == "Polygon" else list(route_floor.geoms)
+    connected = max((part for part in parts if part.geom_type == "Polygon"), key=lambda part: part.area)
+    available = connected.buffer(-.01).difference(unary_union(excluded))
+    for person_index in assignments:
+        person = people[int(person_index)]
+        anchor = list(person["seat_position"])
+        preferred = available.intersection(zone) if person["placement_kind"] == "standing" else available
+        spillover = preferred.is_empty
+        free = available if spillover else preferred
+        if free.is_empty:
+            raise ValueError("Dinner population exceeds distinct seat/standing positions outside queues and walkways")
+        position = list(nearest_points(Point(anchor), free)[1].coords[0])
+        person.update(seat_anchor=anchor, seat_position=position,
+                      seat_adjustment_m=math.dist(anchor, position), standing_overflow=spillover and person["placement_kind"] == "standing")
+        available = available.difference(Point(position).buffer(2 * RADIUS + .03))
     if scenario.arrival_pattern == "waves":
         _dinner_waves(people, scenario)
     return _validated_people(scene, scenario, people)
@@ -197,7 +221,7 @@ def _validated_people(scene: Scene, scenario: Scenario, people: list[dict], *, c
     fields = {"id", "arrival_s", "preferred_speed_m_s", "service_s", "entrance_id",
               "target_id", "destination_id", "spawn_choice"}
     if scenario.mode == "dinner_call":
-        fields |= {"seat_position", "seat_group", "placement_kind"}
+        fields |= {"seat_position", "seat_anchor", "seat_adjustment_m", "standing_overflow", "seat_group", "placement_kind"}
     if not isinstance(people, list) or len(people) != scenario.n_people:
         raise ValueError("Presampled people count must equal scenario.n_people")
     references = {
@@ -239,7 +263,19 @@ def _validated_people(scene: Scene, scenario: Scenario, people: list[dict], *, c
                 raise ValueError(f"Presampled person {identifier}: invalid dinner seat_position")
             if not isinstance(person["seat_group"], str) or not person["seat_group"] or person["placement_kind"] not in {"seat", "standing"}:
                 raise ValueError(f"Presampled person {identifier}: invalid dinner seat group or placement")
+            if (not isinstance(person["seat_anchor"], list) or len(person["seat_anchor"]) != 2
+                    or any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in person["seat_anchor"])
+                    or not isinstance(person["standing_overflow"], bool)
+                    or not isinstance(person["seat_adjustment_m"], (int, float)) or not math.isfinite(person["seat_adjustment_m"])
+                    or person["seat_adjustment_m"] < 0):
+                raise ValueError(f"Presampled person {identifier}: invalid dinner anchor metadata")
+            floor = Polygon(scene.walkable).difference(unary_union([Polygon(o.poly) for o in scene.obstacles]))
+            if not floor.buffer(-RADIUS - .0001, join_style=2).covers(Point(position)):
+                raise ValueError(f"Presampled person {identifier}: dinner seat_position lacks connected native clearance")
             record["seat_position"] = list(position)
+            record["seat_anchor"] = list(person["seat_anchor"])
+        if scenario.mode == "dinner_call" and any(math.dist(record["seat_position"], other["seat_position"]) < 2 * RADIUS + .02 for other in copied):
+            raise ValueError(f"Presampled person {identifier}: dinner seat_position overlaps another guest")
         copied.append(record)
     return copied
 
@@ -447,11 +483,11 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
     Events occur on dt boundaries; a fractional final dt measures the last state
     without stepping past the horizon. Frames use NaN pairs for absent people.
 
-    Dinner-call people have visible schematic anchors from time zero; standing
-    anchors may overlap each other. They enter native physics only on release,
-    after projection into a connected departure region with 0.4 m clearance.
-    Projection distances are recorded, obstacle geometry is unchanged, and the
-    terminal departure waypoint uses the queue's 0.6 m admission tolerance.
+    Dinner-call guests occupy distinct native waiting positions from time zero.
+    Blocked schematic anchors are moved to clear floor before simulation; those
+    adjustments remain on each person's record. Release switches the existing
+    agent journey, and returning guests remain native collision bodies at their
+    assigned positions. Queue-mode guests complete only inside an exit polygon.
     """
     scene = Scene.model_validate(scene.model_dump())
     scenario = Scenario.model_validate(scenario.model_dump())
@@ -463,19 +499,42 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
     safe_floor = floor.buffer(-RADIUS - 0.01)
     sim = jps.Simulation(model=jps.CollisionFreeSpeedModel(), geometry=floor, dt=DT)
     seats = {}
-    for destination in sorted(scene.destinations, key=lambda item: item.id):
+    destination_keys = [person["id"] if dinner else person["destination_id"] for person in people]
+    if dinner:
+        for person in people:
+            position = tuple(person["seat_position"])
+            seats[person["id"]] = (sim.add_waypoint_stage(position, .08), position)
+    exit_routes = {}
+    if not dinner:
+        for exit_region in sorted(scene.exits, key=lambda item: item.id):
+            region = Polygon(exit_region.poly)
+            usable = region.intersection(safe_floor)
+            if usable.is_empty:
+                raise ValueError(f"Exit {exit_region.id}: no agent-clear walkable position")
+            point = usable.representative_point()
+            goal = tuple(point.coords[0])
+            stage = sim.add_waypoint_stage(goal, min(.1, max(.01, point.distance(region.boundary) / 2)))
+            exit_routes[exit_region.id] = (stage, goal, region, sim.add_journey(jps.JourneyDescription([stage])))
+    destination_exits = {}
+    for destination in ([] if dinner else sorted(scene.destinations, key=lambda item: item.id)):
         polygon = Polygon(destination.poly)
         center = polygon.centroid
         if not polygon.covers(center) or not safe_floor.covers(center):
             raise ValueError(f"Destination {destination.id}: centroid is not safely walkable")
         position = tuple(center.coords[0])
         seats[destination.id] = (sim.add_waypoint_stage(position, REACHED_M), position)
+        if not dinner:
+            destination_exits[destination.id] = min(exit_routes, key=lambda key: (math.dist(position, exit_routes[key][1]), key))
     queues = _build_queues(sim, scene, safe_floor, seats)
     dinner_routes = {}
+    dinner_connector_router = None
+    dinner_connector_area = None
     if dinner:
+        dinner_connector_area = floor.buffer(-RADIUS - .0001, join_style=2)
+        dinner_connector_router = jps.RoutingEngine(dinner_connector_area)
         # Native routing on the unbuffered floor can select passages narrower
-        # than a moving person's clearance. Project only before insertion and
-        # give released people native waypoints through the tail's component.
+        # than a moving person's clearance. Give released guests native waypoint
+        # routes through the tail's component; their positions are never edited.
         clear = floor.buffer(-DINNER_ROUTE_CLEARANCE_M, join_style=2)
         components = [clear] if clear.geom_type == "Polygon" else list(clear.geoms)
         components = [part for part in components if part.geom_type == "Polygon" and not part.is_empty]
@@ -524,10 +583,25 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
     def event(person: int, kind: str, time_s: float, **details) -> None:
         events[people[person]["id"]].append({"kind": kind, "time_s": round(time_s, 9), **details})
 
+    initial_agents = {}
+    released_holding = {}
     if dinner:
+        for target in scene.targets:
+            region = Polygon(effective_overflow_area(target)).intersection(safe_floor)
+            point = tuple(region.representative_point().coords[0])
+            stage = sim.add_waypoint_stage(point, .6)
+            released_holding[target.id] = (sim.add_journey(jps.JourneyDescription([stage])), stage)
         for person, record in enumerate(people):
+            hold = sim.add_waiting_set_stage([tuple(record["seat_position"])])
+            journey = sim.add_journey(jps.JourneyDescription([hold]))
+            agent_id = sim.add_agent(jps.CollisionFreeSpeedModelAgentParameters(
+                position=tuple(record["seat_position"]), desired_speed=record["preferred_speed_m_s"],
+                radius=RADIUS, journey_id=journey, stage_id=hold))
+            initial_agents[person] = agent_id
+            agent_person[agent_id] = person
             event(person, "initially_seated", 0, position=list(record["seat_position"]),
-                  seat_group=record["seat_group"], placement_kind=record["placement_kind"])
+                  seat_anchor=list(record["seat_anchor"]), adjustment_m=record["seat_adjustment_m"],
+                  native_present=True, seat_group=record["seat_group"], placement_kind=record["placement_kind"])
 
     for step in range(step_count + 1):
         time_s = round(step * DT, 9)
@@ -576,18 +650,36 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
 
         for agent_id, agent in agents.items():
             person = agent_person[agent_id]
-            seat_stage, center = seats[people[person]["destination_id"]]
-            if agent.stage_id == seat_stage and math.dist(agent.position, center) <= REACHED_M:
-                states[person] = "done"
-                event(person, "seated", time_s, **({"position": list(center)} if dinner else {}))
-                sim.mark_agent_for_removal(agent_id)
+            if states[person] == "done":
+                continue
+            seat_stage, center = seats[destination_keys[person]]
+            if agent.stage_id == seat_stage and math.dist(agent.position, center) <= (.1 if dinner else REACHED_M):
+                if dinner:
+                    states[person] = "done"
+                    event(person, "returned_to_seat", time_s, position=list(agent.position), seat_position=list(center),
+                          placement_kind=people[person]["placement_kind"], seat_group=people[person]["seat_group"])
+                else:
+                    exit_id = destination_exits[people[person]["destination_id"]]
+                    exit_stage, _, _, exit_journey = exit_routes[exit_id]
+                    event(person, "reached_destination", time_s, position=list(agent.position))
+                    sim.switch_agent_journey(agent_id, exit_journey, exit_stage)
+            if not dinner:
+                exit_id = destination_exits[people[person]["destination_id"]]
+                exit_stage, _, exit_region, _ = exit_routes[exit_id]
+                if agent.stage_id == exit_stage and exit_region.covers(Point(agent.position)):
+                    states[person] = "done"
+                    event(person, "exited", time_s, position=list(agent.position), exit_id=exit_id)
+                    sim.mark_agent_for_removal(agent_id)
 
         while next_arrival < n and people[arrival_order[next_arrival]]["arrival_s"] <= time_s + 1e-9:
             person = arrival_order[next_arrival]
             awaiting_spawn.append(person)
             if dinner:
                 states[person] = "walking"
-                event(person, "released", time_s, position=list(people[person]["seat_position"]),
+                agent_id = initial_agents[person]
+                journey, stage = released_holding[people[person]["target_id"]]
+                sim.switch_agent_journey(agent_id, journey, stage)
+                event(person, "released", time_s, position=list(agents[agent_id].position),
                       seat_group=people[person]["seat_group"])
             next_arrival += 1
         # Promote at most one FIFO overflow occupant per target per step. A pop
@@ -638,16 +730,6 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                 continue
             admitted = None
             def attempts():
-                if dinner:
-                    free = dinner_routes[p["target_id"]][0].buffer(-1e-5)
-                    if occupied:
-                        free = free.difference(unary_union([
-                            Point(position).buffer(2 * RADIUS + .021) for position in occupied
-                        ]))
-                    if not free.is_empty:
-                        nearest = tuple(nearest_points(Point(p["seat_position"]), free)[1].coords[0])
-                        yield nearest, math.dist(nearest, p["seat_position"]) > 1e-9
-                    return
                 for j in range(len(candidates)):
                     yield candidates[(offset + j) % len(candidates)], False
                 free = spawn_fallbacks[p["entrance_id"]]
@@ -660,7 +742,13 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                     nearest = nearest_points(Point(candidates[offset]), free)[1]
                     yield tuple(nearest.coords[0]), True
 
-            for position, fallback in attempts():
+            for position, fallback in ([(tuple(agents[initial_agents[person]].position), False)] if dinner else attempts()):
+                if dinner:
+                    agent_id = initial_agents[person]
+                    sim.switch_agent_journey(agent_id, queue.journey if main_slot else holding.journey,
+                                             queue.approach if main_slot else holding.stage)
+                    admitted = (agent_id, position)
+                    break
                 if any(math.dist(position, other) <= 2 * RADIUS + 0.02 for other in occupied):
                     spawn_reasons["occupied"] += 1
                     continue
@@ -696,15 +784,14 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
             agent_person[agent_id] = person
             agents[agent_id] = sim.agent(agent_id)
             occupied.append(position)
-            states[person] = "walking"
+            states[person] = "queued" if person in joined else "walking"
             delay = max(0.0, time_s - p["arrival_s"])
             spawn_delay += delay
             fallback_spawns += int(fallback)
             release_details = {}
             if dinner:
-                projection = math.dist(position, p["seat_position"])
-                max_release_projection = max(max_release_projection, projection)
-                release_details = {"release_position": list(position), "projection_distance_m": projection}
+                release_details = {"release_position": list(position), "projection_distance_m": 0.0,
+                                   "distance_from_initial_position_m": math.dist(position, p["seat_position"])}
             event(person, "spawned", time_s, position=list(position), delay_s=delay, fallback=fallback, **release_details)
             if not main_slot:
                 event(person, "overflow_requested", time_s, holding_position=list(holding.position))
@@ -712,7 +799,12 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                 goal = queue.positions[-1] if main_slot else holding.position
                 component, router = dinner_routes[p["target_id"]]
                 destination = tuple(nearest_points(Point(goal), component.buffer(-1e-5))[1].coords[0])
-                waypoints = router.compute_waypoints(position, destination)[1:]
+                start = tuple(nearest_points(Point(position), component.buffer(-1e-5))[1].coords[0])
+                if not dinner_connector_area.contains(Point(position)):
+                    event(person, "walking_route_unavailable", time_s, reason="Current body is outside the clearance routing region; native journey retained")
+                    continue
+                connector = dinner_connector_router.compute_waypoints(position, start)[1:] if math.dist(start, position) > .01 else []
+                waypoints = connector + router.compute_waypoints(start, destination)[1:]
                 if waypoints:
                     # A tight shared terminal target would jam several bodies
                     # around an empty queue. Match native tail admission at .6 m.
@@ -729,6 +821,16 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
         # add_agent can reallocate native agent storage, invalidating old handles.
         agents = {agent.id: agent for agent in sim.agents()}
 
+        if dinner:
+            for person in awaiting_spawn:
+                target = next(t for t in scene.targets if t.id == people[person]["target_id"])
+                position = agents[initial_agents[person]].position
+                overflow.add(person)
+                if person not in joined and Polygon(effective_overflow_area(target)).covers(Point(position)):
+                    joined[person] = time_s
+                    states[person] = "queued"
+                    event(person, "joined_queue", time_s, position=list(position))
+                    event(person, "queue_overflow", time_s, position=list(position), reservation_pending=True)
         # A join is physical entry through the tail waypoint, not scheduled arrival.
         for queue in queues.values():
             requesting = [a for a in agents.values() if a.stage_id == queue.stage]
@@ -780,7 +882,7 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                 person = agent_person[head]
                 event(person, "service_dispatched", time_s, service_position=list(free_server.position),
                       position=list(agents[head].position))
-                pending_dispatch[head] = (free_server.journeys[people[person]["destination_id"]], free_server.stage)
+                pending_dispatch[head] = (free_server.journeys[destination_keys[person]], free_server.stage)
                 if math.dist(agents[head].position, queue.positions[0]) > 3:
                     waypoints = _handoff_waypoints(
                         floor, tuple(agents[head].position), free_server.position,
@@ -791,7 +893,7 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                               reason="No connected clearanced route around current queued people; native routing retained")
                     elif waypoints:
                         stages = [sim.add_waypoint_stage(tuple(p), 0.15) for p in waypoints]
-                        stages.extend([free_server.stage, seats[people[person]["destination_id"]][0]])
+                        stages.extend([free_server.stage, seats[destination_keys[person]][0]])
                         description = jps.JourneyDescription(stages)
                         for current, following in zip(stages, stages[1:]):
                             description.set_transition_for_stage(current, jps.Transition.create_fixed_transition(following))
@@ -819,7 +921,7 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                         [a.position for a in agents.values() if a.id != server.agent and states[agent_person[a.id]] == "queued"])
                     if waypoints:
                         stages = [sim.add_waypoint_stage(tuple(p), 0.15) for p in waypoints]
-                        stages.extend([server.stage, seats[people[person]["destination_id"]][0]])
+                        stages.extend([server.stage, seats[destination_keys[person]][0]])
                         description = jps.JourneyDescription(stages)
                         for stage, following in zip(stages, stages[1:]):
                             description.set_transition_for_stage(stage, jps.Transition.create_fixed_transition(following))
@@ -885,7 +987,7 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                 elif holding:
                     goal, journey, stage = holding.position, holding.journey, holding.stage
                 elif person in joined:
-                    stage, goal = seats[people[person]["destination_id"]]
+                    stage, goal = seats[destination_keys[person]]
                     journey = sim.add_journey(jps.JourneyDescription([stage]))
                 else:
                     continue
@@ -901,11 +1003,29 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                     event(person, "walking_route_native_retry", time_s, position=list(agent.position),
                           goal=list(goal), stage_stalled_s=30)
                     continue
+                stationary_bodies = [other.position for other in agents.values()
+                                     if other.id != agent.id and (states[agent_person[other.id]] in {"seated", "done"})]
+                detour = _handoff_waypoints(floor, tuple(agent.position), tuple(goal), stationary_bodies)
+                if detour is not None and detour:
+                    stages = [sim.add_waypoint_stage(tuple(point), .05) for point in detour]
+                    route = jps.JourneyDescription([*stages, stage])
+                    for before, after in zip(stages, [*stages[1:], stage]):
+                        route.set_transition_for_stage(before, jps.Transition.create_fixed_transition(after))
+                    sim.switch_agent_journey(agent.id, sim.add_journey(route), stages[0])
+                    dinner_detours.pop(agent.id, None)
+                    dinner_stage_progress[agent.id] = (stages[0], time_s)
+                    event(person, "walking_route_replanned", time_s, position=list(agent.position),
+                          goal=list(goal), waypoint_count=len(stages), stationary_bodies=len(stationary_bodies))
+                    continue
                 component, router = dinner_routes[people[person]["target_id"]]
                 inside = component.buffer(-1e-5)
                 start = tuple(nearest_points(Point(agent.position), inside)[1].coords[0])
                 destination = tuple(nearest_points(Point(goal), inside)[1].coords[0])
-                waypoints = [start, *router.compute_waypoints(start, destination)[1:]]
+                if not dinner_connector_area.contains(Point(agent.position)):
+                    event(person, "walking_route_unavailable", time_s, reason="Current body is outside the clearance routing region; native journey retained")
+                    continue
+                connector = dinner_connector_router.compute_waypoints(tuple(agent.position), start)[1:]
+                waypoints = [*connector, *router.compute_waypoints(start, destination)[1:]]
                 stages = [sim.add_waypoint_stage(tuple(p), .6 if i == len(waypoints) - 1 else DINNER_ROUTE_TOLERANCE_M)
                           for i, p in enumerate(waypoints)]
                 route = jps.JourneyDescription(stages)
@@ -917,11 +1037,7 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                 event(person, "walking_route_replanned", time_s, position=list(agent.position),
                       goal=list(goal), waypoint_count=len(stages))
 
-        active = [(agent_person[a.id], a.position) for a in agents.values() if states[agent_person[a.id]] != "done"]
-        if dinner:
-            native_people = set(agent_person.values())
-            active += [(person, tuple(record["seat_position"])) for person, record in enumerate(people)
-                       if person not in native_people]
+        active = [(agent_person[a.id], a.position) for a in agents.values() if dinner or states[agent_person[a.id]] != "done"]
         if step % 2 == 0:
             for person, position in active:
                 frames[step // 2, person] = position
@@ -930,7 +1046,7 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
             if step >= 600:
                 history = frames[step // 2 - 300:step // 2 + 1]
                 for person, position in active:
-                    if states[person] == "seated":
+                    if states[person] in {"seated", "done"}:
                         continue
                     track = history[:, person]
                     if np.isfinite(track).all() and np.max(np.linalg.norm(track - position, axis=1)) < 0.1:
@@ -984,6 +1100,8 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
                 diagnostics[-1].pop("not_arrived")
                 diagnostics[-1]["seated"] = states.count("seated")
                 diagnostics[-1]["released_waiting_admission"] = len(awaiting_spawn)
+                diagnostics[-1]["native_agents"] = len(agents)
+                diagnostics[-1]["returned_native"] = sum(states[agent_person[a.id]] == "done" for a in agents.values())
         positions = np.asarray([position for _, position in active], dtype=float).reshape(-1, 2)
         if interval > 0:
             for target_id, queue in queues.items():
@@ -1026,6 +1144,9 @@ def run(scene: Scene, scenario: Scenario, *, people: list[dict] | None = None) -
     if dinner:
         metrics.update(initial_seat_count=sum(p["placement_kind"] == "seat" for p in people),
                        initial_standing_count=sum(p["placement_kind"] == "standing" for p in people),
+                       standing_overflow_count=sum(p["standing_overflow"] for p in people),
+                       adjusted_seat_count=sum(p["seat_adjustment_m"] > 1e-9 for p in people),
+                       max_seat_adjustment_m=max(p["seat_adjustment_m"] for p in people),
                        standing_zone_area_m2=dinner_standing_zone(scene).area,
                        release_projection_count=fallback_spawns, max_release_projection_m=max_release_projection)
     return Result(

@@ -100,7 +100,8 @@ def strict_schema(model: type[Contract]) -> dict:
 
 def assumption_receipt(output: Interpretation, active_scene: Scene | None = None) -> list[str]:
     """Every chosen parameter is shown for confirmation, even if Astra omits it."""
-    notes = list(output.assumptions)
+    notes = [note for note in output.assumptions
+             if not re.search(r"\b(?:exit\w*|depart\w*|dispers\w*|return\w*|vanish\w*|disappear\w*)\b", note, re.I)]
     if output.scenario.mode == "dinner_call":
         # Seating claims are derived from the engine geometry, never model prose.
         notes = [note for note in notes if not re.search(r"\b(?:seat\w*|standing|sit\w*|tables?)\b", note, re.I)]
@@ -114,8 +115,10 @@ def assumption_receipt(output: Interpretation, active_scene: Scene | None = None
             notes.append(f"Engine-derived initial placement: {seated} people seated at configured positions; {standing} people in the standing zone ({configured} configured seats).")
         else:
             notes.append("Initial placement uses configured seats; excess people begin in a standing zone. Seat and standing counts require a room.")
-        notes.append("The release schedule calls people to the buffet; they disperse to the destination after service.")
+        notes.append("After buffet service, people return to their assigned seat or standing position and remain visible; completion is measured on that return.")
         notes.append("Arrival pattern/window control the release schedule; when arrival_pattern is waves, wave_count and wave_gap_s set the table calls.")
+    else:
+        notes.append("After service, people visit the destination waypoint and then leave through an exit; completion is measured only at the exit.")
     if output.scene is None:
         notes.append("Service time and staffing remain those in the currently loaded scene.")
     else:

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 from fastapi.testclient import TestClient
+from shapely.geometry import Point, Polygon
 
 import server
 from crowd.engine import run
@@ -43,7 +44,12 @@ def test_run_and_binary_frames_match_engine(monkeypatch):
             join = next(row for row in rows if row["kind"] == "joined_queue")
             assert isinstance(join["people_ahead"], int)
             assert join["target_id"] == "check_in"
-            assert next(row for row in rows if row["kind"] == "seated")["position"] == [19.5, 10.25]
+            destination = next(row for row in rows if row["kind"] == "reached_destination")
+            assert Point(destination["position"]).distance(Point(19.5, 10.25)) <= 0.35
+            exited = next(row for row in rows if row["kind"] == "exited")
+            assert exited["time_s"] > destination["time_s"]
+            assert Polygon(next(region.poly for region in scene.exits if region.id == exited["exit_id"])).covers(Point(exited["position"]))
+            assert not any(row["kind"] == "seated" for row in rows)
         second = client.post("/api/run", json={"scene": scene.model_dump(), "scenario": scenario.model_dump()})
         assert second.status_code == 200
         assert second.json()["run_id"] != summary["run_id"]

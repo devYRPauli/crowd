@@ -96,8 +96,8 @@ def test_events_waits_service_and_accounting(result):
     for person in result.people:
         timeline = result.events[person["id"]]
         assert [e["time_s"] for e in timeline] == sorted(e["time_s"] for e in timeline)
-        events = [e for e in timeline if e["kind"] in {"spawned", "joined_queue", "service_start", "service_end", "seated"}]
-        assert [e["kind"] for e in events] == ["spawned", "joined_queue", "service_start", "service_end", "seated"]
+        events = [e for e in timeline if e["kind"] in {"spawned", "joined_queue", "service_start", "service_end", "reached_destination", "exited"}]
+        assert [e["kind"] for e in events] == ["spawned", "joined_queue", "service_start", "service_end", "reached_destination", "exited"]
         times = [e["time_s"] for e in events]
         assert times == sorted(times)
         assert person["arrival_s"] <= times[0] < person["arrival_s"] + DT

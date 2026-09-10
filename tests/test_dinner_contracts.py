@@ -84,7 +84,7 @@ def test_interpret_reports_initial_seating_and_wave_assumptions(monkeypatch, din
     assumptions = " ".join(body["assumptions"])
     assert "configured seats" in assumptions and "standing zone" in assumptions
     assert "wave_count = 3" in assumptions and "wave_gap_s = 300" in assumptions
-    assert "disperse" in assumptions
+    assert "return to their assigned seat or standing position" in assumptions
     assert "already seated" in prompts[0] and "dinner_call" in prompts[0]
     assert len(prompts) == 1
 
@@ -174,3 +174,36 @@ def test_seat_receipt_uses_returned_scene_and_caps_at_guest_count(room, dinner):
     receipt = " ".join(assumption_receipt(output))
     assert "3 people seated" in receipt and "0 people in the standing zone" in receipt
     assert "Everyone is sitting" not in receipt
+
+
+def test_queue_receipt_marks_completion_only_at_exit(dinner):
+    from crowd.advice import assumption_receipt
+
+    queue = dinner.model_copy(update={"mode": "queue"})
+    output = Interpretation(scene=None, scenario=queue,
+                            assumptions=["People disappear at the coffee counter."])
+    notes = " ".join(assumption_receipt(output))
+    assert "destination waypoint" in notes and "completion is measured only at the exit" in notes
+    assert "disappear at the coffee counter" not in notes
+
+
+def test_dinner_receipt_rejects_obsolete_disperse_assumption(room, dinner):
+    from crowd.advice import assumption_receipt
+
+    output = Interpretation(scene=None, scenario=dinner, assumptions=["Guests disperse after service."])
+    notes = " ".join(assumption_receipt(output, room))
+    assert "return to their assigned seat or standing position" in notes
+    assert "remain visible" in notes and "Guests disperse" not in notes
+
+
+def test_viewer_preserves_terminal_engine_coordinates_and_posture(room):
+    person = {"id": "p0", "target_id": room.targets[0].id,
+              "destination_id": room.destinations[0].id, "seat_position": [2, 3],
+              "placement_kind": "standing"}
+    original = {"p0": [{"kind": "returned_to_seat", "time_s": 20, "position": [2.1, 3.1]},
+                       {"kind": "exited", "time_s": 30, "position": [24, 7]}]}
+    result = SimpleNamespace(people=[person], events=deepcopy(original))
+    output = server._viewer_events(result, room)["p0"]
+    assert output[0]["position"] == [2.1, 3.1] and output[0]["placement_kind"] == "standing"
+    assert output[1]["position"] == [24, 7]
+    assert result.events == original

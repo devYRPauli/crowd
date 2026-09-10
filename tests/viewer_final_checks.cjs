@@ -522,7 +522,7 @@ async function runChecks() {
     assert.equal(viewer.evaluate('stateAt(people[1],.15)'),'seated');
     assert.deepEqual(plain(viewer.evaluate("personPosition(0,'walking')")),[2,3]);
     assert.match(viewer.elements.get('accounting').textContent,/seated 1/);
-    assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');
+    assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');assert.equal(viewer.elements.get('experimental-notice').hidden,false);
     const roundTrip=plain(viewer.evaluate('buildBundle()'));
     assert.deepEqual(roundTrip.accounting,bundle.accounting);
     assert.deepEqual(roundTrip.playback,bundle.playback);
@@ -550,8 +550,8 @@ async function runChecks() {
     viewer.evaluate('initializeDemo()');
     assert.equal(viewer.elements.get('filename').textContent,'Puck Building, 3rd floor');
     assert.deepEqual(plain(viewer.evaluate('scene.layout_options.map(option=>option.id)')),['line_in_aisle','line_south_corridor']);
-    assert.equal(viewer.evaluate('currentScenario().mode'),'dinner_call');assert.equal(viewer.evaluate('currentScenario().n_people'),120);
-    assert.match(viewer.elements.get('brief').value,/120 guests are already seated/);
+    assert.equal(viewer.evaluate('currentScenario().mode'),'queue');assert.equal(viewer.evaluate('currentScenario().n_people'),120);assert.equal(viewer.elements.get('experimental-notice').hidden,true);
+    assert.match(viewer.elements.get('brief').value,/120 guests arrive for the event/);
     assert.match(viewer.elements.get('constraints').value,/central aisle clear/);
     assert.equal(viewer.elements.get('run').disabled,true);
     for(const id of ['open_coffee_room','furnished_coffee_room']){

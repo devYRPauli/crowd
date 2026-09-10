@@ -43,7 +43,7 @@ def test_v2_all_people_finish_and_both_servers_work(v2_runs, side):
 
 @pytest.mark.parametrize("side", ["east", "west"])
 def test_v2_lifecycle_is_complete_ordered_and_never_requeues(v2_runs, side):
-    required = ["spawned", "joined_queue", "service_start", "service_end", "seated"]
+    required = ["spawned", "joined_queue", "service_start", "service_end", "reached_destination", "exited"]
     result = v2_runs[side]
     for person in result.people:
         events = result.events[person["id"]]

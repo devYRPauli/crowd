@@ -58,7 +58,7 @@ def test_west_wall_handoff_completes_with_both_servers(venue_runs):
 
 
 def test_west_wall_release_never_requeues_and_service_starts_on_arrival(venue_runs):
-    required = ["spawned", "joined_queue", "service_start", "service_end", "seated"]
+    required = ["spawned", "joined_queue", "service_start", "service_end", "reached_destination", "exited"]
     for result in venue_runs:
         for person in result.people:
             events = result.events[person["id"]]

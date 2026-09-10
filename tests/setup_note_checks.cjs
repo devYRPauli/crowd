@@ -1,13 +1,9 @@
-/* Copy to tests/setup_note_checks.cjs after helper integration.
- * Run: node tests/setup_note_checks.cjs
- * An optional CROWD_SETUP_HELPER path is for pre-integration verification only.
- */
+// Run: node tests/setup_note_checks.cjs
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const root=process.env.CROWD_ROOT||process.cwd();
+const root=path.resolve(__dirname,'..');
 const {createViewer}=require(path.join(root,'tests/viewer_final_checks.cjs'));
 function checkSetupNote() {
   const viewer=createViewer();
-  if(process.env.CROWD_SETUP_HELPER)viewer.evaluate(fs.readFileSync(process.env.CROWD_SETUP_HELPER,'utf8'));
   assert.equal(viewer.evaluate('typeof setupNoteData'),'function','actual inline setupNoteData helper must be present');
   const sample=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/sample_room.json'),'utf8'));
   const snapshot={scene:sample,scenario:{n_people:3,arrival_pattern:'front_loaded',arrival_window_s:600,horizon_s:100},metrics:{mean_wait_s:10,max_wait_s:20,walkway_conflict_person_s:40},accounting:{done:3},events:{p0:[{kind:'joined_queue',time_s:1},{kind:'queue_overflow',time_s:2},{kind:'overflow_end',time_s:3},{kind:'service_start',time_s:5}],p1:[{kind:'joined_queue',time_s:1},{kind:'service_start',time_s:3}],p2:[{kind:'joined_queue',time_s:3},{kind:'service_start',time_s:5}]}};
