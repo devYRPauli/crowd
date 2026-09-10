@@ -2,6 +2,8 @@
 
 import base64
 import json
+import os
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,7 +14,31 @@ from crowd.schema import SCENE_SCHEMA, SCENARIO_SCHEMA, Scene, Scenario
 
 MODEL = "gpt-6-astra"
 USAGE_PATH = Path(__file__).resolve().parents[1] / "usage.jsonl"
+ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 _OBJECT = TypeAdapter(dict[str, JsonValue])
+
+
+def load_api_key() -> str | None:
+    """Read only OPENAI_API_KEY; an existing environment value takes precedence.
+
+    Accept KEY=VALUE lines, quotes, and comments without executing shell syntax
+    or loading unrelated settings. Never log the key or file contents.
+    """
+    if key := os.getenv("OPENAI_API_KEY"):
+        return key
+    if not ENV_PATH.exists():
+        return None
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        name, separator, value = line.partition("=")
+        if separator and name.strip() == "OPENAI_API_KEY":
+            try:
+                parts = shlex.split(value, comments=True)
+            except ValueError:
+                raise ValueError("Malformed OPENAI_API_KEY assignment in .env") from None
+            if len(parts) > 1:
+                raise ValueError("Malformed OPENAI_API_KEY assignment in .env")
+            return parts[0] if parts else None
+    return None
 
 
 def _image_url(data: bytes) -> str:
@@ -57,7 +83,7 @@ def ask_structured(
     }
     try:
         # No hidden retries: one application call corresponds to one receipt.
-        with OpenAI(max_retries=0, timeout=60.0) as client:
+        with OpenAI(api_key=load_api_key(), max_retries=0, timeout=60.0) as client:
             response = client.responses.create(
                 model=MODEL,
                 input=[{"role": "user", "content": content}],

@@ -3,10 +3,12 @@
   "walkable": [[0, 0], [24, 0], [24, 14], [0, 14]],
   "obstacles": [
     {"id": "check_in_desk", "kind": "desk", "poly": [[5, 10], [9, 10], [9, 11], [5, 11]], "locked": false},
-    {"id": "seating_area", "kind": "seating", "poly": [[17, 8.5], [22, 8.5], [22, 12], [17, 12]], "locked": false},
     {"id": "dining_1", "kind": "dining_table", "poly": [[6, 2], [8, 2], [8, 4], [6, 4]], "locked": true},
     {"id": "dining_2", "kind": "dining_table", "poly": [[11, 2], [13, 2], [13, 4], [11, 4]], "locked": true},
     {"id": "dining_3", "kind": "dining_table", "poly": [[16, 2], [18, 2], [18, 4], [16, 4]], "locked": true}
+  ],
+  "destinations": [
+    {"id": "seating_area", "poly": [[17, 8.5], [22, 8.5], [22, 12], [17, 12]]}
   ],
   "entrances": [
     {"id": "entrance_west", "poly": [[0, 6], [1, 6], [1, 8], [0, 8]]}
@@ -19,7 +21,7 @@
     {
       "id": "check_in",
       "poly": [[5, 9], [9, 9], [9, 10], [5, 10]],
-      "queue_polyline": [[2, 8.5], [3.5, 8.5], [3.5, 9.5], [5, 9.5]],
+      "queue_polyline": [[5, 9.5], [3, 9.5], [3, 7], [13, 7]],
       "service_positions": [[6, 9.5], [8, 9.5]],
       "service_s": 12
     }

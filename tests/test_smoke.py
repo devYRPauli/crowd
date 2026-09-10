@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 import struct
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +11,6 @@ from pydantic import ValidationError
 from shapely.geometry import Polygon
 
 from crowd import astra
-from crowd.engine import run
 from crowd.schema import (
     RESULT_SCHEMA,
     SCENARIO_SCHEMA,
@@ -29,6 +27,14 @@ TINY_SCHEMA = {
     "properties": {"ok": {"type": "boolean"}},
     "required": ["ok"],
     "additionalProperties": False,
+}
+RESULT_METADATA = {
+    "frame_shape": [1, 1, 2], "frame_dt_s": 0.1, "horizon_s": 0.1,
+    "density_grid": {
+        "origin": [0, 0], "cell_size_m": 0.5,
+        "mean_persons_m2": [[0]], "max_persons_m2": [[0]],
+        "max_sustained_s": [[0]], "bottleneck_cells": [],
+    },
 }
 
 
@@ -52,6 +58,7 @@ def test_schema_round_trip(scene, scenario):
         people=[{"id": "p0", "arrival_s": 0}], frames=frames,
         events={"p0": [{"kind": "arrived", "time_s": 0}]},
         scene_hash="a" * 64, scenario_hash="b" * 64,
+        **RESULT_METADATA,
     )
     for model, schema in (
         (scene, SCENE_SCHEMA), (scenario, SCENARIO_SCHEMA), (result, RESULT_SCHEMA)
@@ -72,7 +79,9 @@ def test_sample_room_contents(scene):
     assert len(scene.targets[0].service_positions) == 2
     assert len(scene.targets[0].queue_polyline) >= 2
     assert sum(o.kind == "dining_table" and o.locked for o in scene.obstacles) == 3
-    assert any(o.kind == "seating" for o in scene.obstacles)
+    assert any(d.id == "seating_area" for d in scene.destinations)
+    assert all(o.id != "seating_area" for o in scene.obstacles)
+    assert scene.targets[0].queue_polyline == [[5, 9.5], [3, 9.5], [3, 7], [13, 7]]
 
 
 @pytest.mark.parametrize("defect", ["crossed", "outside", "duplicate", "blocked", "service", "extra"])
@@ -111,14 +120,8 @@ def test_result_rejects_invalid_frames(frames):
         Result(
             metrics={}, accounting={}, people=[], frames=frames, events={},
             scene_hash="a" * 64, scenario_hash="b" * 64,
+            **RESULT_METADATA,
         )
-
-
-def test_engine_is_explicit_stub(scene, scenario):
-    before = (scene.model_dump_json(), scenario.model_dump_json())
-    with pytest.raises(NotImplementedError, match="milestone 2"):
-        run(scene, scenario)
-    assert before == (scene.model_dump_json(), scenario.model_dump_json())
 
 
 def test_http_scaffold(scene):
@@ -205,6 +208,17 @@ def test_astra_failure_is_loud_and_logged(fake_astra, scene, failure):
     assert record["cost_estimate_usd"] == (None if failure == "api" else 0.002)
 
 
-@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY is not set")
 def test_astra_live_tiny_object():
+    if not astra.load_api_key():
+        pytest.skip("OPENAI_API_KEY is not set in environment or .env")
     assert astra.ask_structured("Return a JSON object with ok set to true.", TINY_SCHEMA) == {"ok": True}
+
+
+def test_dotenv_key_loading(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    path = tmp_path / "test.env"
+    path.write_text('# Comment\nUNRELATED=ignored\nOPENAI_API_KEY="fake-test-key" # comment\n')
+    monkeypatch.setattr(astra, "ENV_PATH", path)
+    assert astra.load_api_key() == "fake-test-key"
+    monkeypatch.setenv("OPENAI_API_KEY", "environment-test-key")
+    assert astra.load_api_key() == "environment-test-key"
