@@ -10,6 +10,46 @@ from pydantic import Field, FiniteFloat
 from crowd.schema import Contract, Coordinate, Scenario, Scene
 
 
+HEADLINE_METRICS = (
+    "mean_wait_s", "max_wait_s", "walkway_conflict_person_s",
+    "overflow_count", "bottleneck_cell_count", "completed",
+)
+
+
+def compact_proposal_payload(scene: Scene, scenario: Scenario, metrics: dict,
+                             accounting: dict, constraints: str) -> dict:
+    """Give Astra decision context without duplicate option geometry or run data.
+
+    Bounding boxes are context, not geometry validation; every resulting patch
+    is still checked against the original exact polygons before simulation.
+    Array indices refer to the original scene so patch paths remain unambiguous.
+    """
+    def bounds(poly):
+        xs, ys = zip(*poly)
+        return [min(xs), min(ys), max(xs), max(ys)]
+
+    def regions(items):
+        return [{"index": i, "id": item.id, "bbox": bounds(item.poly)}
+                for i, item in enumerate(items)]
+
+    summary = {
+        "units": scene.units, "walkable_bbox": bounds(scene.walkable),
+        "obstacles": [{**item, "kind": obstacle.kind, "locked": obstacle.locked}
+                      for item, obstacle in zip(regions(scene.obstacles), scene.obstacles)],
+        "entrances": regions(scene.entrances), "exits": regions(scene.exits),
+        "destinations": regions(scene.destinations), "walkways": regions(scene.walkways),
+        "targets": [{**item, "queue_polyline": target.queue_polyline,
+                     "service_positions": target.service_positions, "service_s": target.service_s,
+                     "overflow_bbox": bounds(target.overflow_area) if target.overflow_area else None}
+                    for item, target in zip(regions(scene.targets), scene.targets)],
+        "layout_options": [{"id": option.id, "target_id": option.target_id, "label": option.label}
+                           for option in scene.layout_options],
+    }
+    return {"scene": summary, "scenario": scenario.model_dump(mode="json"),
+            "baseline_metrics": {key: metrics.get(key) for key in HEADLINE_METRICS},
+            "baseline_accounting": dict(accounting), "constraints": constraints}
+
+
 class Interpretation(Contract):
     scenario: Scenario
     scene: Scene | None

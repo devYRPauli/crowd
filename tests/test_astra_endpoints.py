@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from pathlib import Path
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -39,6 +40,20 @@ def mock_answers(monkeypatch, answers):
 
     monkeypatch.setattr(server.astra, "ask_structured", ask)
     return calls
+
+
+
+def completed_proposal(client, response):
+    assert response.status_code == 200, response.text
+    assert set(response.json()) == {"job_id"}
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = client.get("/api/propose/" + response.json()["job_id"]).json()
+        if job["status"] in {"completed", "error"}:
+            assert job["status"] == "completed", job
+            return job
+        time.sleep(0.01)
+    pytest.fail("Proposal worker did not finish within test deadline")
 
 
 def test_interpret_returns_bad_scene_errors_after_exactly_one_correction(
@@ -108,20 +123,23 @@ def test_propose_rejects_locked_candidate_and_runs_survivor_with_same_people(
         return result
 
     monkeypatch.setattr(server, "simulate", record_run)
-    response = TestClient(server.app).post("/api/propose", json={
+    client = TestClient(server.app)
+    response = client.post("/api/propose", json={
         "scene": scene_data, "scenario": scenario_data,
         "baseline_metrics": baseline.metrics, "baseline_accounting": baseline.accounting,
         "constraints": "Keep two volunteers and the dining tables",
     })
     assert response.status_code == 200, response.text
-    body = response.json()
+    body = completed_proposal(client, response)
     assert len(body["rejected"]) == 1
     assert "locked" in body["rejected"][0]["reason"].lower()
     assert len(body["candidates"]) == 1
     assert body["candidates"][0]["comparison"]
     assert measured
     assert all(result.people == baseline.people for result in measured)
-    assert calls[0]["reasoning"] == "high"
+    assert calls[0]["reasoning"] == "medium"
+    assert calls[0]["timeout_s"] == 120
+    assert calls[0]["max_output_tokens"] == 2048
 
 
 def test_explain_substitutes_only_measured_numbers(monkeypatch):

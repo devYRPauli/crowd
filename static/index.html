@@ -30,7 +30,7 @@ aside{background:#fcfdf9;border:1px solid var(--line);border-radius:12px;padding
 </form>
 <div class="astra-tools">
 <section><label for="brief">Brief</label><textarea id="brief" placeholder="Describe the event, guest arrivals, and how check-in works."></textarea><button id="interpret" type="button">Interpret brief</button><small>Review Astra’s assumptions before applying them. Measurements come from the engine.</small><div id="interpretation" hidden><ul id="assumptions"></ul><button id="confirm" type="button">Confirm assumptions</button></div></section>
-<section><button id="propose" type="button">Find a better setup</button><label for="constraints" style="margin-top:10px">Constraints</label><textarea id="constraints" placeholder="Keep two volunteers and the dining tables"></textarea><small>Run the current room first. Candidates reuse the original people and seed.</small></section>
+<section><button id="propose" type="button">Find a better setup</button><small id="proposal-stage" role="status" aria-live="polite"></small><label for="constraints" style="margin-top:10px">Constraints</label><textarea id="constraints" placeholder="Keep two volunteers and the dining tables"></textarea><small>Run the current room first. Candidates reuse the original people and seed.</small></section>
 </div>
 <p id="api-error" role="status" aria-live="polite"></p>
 <section id="comparison" class="comparison" hidden aria-label="Measured layout comparison"><div id="candidate-tabs" class="candidate-tabs"></div><div id="candidate-rejections"></div><div id="metric-comparison"></div><p id="explanation"></p></section>
@@ -55,16 +55,16 @@ const bg = base.getContext('2d'), fg = ink.getContext('2d'), hg = heat.getContex
 let scene = null, result = null, frames = null, people = [], ids = [], frameCount = 0, frameDt = .2;
 let time = 0, duration = 0, playing = false, busy = false, selected = -1, drawn = [], raf = 0, lastStamp = null;
 let width = 1, height = 1, dpr = 1, fit = {scale:1,x:0,y:0}, bounds, heatBucket = -1, sceneVersion = 0;
-let revision=0, controllers=new Set(), interpreted=null, lastRun=null, original=null, candidates=[], activeCandidate=-1;
+let revision=0, controllers=new Set(), interpreted=null, lastRun=null, original=null, candidates=[], activeCandidate=-1, pollTimer=null, pollResolve=null;
 const clone=value=>JSON.parse(JSON.stringify(value));
 function currentScenario(){return {n_people:Number($('n-people').value),arrival_window_s:Number($('arrival').value),arrival_pattern:$('pattern').value,seed:Number($('seed').value),horizon_s:Number($('horizon').value),mode:'queue'};}
 function fillScenario(value){for(const [id,key] of Object.entries({'n-people':'n_people',arrival:'arrival_window_s',pattern:'arrival_pattern',seed:'seed',horizon:'horizon_s'}))$(id).value=value[key];}
-function invalidate(){revision++;for(const controller of controllers)controller.abort();controllers.clear();setBusy(false);$('interpret').disabled=false;$('propose').disabled=false;return revision;}
+function invalidate(){revision++;if(pollResolve){clearTimeout(pollTimer);const resolve=pollResolve;pollResolve=null;resolve();}$('proposal-stage').textContent='';for(const controller of controllers)controller.abort();controllers.clear();setBusy(false);$('interpret').disabled=false;$('propose').disabled=false;return revision;}
 function clearCandidates(){original=null;candidates=[];activeCandidate=-1;$('comparison').hidden=true;}
 function edited(kind){invalidate();$('api-error').textContent='';interpreted=null;$('interpretation').hidden=true;if(kind!=='brief')clearCandidates();}
 function fail(error,token){if(token===revision)$('api-error').textContent=error.message;}
 async function api(url,body,token,binary=false){
-  const controller=new AbortController();controllers.add(controller);const timer=setTimeout(()=>controller.abort(),30000);
+  const controller=new AbortController();controllers.add(controller);const timeout=['/api/interpret','/api/explain'].includes(url)?95000:30000;const timer=setTimeout(()=>controller.abort(),timeout);
   try{const response=await fetch(url,{signal:controller.signal,...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
     if(!response.ok)throw Error(await responseError(response));const data=binary?await response.arrayBuffer():await response.json();
     if(token!==revision)throw Error('Request superseded by a newer edit.');return binary?{data,headers:response.headers}:data;
@@ -182,11 +182,24 @@ $('interpret').addEventListener('click',async()=>{
   catch(error){fail(error,token);}finally{if(token===revision)$('interpret').disabled=false;}
 });
 $('confirm').addEventListener('click',()=>{if(!interpreted)return;invalidate();clearCandidates();if(interpreted.scene)loadScene(clone(interpreted.scene),'Interpreted scene');fillScenario(interpreted.scenario);$('interpretation').hidden=true;interpreted=null;$('api-error').textContent='';status('Assumptions confirmed. Run to measure this scenario.');});
+function waitForPoll(){return new Promise(resolve=>{pollResolve=resolve;pollTimer=setTimeout(()=>{pollResolve=null;resolve();},1000);});}
+async function pollProposal(jobId,token){
+  const labels={asking_astra:'Astra is considering permitted layouts…',validating:'Validating candidate layouts…','simulating A':'Simulating Candidate A…','simulating B':'Simulating Candidate B…',done:'Candidate measurements ready.'};
+  while(token===revision){
+    const job=await api(`/api/propose/${encodeURIComponent(jobId)}`,undefined,token);
+    $('proposal-stage').textContent=labels[job.stage]||job.stage||'Proposal queued…';
+    if(job.status==='completed')return job;
+    if(job.status==='error'){const detail=job.error||job.detail||'Proposal job failed.';throw Error(typeof detail==='string'?detail:JSON.stringify(detail));}
+    if(!['pending','running'].includes(job.status))throw Error('Unrecognized proposal job status.');
+    await waitForPoll();
+  }
+  throw Error('Request superseded by a newer edit.');
+}
 $('propose').addEventListener('click',async()=>{
   if(!lastRun||JSON.stringify(lastRun.scene)!==JSON.stringify(scene)||JSON.stringify(lastRun.scenario)!==JSON.stringify(currentScenario())){$('api-error').textContent='Run the current scene and scenario before finding a better setup.';return;}
-  const token=invalidate();$('api-error').textContent='';$('propose').disabled=true;original=clone(lastRun);candidates=[];activeCandidate=-1;$('comparison').hidden=true;$('explanation').textContent='';
-  try{const data=await api('/api/propose',{scene:original.scene,scenario:original.scenario,baseline_metrics:original.metrics,baseline_accounting:original.accounting,constraints:$('constraints').value},token);candidates=data.candidates||[];$('candidate-rejections').replaceChildren();for(const rejected of data.rejected||[]){const line=document.createElement('div');line.className='rejected';line.textContent=`Candidate ${String.fromCharCode(65+rejected.index)} rejected: ${rejected.reason}`;$('candidate-rejections').append(line);}renderComparison();if(candidates[0])await explainCandidate(candidates[0],token);else $('explanation').textContent='No permitted candidate was returned. You can edit the constraints or continue manually.';}
-  catch(error){fail(error,token);}finally{if(token===revision)$('propose').disabled=false;}
+  const token=invalidate();$('api-error').textContent='';$('propose').disabled=true;$('proposal-stage').textContent='Starting proposal…';original=clone(lastRun);candidates=[];activeCandidate=-1;$('comparison').hidden=true;$('explanation').textContent='';
+  try{const started=await api('/api/propose',{scene:original.scene,scenario:original.scenario,baseline_metrics:original.metrics,baseline_accounting:original.accounting,constraints:$('constraints').value},token);if(typeof started.job_id!=='string'||!started.job_id)throw Error('Proposal response is missing its job ID.');const data=await pollProposal(started.job_id,token);candidates=data.candidates||[];$('candidate-rejections').replaceChildren();for(const rejected of data.rejected||[]){const line=document.createElement('div');line.className='rejected';line.textContent=`Candidate ${String.fromCharCode(65+rejected.index)} rejected: ${rejected.reason}`;$('candidate-rejections').append(line);}renderComparison();if(candidates[0])await explainCandidate(candidates[0],token);else $('explanation').textContent='No permitted candidate was returned. You can edit the constraints or continue manually.';}
+  catch(error){if(token===revision)$('proposal-stage').textContent='Proposal stopped. Manual rehearsal remains available.';fail(error,token);}finally{if(token===revision)$('propose').disabled=false;}
 });
 function stateAt(person, t) {
   const e=person.timeline, passed=kind=>e[kind]&&e[kind].time_s<=t+1e-8;
