@@ -1,18 +1,19 @@
 /**
  * The neighbour index the crowd runs on.
  *
- * Everything that asks "who is near me" goes through here: ORCA, contact
- * resolution, the density a walker reads ahead of itself. The contract lets the
- * hash be generous — it works in whole cells, so a query may visit items
- * slightly outside the radius — but it is never allowed to be stingy. A missed
- * neighbour is a pair of people who walk through each other, and because the
- * hash is rebuilt from scratch every tick, a miss shows up as a one-frame
- * glitch that is near impossible to reproduce by hand.
+ * Everything that asks "who is near me" goes through here: the neighbour list
+ * ORCA steers by, contact resolution, and the clearance check that keeps an
+ * arriving person off somebody's head. The contract lets the hash be generous —
+ * it works in whole cells, so a query may visit items slightly outside the
+ * radius — but it is never allowed to be stingy. A missed neighbour is a pair
+ * of people who walk through each other, and because the hash is rebuilt from
+ * scratch every tick, a miss shows up as a one-frame glitch that is near
+ * impossible to reproduce by hand.
  *
- * So the load-bearing test is a brute-force scan over random points. It is
- * paired with a tightness check on purpose: on its own, a query that simply
- * visited every cell would sail through the miss test, and that is exactly the
- * regression a "just widen the search" fix would introduce.
+ * So the load-bearing test here is a brute-force scan. It is paired with a
+ * tightness check on purpose: on its own, a query that simply visited every
+ * cell would sail through the miss test, and that is exactly the regression a
+ * "just widen the search" fix would introduce.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -51,6 +52,10 @@ const collect = (hash: SpatialHash, x: number, y: number, radius: number): numbe
   return ids
 }
 
+const sorted = (ids: readonly number[]): number[] => [...ids].sort((a, b) => a - b)
+
+const everyone = (n: number): number[] => Array.from({ length: n }, (_, id) => id)
+
 /** Brute force: the answer the hash is only ever allowed to be a superset of. */
 const trulyWithin = (
   points: readonly Point[],
@@ -73,10 +78,90 @@ const scatter = (rng: Rng, n: number, extent: Extent): Point[] =>
     y: rng.uniform(extent.minY, extent.maxY),
   }))
 
-describe('SpatialHash.query', () => {
-  it('returns every point genuinely within the radius', () => {
+interface Miss {
+  radius: number
+  atX: number
+  atY: number
+  id: number
+  distance: number
+}
+
+/** Everyone the brute-force scan found and the hash did not. */
+const missesAt = (
+  hash: SpatialHash,
+  points: readonly Point[],
+  probe: Point,
+  radius: number,
+): { misses: Miss[]; hits: number } => {
+  const returned = new Set(collect(hash, probe.x, probe.y, radius))
+  const misses: Miss[] = []
+  const expected = trulyWithin(points, probe.x, probe.y, radius)
+  for (const id of expected) {
+    if (!returned.has(id)) {
+      misses.push({
+        radius,
+        atX: probe.x,
+        atY: probe.y,
+        id,
+        distance: Math.hypot(points[id].x - probe.x, points[id].y - probe.y),
+      })
+    }
+  }
+  return { misses, hits: expected.size }
+}
+
+const CELL = 1.5
+/** Forty by twenty-five metres: a hall, in the coordinates a centred plan uses. */
+const HALL: Extent = { minX: -12, minY: -8, maxX: 28, maxY: 17 }
+
+describe('the neighbour index', () => {
+  it('finds everyone a brute-force scan finds, at radii either side of the cell size', () => {
+    const rng = new Rng('spatial-hash-radii')
+    const points = scatter(rng, 400, HALL)
+    const hash = build(CELL, points, HALL)
+
+    const probes: Point[] = [
+      // The engine always asks from where somebody is standing, so most of the
+      // probes are people rather than arbitrary coordinates.
+      ...points.slice(0, 80),
+      ...scatter(rng, 120, HALL),
+      // Exactly on the cell lines, on the corners, and well outside the hall,
+      // where the grid clamps the query into its border cells.
+      ...Array.from({ length: 17 }, (_, k) => ({
+        x: HALL.minX + k * CELL,
+        y: HALL.minY + k * CELL,
+      })),
+      { x: HALL.minX, y: HALL.minY },
+      { x: HALL.maxX, y: HALL.maxY },
+      { x: HALL.minX - 9, y: HALL.minY - 9 },
+      { x: HALL.maxX + 40, y: 0 },
+    ]
+
+    const misses: Miss[] = []
+    const hits: number[] = []
+    // Well under a cell, half of one, exactly one, the engine's own neighbour
+    // range, and a radius spanning most of the venue.
+    for (const radius of [0.2, CELL / 2, CELL, 5, CELL * 20]) {
+      let found = 0
+      for (const probe of probes) {
+        const result = missesAt(hash, points, probe, radius)
+        misses.push(...result.misses)
+        found += result.hits
+      }
+      hits.push(found)
+    }
+
+    expect(misses).toEqual([])
+    // Guards the scan above against passing because it never had anything to
+    // find: every radius, down to the smallest, has to have had real work.
+    expect(hits[0]).toBeGreaterThanOrEqual(80)
+    expect(hits[2]).toBeGreaterThan(hits[0])
+    expect(hits[4]).toBeGreaterThan(20000)
+  })
+
+  it('misses nobody whatever the venue and the cell size', () => {
     const rng = new Rng('spatial-hash-brute-force')
-    const misses: Array<Record<string, number>> = []
+    const misses: Miss[] = []
     let found = 0
 
     for (let trial = 0; trial < 200; trial++) {
@@ -95,60 +180,18 @@ describe('SpatialHash.query', () => {
       const hash = build(cellSize, points, extent)
 
       for (let q = 0; q < 10; q++) {
-        const x = rng.uniform(extent.minX, extent.maxX)
-        const y = rng.uniform(extent.minY, extent.maxY)
-        const radius = rng.uniform(0, cellSize * 2)
-        const returned = new Set(collect(hash, x, y, radius))
-        for (const id of trulyWithin(points, x, y, radius)) {
-          found++
-          if (!returned.has(id)) {
-            misses.push({
-              trial,
-              cellSize,
-              x,
-              y,
-              radius,
-              pointX: points[id].x,
-              pointY: points[id].y,
-            })
-          }
+        const probe = {
+          x: rng.uniform(extent.minX, extent.maxX),
+          y: rng.uniform(extent.minY, extent.maxY),
         }
+        const result = missesAt(hash, points, probe, rng.uniform(0, cellSize * 2))
+        misses.push(...result.misses)
+        found += result.hits
       }
     }
 
     expect(misses).toEqual([])
-    // Guards the scan above against passing because it never had anything to find.
     expect(found).toBeGreaterThan(1000)
-  })
-
-  it('finds neighbours on the far side of a cell boundary', () => {
-    const eps = 1e-6
-    for (const cellSize of [1, 0.7, 2.5]) {
-      const extent: Extent = { minX: 0, minY: 0, maxX: 10, maxY: 10 }
-      const points: Point[] = []
-      for (let k = 1; k * cellSize < 10; k++) {
-        points.push({ x: k * cellSize - eps, y: 5 }, { x: k * cellSize + eps, y: 5 })
-      }
-      const hash = build(cellSize, points, extent)
-
-      for (let k = 1; k * cellSize < 10; k++) {
-        const ids = collect(hash, k * cellSize, 5, eps * 4).sort((a, b) => a - b)
-        expect(ids).toContain((k - 1) * 2)
-        expect(ids).toContain((k - 1) * 2 + 1)
-      }
-    }
-  })
-
-  it('finds all four neighbours around a grid corner', () => {
-    const eps = 1e-4
-    const corners: Point[] = [
-      { x: 3 - eps, y: 3 - eps },
-      { x: 3 + eps, y: 3 - eps },
-      { x: 3 - eps, y: 3 + eps },
-      { x: 3 + eps, y: 3 + eps },
-    ]
-    const hash = build(1, corners, { minX: 0, minY: 0, maxX: 10, maxY: 10 })
-    expect(collect(hash, 3, 3, eps * 4).sort((a, b) => a - b)).toEqual([0, 1, 2, 3])
   })
 
   it('stays close to the radius instead of visiting the whole grid', () => {
@@ -164,7 +207,7 @@ describe('SpatialHash.query', () => {
       for (let q = 0; q < 6; q++) {
         const x = rng.uniform(0, 40)
         const y = rng.uniform(0, 40)
-        const radius = rng.uniform(0, cellSize)
+        const radius = rng.uniform(0, cellSize * 4)
         for (const id of collect(hash, x, y, radius)) {
           returnedTotal++
           // A cell-aligned box can overshoot by at most one cell per axis. An
@@ -176,48 +219,148 @@ describe('SpatialHash.query', () => {
       }
     }
 
-    expect(returnedTotal).toBeGreaterThan(100)
+    expect(returnedTotal).toBeGreaterThan(1000)
   })
 
-  it('reports each id once even when a query spans many cells', () => {
-    const rng = new Rng('spatial-hash-duplicates')
+  it('reports each person once, and everybody, when a query sweeps the venue', () => {
+    const rng = new Rng('spatial-hash-sweep')
     const extent: Extent = { minX: -5, minY: -5, maxX: 5, maxY: 5 }
-    const points = scatter(rng, 300, extent)
+    // Coincident coordinates are normal — people queue shoulder to shoulder —
+    // and the counting-sort layout has to keep one slot per person regardless.
+    const points = [
+      ...scatter(rng, 300, extent),
+      ...Array.from({ length: 12 }, () => ({ x: 1.25, y: -3 })),
+    ]
     const hash = build(0.4, points, extent)
 
     // Wide enough to sweep every cell in the grid, which is where a duplicate
     // would surface if a cell were ever visited twice.
     const ids = collect(hash, 0, 0, 50)
-    expect(new Set(ids).size).toBe(ids.length)
     expect(ids.length).toBe(points.length)
+    expect(sorted(ids)).toEqual(everyone(points.length))
   })
 
-  it('makes every stored id reachable exactly once', () => {
-    const rng = new Rng('spatial-hash-completeness')
-    const extent: Extent = { minX: 0, minY: 0, maxX: 12, maxY: 7 }
-    // Duplicated coordinates are normal — people queue shoulder to shoulder —
-    // and the counting-sort layout has to keep one slot per entry regardless.
-    const points = [
-      ...scatter(rng, 40, extent),
-      ...Array.from({ length: 10 }, () => ({ x: 6, y: 3 })),
-    ]
-    const hash = build(1.5, points, extent)
+  it('works the same in a venue laid out entirely in negative coordinates', () => {
+    const rng = new Rng('spatial-hash-negative')
+    const extent: Extent = { minX: -64, minY: -41, maxX: -24, maxY: -9 }
+    const points = scatter(rng, 300, extent)
+    const hash = build(2, points, extent)
 
-    expect(collect(hash, 6, 3.5, 100).sort((a, b) => a - b)).toEqual(
-      points.map((_, id) => id).sort((a, b) => a - b),
-    )
+    const misses: Miss[] = []
+    let found = 0
+    for (const radius of [0.4, 2, 9]) {
+      for (const probe of [...points.slice(0, 60), ...scatter(rng, 40, extent)]) {
+        const result = missesAt(hash, points, probe, radius)
+        misses.push(...result.misses)
+        found += result.hits
+      }
+    }
+
+    expect(misses).toEqual([])
+    expect(found).toBeGreaterThan(300)
+    // Truncating towards zero instead of flooring would fold the left-hand
+    // columns onto each other, so a query on one side of the hall would answer
+    // with people from the other.
+    for (const id of collect(hash, -60, -38, 1)) {
+      expect(Math.abs(points[id].x + 60)).toBeLessThanOrEqual(3)
+      expect(Math.abs(points[id].y + 38)).toBeLessThanOrEqual(3)
+    }
   })
 })
 
-describe('SpatialHash rebuilds', () => {
+describe('cell boundaries', () => {
+  it('finds the neighbour on the far side of a cell boundary', () => {
+    const eps = 1e-6
+    for (const cellSize of [1, 0.7, 2.5]) {
+      const extent: Extent = { minX: 0, minY: 0, maxX: 10, maxY: 10 }
+      const points: Point[] = []
+      for (let k = 1; k * cellSize < 10; k++) {
+        points.push({ x: k * cellSize - eps, y: 5 }, { x: k * cellSize + eps, y: 5 })
+      }
+      const hash = build(cellSize, points, extent)
+
+      for (let k = 1; k * cellSize < 10; k++) {
+        const ids = collect(hash, k * cellSize, 5, eps * 4)
+        expect(ids).toContain((k - 1) * 2)
+        expect(ids).toContain((k - 1) * 2 + 1)
+      }
+    }
+  })
+
+  it('finds somebody standing exactly on a cell line, from either side of it', () => {
+    // Placement and lookup share one cell function, so a person on the line is
+    // wherever that function puts them — what must hold is that a query from
+    // either neighbouring cell still reaches them.
+    for (const cellSize of [1, 0.3, 2]) {
+      const extent: Extent = { minX: 0, minY: 0, maxX: 12, maxY: 12 }
+      const onLines = Array.from({ length: 6 }, (_, k) => ({
+        x: (k + 1) * cellSize,
+        y: (k + 1) * cellSize,
+      }))
+      const hash = build(cellSize, onLines, extent)
+
+      onLines.forEach((p, id) => {
+        const step = cellSize * 0.4
+        expect(collect(hash, p.x - step, p.y - step, cellSize)).toContain(id)
+        expect(collect(hash, p.x + step, p.y + step, cellSize)).toContain(id)
+        expect(collect(hash, p.x, p.y, 0)).toContain(id)
+      })
+    }
+  })
+
+  it('finds all four neighbours around a grid corner', () => {
+    const eps = 1e-4
+    const corners: Point[] = [
+      { x: 3 - eps, y: 3 - eps },
+      { x: 3 + eps, y: 3 - eps },
+      { x: 3 - eps, y: 3 + eps },
+      { x: 3 + eps, y: 3 + eps },
+    ]
+    const hash = build(1, corners, { minX: 0, minY: 0, maxX: 10, maxY: 10 })
+    expect(sorted(collect(hash, 3, 3, eps * 4))).toEqual([0, 1, 2, 3])
+  })
+})
+
+describe('rebuilding every tick', () => {
+  it('answers with this tick’s crowd only, however big the last one was', () => {
+    const extent: Extent = { minX: 0, minY: 0, maxX: 30, maxY: 30 }
+    const rng = new Rng('spatial-hash-frames')
+    const hash = new SpatialHash(2)
+    load(hash, scatter(rng, 240, extent), extent)
+    expect(collect(hash, 15, 15, 100)).toHaveLength(240)
+
+    // The tick after nearly everyone has left. The entry array still physically
+    // holds the 240 ids from the frame before, so anything that trusted its
+    // contents rather than this frame's counts would hand ORCA people who have
+    // gone home — and index `agents` with ids that are no longer live.
+    const remaining: Point[] = [
+      { x: 4, y: 4 },
+      { x: 4.2, y: 4.1 },
+      { x: 27, y: 28 },
+    ]
+    load(hash, remaining, extent)
+
+    expect(sorted(collect(hash, 15, 15, 100))).toEqual([0, 1, 2])
+    expect(collect(hash, 4.1, 4.05, 0.3)).toContain(0)
+    expect(collect(hash, 27, 28, 0.5)).toEqual([2])
+    for (const probe of [
+      { x: 0, y: 0 },
+      { x: 4, y: 4 },
+      { x: 15, y: 15 },
+      { x: 30, y: 30 },
+    ]) {
+      for (const id of collect(hash, probe.x, probe.y, 12)) expect(id).toBeLessThan(3)
+    }
+  })
+
   it('discards the previous contents on reset', () => {
     const extent: Extent = { minX: 0, minY: 0, maxX: 10, maxY: 10 }
     const rng = new Rng('spatial-hash-reset')
     const hash = build(1, scatter(rng, 50, extent), extent)
     expect(collect(hash, 5, 5, 100)).toHaveLength(50)
 
-    // A reset with no rebuild behind it is what an engine tick looks like when
-    // every agent has left: it must answer nothing, not the last tick's crowd.
+    // A reset with no rebuild behind it is what a tick looks like when every
+    // agent has left: it must answer nothing, not the last tick's crowd.
     hash.reset(extent.minX, extent.minY, extent.maxX, extent.maxY, 1)
     expect(collect(hash, 5, 5, 100)).toEqual([])
 
@@ -231,7 +374,7 @@ describe('SpatialHash rebuilds', () => {
     // where a stale count would resurrect ids from a previous tick.
     const rng = new Rng('spatial-hash-reuse')
     const hash = new SpatialHash(1.5)
-    const misses: Array<Record<string, number>> = []
+    const misses: Miss[] = []
     const strangers: number[] = []
 
     for (let trial = 0; trial < 150; trial++) {
@@ -245,16 +388,15 @@ describe('SpatialHash rebuilds', () => {
       load(hash, points, extent)
 
       for (let q = 0; q < 5; q++) {
-        const x = rng.uniform(extent.minX, extent.maxX)
-        const y = rng.uniform(extent.minY, extent.maxY)
+        const probe = {
+          x: rng.uniform(extent.minX, extent.maxX),
+          y: rng.uniform(extent.minY, extent.maxY),
+        }
         const radius = rng.uniform(0, 4)
-        const returned = collect(hash, x, y, radius)
-        for (const id of returned) {
+        for (const id of collect(hash, probe.x, probe.y, radius)) {
           if (!Number.isInteger(id) || id < 0 || id >= points.length) strangers.push(id)
         }
-        const expected = trulyWithin(points, x, y, radius)
-        const seen = new Set(returned)
-        for (const id of expected) if (!seen.has(id)) misses.push({ trial, x, y, radius, id })
+        misses.push(...missesAt(hash, points, probe, radius).misses)
       }
     }
 
@@ -263,7 +405,7 @@ describe('SpatialHash rebuilds', () => {
   })
 })
 
-describe('SpatialHash degenerate input', () => {
+describe('degenerate crowds', () => {
   it('answers nothing before it has ever been reset', () => {
     const hash = new SpatialHash(1)
     expect(collect(hash, 0, 0, 5)).toEqual([])
@@ -273,9 +415,31 @@ describe('SpatialHash degenerate input', () => {
     const hash = new SpatialHash(1)
     load(hash, [], { minX: 0, minY: 0, maxX: 20, maxY: 20 })
     expect(collect(hash, 10, 10, 1000)).toEqual([])
+    expect(collect(hash, -400, 900, 0)).toEqual([])
   })
 
-  it('handles a zero radius', () => {
+  it('finds the only person in the venue, and not from across it', () => {
+    const extent: Extent = { minX: 0, minY: 0, maxX: 50, maxY: 50 }
+    const hash = build(4, [{ x: 31.5, y: 12.25 }], extent)
+
+    expect(collect(hash, 31.5, 12.25, 0)).toEqual([0])
+    expect(collect(hash, 30, 13, 5)).toEqual([0])
+    expect(collect(hash, 25, 25, 200)).toEqual([0])
+    expect(collect(hash, 5, 45, 4)).toEqual([])
+  })
+
+  it('returns the whole huddle when everybody is standing on one spot', () => {
+    const spot = { x: 2.5, y: -1.25 }
+    const extent: Extent = { minX: -5, minY: -5, maxX: 15, maxY: 15 }
+    const huddle = Array.from({ length: 64 }, () => ({ ...spot }))
+    const hash = build(1, huddle, extent)
+
+    expect(sorted(collect(hash, spot.x, spot.y, 0))).toEqual(everyone(64))
+    expect(sorted(collect(hash, spot.x + 0.4, spot.y - 0.3, 0.6))).toEqual(everyone(64))
+    expect(collect(hash, 12, 12, 1)).toEqual([])
+  })
+
+  it('answers who else is standing exactly here at zero radius', () => {
     const extent: Extent = { minX: 0, minY: 0, maxX: 10, maxY: 10 }
     const hash = build(
       1,
@@ -287,23 +451,29 @@ describe('SpatialHash degenerate input', () => {
       extent,
     )
 
-    // Two people at the same coordinate is the case that matters: a zero-radius
-    // query is how the engine asks "who else is exactly here".
-    expect(collect(hash, 3, 3, 0).sort((a, b) => a - b)).toEqual([0, 1])
+    expect(sorted(collect(hash, 3, 3, 0))).toEqual([0, 1])
     expect(collect(hash, 7, 7, 0)).toEqual([2])
     expect(collect(hash, 5.5, 5.5, 0)).toEqual([])
   })
 
-  it('keeps points that drift outside the extent', () => {
-    // Agents can be pushed past the world bounds by contact resolution. Such a
-    // point is clamped into the border cell rather than dropped, so a query out
-    // there still finds it.
+  it('keeps people who drift outside the extent', () => {
+    // Contact resolution can push somebody past the world bounds. Such a person
+    // is clamped into the border cell rather than dropped, so a query out there
+    // still finds them and they can be pushed back.
     const extent: Extent = { minX: 0, minY: 0, maxX: 10, maxY: 10 }
-    const stray = { x: 20, y: 5 }
-    const hash = build(2, [{ x: 5, y: 5 }, stray], extent)
+    const hash = build(
+      2,
+      [
+        { x: 5, y: 5 },
+        { x: 20, y: 5 },
+        { x: -7, y: -7 },
+      ],
+      extent,
+    )
 
     expect(collect(hash, 19, 5, 1.5)).toContain(1)
-    expect(collect(hash, -9, 5, 1.5)).not.toContain(1)
+    expect(collect(hash, -9, -9, 1.5)).toContain(2)
+    expect(collect(hash, -9, -9, 1.5)).not.toContain(1)
   })
 
   it('survives an inverted extent', () => {
@@ -315,13 +485,24 @@ describe('SpatialHash degenerate input', () => {
         { x: 0, y: 0 },
         { x: 100, y: 100 },
       ],
-      {
-        minX: 5,
-        minY: 5,
-        maxX: -5,
-        maxY: -5,
-      },
+      { minX: 5, minY: 5, maxX: -5, maxY: -5 },
     )
-    expect(collect(hash, 0, 0, 1).sort((a, b) => a - b)).toEqual([0, 1])
+    expect(sorted(collect(hash, 0, 0, 1))).toEqual([0, 1])
+  })
+
+  it('keeps the rest of the crowd findable when one position has gone NaN', () => {
+    const extent: Extent = { minX: 0, minY: 0, maxX: 20, maxY: 20 }
+    const rng = new Rng('spatial-hash-nan')
+    const crowd = scatter(rng, 40, extent)
+    const points = [...crowd, { x: NaN, y: NaN }]
+    const hash = build(2, points, extent)
+
+    const misses: Miss[] = []
+    for (const probe of crowd) misses.push(...missesAt(hash, crowd, probe, 3).misses)
+    expect(misses).toEqual([])
+    // A broken position lands in the origin cell, where it is an extra the
+    // callers' own distance checks throw away, rather than corrupting the
+    // layout and taking real neighbours with it.
+    expect(collect(hash, 0, 0, 0)).toContain(40)
   })
 })

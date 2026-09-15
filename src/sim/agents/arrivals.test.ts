@@ -1,16 +1,15 @@
 /**
  * Arrival schedules.
  *
- * The count is the easy half. The shape is the half the product is actually
- * sold on: the same 600 people arriving evenly, in five coach-loads, or in a
- * pre-session peak queue completely differently, and a profile that quietly
- * flattens into another one makes those comparisons meaningless. So most of
- * what is below measures shape — where the mass sits, how spread out it is,
- * whether it stays inside the window it was given — rather than just counting.
+ * The count is the easy half. The shape is the half the product is sold on: the
+ * same 600 people arriving evenly, in five coach-loads or in a pre-session peak
+ * queue completely differently, and a profile that has quietly flattened into
+ * another one makes the comparison between them meaningless. So most of what
+ * follows measures where the mass sits and how far it spreads, in bins wide
+ * enough that only a real change of shape moves them.
  *
- * Determinism is checked per profile because AGENTS.md makes it a whole-engine
- * invariant: the same seed must replay exactly, and a different seed must
- * actually move the stochastic profiles rather than silently doing nothing.
+ * Every draw comes from a seeded Rng, so nothing here is sampled twice hoping
+ * for a different answer: the numbers below are the numbers the engine gets.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -20,17 +19,25 @@ import type { ArrivalKind, ArrivalProfile } from '../../core/model/types'
 
 const WINDOW = 1200
 
-const ALL_KINDS: ArrivalKind[] = [
-  'uniform',
-  'poisson',
-  'waves',
-  'front-loaded',
-  'peak',
-  'all-at-once',
-]
+/**
+ * Keyed by the union rather than listed loose, so adding a profile stops the
+ * build here. A new arrival shape that nothing in this file has ever run is
+ * exactly the kind of thing that ships broken.
+ */
+const ALL_KINDS = Object.keys({
+  uniform: true,
+  poisson: true,
+  waves: true,
+  'front-loaded': true,
+  peak: true,
+  'all-at-once': true,
+} satisfies Record<ArrivalKind, true>) as ArrivalKind[]
 
-/** Profiles that draw from the rng, so a new seed must change the answer. */
+/** Profiles that draw from the rng, so a new seed must move them. */
 const STOCHASTIC_KINDS: ArrivalKind[] = ['poisson', 'waves', 'front-loaded', 'peak']
+
+/** Profiles that are pure arithmetic, so the seed must not reach them at all. */
+const DETERMINISTIC_KINDS: ArrivalKind[] = ['uniform', 'all-at-once']
 
 const profileFor = (
   kind: ArrivalKind,
@@ -43,8 +50,7 @@ const profileFor = (
 })
 
 /** Position in the window, 0–1, which is how every shape assertion is phrased. */
-const fractions = (times: number[], start = 0, window = WINDOW): number[] =>
-  times.map((t) => (t - start) / window)
+const fractions = (times: number[]): number[] => times.map((t) => t / WINDOW)
 
 const mean = (values: number[]): number => values.reduce((a, b) => a + b, 0) / values.length
 
@@ -62,16 +68,19 @@ const histogram = (times: number[], bins: number): number[] => {
 }
 
 describe('every arrival profile', () => {
-  it.each(ALL_KINDS)('produces exactly the headcount it was asked for (%s)', (kind) => {
+  it.each(ALL_KINDS)('delivers exactly the headcount the population asked for (%s)', (kind) => {
     expect(scheduleArrivals(profileFor(kind), 137, new Rng(11))).toHaveLength(137)
   })
 
-  it.each(ALL_KINDS)('returns times sorted ascending (%s)', (kind) => {
+  it.each(ALL_KINDS)('hands the engine the arrivals in the order they happen (%s)', (kind) => {
+    // The engine walks the schedule alongside the group split, giving the nth
+    // person the nth time and a whole group its first member's time. Out of
+    // order, a group would be spawned before the people ahead of it.
     const times = scheduleArrivals(profileFor(kind), 300, new Rng(11))
     expect(times.every((t, i) => i === 0 || times[i - 1] <= t)).toBe(true)
   })
 
-  it.each(ALL_KINDS)('never seats anybody before the doors open (%s)', (kind) => {
+  it.each(ALL_KINDS)('lets nobody in before the doors open (%s)', (kind) => {
     const times = scheduleArrivals(profileFor(kind, { startS: 900 }), 300, new Rng(11))
     expect(Math.min(...times)).toBeGreaterThanOrEqual(900)
   })
@@ -79,30 +88,39 @@ describe('every arrival profile', () => {
   it.each(ALL_KINDS)(
     'offsets the whole schedule by startS rather than reshaping it (%s)',
     (kind) => {
+      // A later doors-open time must move the queue, not redraw it: the same seed
+      // has to spend its draws on the same shape either way.
       const atZero = scheduleArrivals(profileFor(kind), 200, new Rng(31))
       const shifted = scheduleArrivals(profileFor(kind, { startS: 450 }), 200, new Rng(31))
       shifted.forEach((t, i) => expect(t - 450).toBeCloseTo(atZero[i], 9))
     },
   )
 
-  it.each(ALL_KINDS)('treats a headcount of zero as nobody, not as a crash (%s)', (kind) => {
-    expect(scheduleArrivals(profileFor(kind), 0, new Rng(11))).toEqual([])
-  })
+  it.each(ALL_KINDS)(
+    'treats an empty or negative headcount as nobody, not as a crash (%s)',
+    (kind) => {
+      expect(scheduleArrivals(profileFor(kind), 0, new Rng(11))).toEqual([])
+      expect(scheduleArrivals(profileFor(kind), -5, new Rng(11))).toEqual([])
+    },
+  )
 
-  it.each(ALL_KINDS)('treats a negative headcount as nobody (%s)', (kind) => {
-    expect(scheduleArrivals(profileFor(kind), -5, new Rng(11))).toEqual([])
-  })
-
-  it.each(ALL_KINDS)('clamps a negative start and window to zero (%s)', (kind) => {
-    const times = scheduleArrivals(profileFor(kind, { startS: -60, windowS: -30 }), 5, new Rng(11))
-    expect(times).toHaveLength(5)
-    expect(times.every((t) => t >= 0 && Number.isFinite(t))).toBe(true)
-  })
+  it.each(ALL_KINDS)(
+    'clamps a negative start and window instead of scheduling the past (%s)',
+    (kind) => {
+      const times = scheduleArrivals(
+        profileFor(kind, { startS: -60, windowS: -30 }),
+        5,
+        new Rng(11),
+      )
+      expect(times).toHaveLength(5)
+      expect(times.every((t) => t >= 0 && Number.isFinite(t))).toBe(true)
+    },
+  )
 })
 
 describe('staying inside the window', () => {
-  // Poisson and waves are excluded on purpose — both overrun, and each has its
-  // own test below saying by how much.
+  // Poisson and waves are left out on purpose: both overrun, and each has a
+  // test of its own below saying by how much.
   const BOUNDED: ArrivalKind[] = ['uniform', 'front-loaded', 'peak', 'all-at-once']
 
   it.each(BOUNDED)('keeps every arrival between start and start + window (%s)', (kind) => {
@@ -111,9 +129,10 @@ describe('staying inside the window', () => {
     expect(Math.max(...times)).toBeLessThanOrEqual(300 + WINDOW)
   })
 
-  it.each(['uniform', 'poisson', 'front-loaded', 'peak', 'all-at-once'] as ArrivalKind[])(
+  it.each([...BOUNDED, 'poisson' as ArrivalKind])(
     'collapses a zero-length window onto the start instant (%s)',
     (kind) => {
+      // Poisson's rate is count / window, so this is also the division by zero.
       const times = scheduleArrivals(profileFor(kind, { startS: 120, windowS: 0 }), 12, new Rng(7))
       expect(times).toEqual(new Array(12).fill(120))
     },
@@ -127,20 +146,14 @@ describe('uniform arrivals', () => {
     const gap = WINDOW / count
     expect(times[0]).toBeCloseTo(gap / 2, 9)
     expect(times[count - 1]).toBeCloseTo(WINDOW - gap / 2, 9)
-    // Equal half gaps at both ends are what keep the flow rate constant across
-    // a run made of back-to-back uniform windows.
+    // Half a gap at each end is what keeps the flow rate constant across two
+    // back-to-back windows instead of doubling up on the seam.
     times.slice(1).forEach((t, i) => expect(t - times[i]).toBeCloseTo(gap, 9))
   })
 
   it('is perfectly flat: every tenth of the window gets the same number', () => {
     expect(histogram(scheduleArrivals(profileFor('uniform'), 600, new Rng(3)), 10)).toEqual(
       new Array(10).fill(60),
-    )
-  })
-
-  it('ignores the seed, because it makes no random draws at all', () => {
-    expect(scheduleArrivals(profileFor('uniform'), 40, new Rng(1))).toEqual(
-      scheduleArrivals(profileFor('uniform'), 40, new Rng(999999)),
     )
   })
 })
@@ -150,35 +163,37 @@ describe('all-at-once arrivals', () => {
     const times = scheduleArrivals(profileFor('all-at-once', { startS: 90 }), 250, new Rng(3))
     expect(times).toEqual(new Array(250).fill(90))
   })
-
-  it('ignores the seed, because it makes no random draws at all', () => {
-    expect(scheduleArrivals(profileFor('all-at-once'), 40, new Rng(1))).toEqual(
-      scheduleArrivals(profileFor('all-at-once'), 40, new Rng(999999)),
-    )
-  })
 })
 
 describe('poisson arrivals', () => {
   it('draws gaps at the rate the count and window imply', () => {
-    const count = 4000
-    const times = scheduleArrivals(profileFor('poisson'), count, new Rng(9))
-    const gaps = times.slice(1).map((t, i) => t - times[i])
-    expect(mean(gaps)).toBeCloseTo(WINDOW / count, 2)
+    const count = 2000
+    const nominal = WINDOW / count
+    const gapMeans = Array.from({ length: 12 }, (_, i) => {
+      const times = scheduleArrivals(profileFor('poisson'), count, new Rng(i + 1))
+      return mean(times.slice(1).map((t, j) => t - times[j]))
+    })
+    for (const gapMean of gapMeans) {
+      expect(gapMean).toBeGreaterThan(nominal * 0.9)
+      expect(gapMean).toBeLessThan(nominal * 1.1)
+    }
+    expect(mean(gapMeans)).toBeGreaterThan(nominal * 0.95)
+    expect(mean(gapMeans)).toBeLessThan(nominal * 1.05)
   })
 
   it('is genuinely bursty rather than uniform with jitter', () => {
-    // A flat schedule of 600 puts exactly 60 in every tenth of the window. The
-    // whole point of choosing poisson over uniform is that some tenths are
-    // busier than others, which is what makes a queue form and clear.
+    // Flat would put exactly 60 in every tenth and space everyone 2 s apart.
+    // Choosing poisson over uniform buys the busy tenths and the lulls, which
+    // are what make a queue build and clear at all.
     for (let seed = 1; seed <= 20; seed++) {
-      const busiest = Math.max(
-        ...histogram(scheduleArrivals(profileFor('poisson'), 600, new Rng(seed)), 10),
-      )
-      expect(busiest).toBeGreaterThan(60)
+      const times = scheduleArrivals(profileFor('poisson'), 600, new Rng(seed))
+      const gaps = times.slice(1).map((t, i) => t - times[i])
+      expect(Math.max(...histogram(times, 10))).toBeGreaterThan(60)
+      expect(Math.max(...gaps)).toBeGreaterThan(mean(gaps) * 3)
     }
   })
 
-  it('finishes near the end of the window on average', () => {
+  it('still finishes roughly when the window says it should', () => {
     for (let seed = 1; seed <= 20; seed++) {
       const times = scheduleArrivals(profileFor('poisson'), 600, new Rng(seed))
       const last = times[times.length - 1] / WINDOW
@@ -187,12 +202,15 @@ describe('poisson arrivals', () => {
     }
   })
 
-  it('SUSPECTED BUG: lets people turn up after the window has closed', () => {
-    // Current behaviour, asserted rather than fixed. The schedule is a running
-    // sum of exponential gaps, so nothing bounds it by the window: "600 people
-    // over 20 minutes" routinely delivers its last arrival minutes after the
-    // 20 minutes are up, and every other bounded profile disagrees with it
-    // about what windowS means.
+  it('lets people turn up after the window it was given has closed', () => {
+    // SUSPECTED BUG: the schedule is a running sum of exponential gaps, so
+    // nothing bounds it by the window — "600 people over 20 minutes" delivers
+    // its last arrivals after the 20 minutes are up about half the time, and
+    // this profile then disagrees with every bounded one about what windowS
+    // means. Anyone past the scenario duration never enters the venue at all,
+    // so a comparison against a uniform baseline is quietly short of people.
+    // Asserting current behaviour; correct would be to scale the draws onto
+    // the window (or to thin the process to it) and keep the burstiness.
     let overran = 0
     for (let seed = 1; seed <= 50; seed++) {
       const times = scheduleArrivals(profileFor('poisson'), 200, new Rng(seed))
@@ -203,21 +221,29 @@ describe('poisson arrivals', () => {
 })
 
 describe('wave arrivals', () => {
-  /** Wave index of each time, given that the spread only ever runs forwards. */
+  /** Which wave a time belongs to, given that the unload only runs forwards. */
   const waveOf = (times: number[], gap: number): number[] => times.map((t) => Math.floor(t / gap))
 
-  it('splits the headcount evenly across the requested number of waves', () => {
-    const times = scheduleArrivals(profileFor('waves', { waves: 5 }), 100, new Rng(3))
-    const counts = new Array<number>(5).fill(0)
-    for (const wave of waveOf(times, WINDOW / 4)) counts[wave]++
-    expect(counts).toEqual([20, 20, 20, 20, 20])
+  const countPerWave = (times: number[], waves: number): number[] => {
+    const counts = new Array<number>(waves).fill(0)
+    for (const wave of waveOf(times, WINDOW / (waves - 1))) counts[wave]++
+    return counts
+  }
+
+  it('splits the headcount as evenly across the waves as it divides', () => {
+    const even = scheduleArrivals(profileFor('waves', { waves: 5 }), 100, new Rng(3))
+    expect(countPerWave(even, 5)).toEqual([20, 20, 20, 20, 20])
+
+    // Ten people off four coaches cannot be even, but no coach may arrive empty
+    // and none may be left carrying the rounding error for all the others.
+    const odd = scheduleArrivals(profileFor('waves', { waves: 4 }), 10, new Rng(8))
+    expect(countPerWave(odd, 4)).toEqual([3, 2, 3, 2])
   })
 
   it('defaults to four waves', () => {
-    const times = scheduleArrivals(profileFor('waves'), 100, new Rng(8))
-    const counts = new Array<number>(4).fill(0)
-    for (const wave of waveOf(times, WINDOW / 3)) counts[wave]++
-    expect(counts).toEqual([25, 25, 25, 25])
+    expect(countPerWave(scheduleArrivals(profileFor('waves'), 100, new Rng(8)), 4)).toEqual([
+      25, 25, 25, 25,
+    ])
   })
 
   it('lands each wave on its nominal time plus a short unload', () => {
@@ -225,17 +251,17 @@ describe('wave arrivals', () => {
     const times = scheduleArrivals(profileFor('waves', { waves: 5 }), 400, new Rng(12))
     const offsets = times.map((t) => t - Math.floor(t / gap) * gap)
     expect(Math.min(...offsets)).toBeGreaterThanOrEqual(0)
-    // A coach does not empty instantly, but it does empty: the spread is capped
-    // at 45 s, so waves stay separate rather than smearing into a uniform run.
+    // A coach does not empty instantly, but it does empty: capped at 45 s so
+    // the waves stay distinguishable instead of smearing into a uniform run.
     expect(Math.max(...offsets)).toBeLessThanOrEqual(45)
     expect(Math.max(...offsets)).toBeGreaterThan(30)
   })
 
-  it('clamps a waves count below one to a single batch', () => {
+  it('clamps a wave count below one to a single batch', () => {
     for (const waves of [0, -3, 0.4]) {
       const times = scheduleArrivals(profileFor('waves', { waves }), 40, new Rng(8))
       expect(times).toHaveLength(40)
-      // One wave means no gap, so everyone lands in the first unload window.
+      // One wave means no gap to spread over, so the unload floor is all there is.
       expect(Math.max(...times)).toBeLessThanOrEqual(10)
     }
   })
@@ -243,23 +269,25 @@ describe('wave arrivals', () => {
   it('does not fabricate a wave it has nobody for', () => {
     const times = scheduleArrivals(profileFor('waves', { waves: 10 }), 3, new Rng(8))
     expect(times).toHaveLength(3)
-    expect(new Set(times.map((t) => Math.floor(t / (WINDOW / 9)))).size).toBe(3)
+    expect(new Set(waveOf(times, WINDOW / 9)).size).toBe(3)
   })
 
-  it('SUSPECTED BUG: the last wave and its unload both run past the window', () => {
-    // Current behaviour, asserted rather than fixed. The final wave starts at
-    // exactly start + window and only then gets its unload spread added, so a
-    // wave schedule always overruns its window by up to 45 s.
+  it('runs the last wave and its unload past the end of the window', () => {
+    // SUSPECTED BUG: the final wave starts at exactly start + window and only
+    // then has its unload spread added, so a wave schedule always overruns by
+    // up to 45 s. Correct would be to fit the waves so the last one has emptied
+    // by the end of the window; as it stands "in waves" and "evenly spread"
+    // over the same window are not over the same window.
     const times = scheduleArrivals(profileFor('waves', { waves: 5 }), 200, new Rng(3))
     expect(Math.max(...times)).toBeGreaterThan(WINDOW)
     expect(Math.max(...times)).toBeLessThanOrEqual(WINDOW + 45)
   })
 
-  it('SUSPECTED BUG: a zero-length window still spreads arrivals over 10 s', () => {
-    // Current behaviour, asserted rather than fixed. The unload spread has a
-    // 10 s floor that does not scale with the window, so "everyone at once" via
-    // a zero-length wave window is not actually at once — unlike every other
-    // profile, which collapses onto the start instant.
+  it('still spreads arrivals over ten seconds when the window is zero', () => {
+    // SUSPECTED BUG: the unload spread has a flat 10 s floor that does not
+    // scale with the window, so a zero-length wave window is the one profile
+    // where "everybody at once" is not at once. Correct would be to cap the
+    // spread by the window as well as by 45 s.
     const times = scheduleArrivals(profileFor('waves', { startS: 120, windowS: 0 }), 20, new Rng(3))
     expect(Math.min(...times)).toBeGreaterThan(120)
     expect(Math.max(...times)).toBeLessThanOrEqual(130)
@@ -267,30 +295,27 @@ describe('wave arrivals', () => {
 })
 
 describe('front-loaded arrivals', () => {
-  const times = scheduleArrivals(profileFor('front-loaded'), 3000, new Rng(13))
-  const positions = fractions(times)
+  const positions = fractions(scheduleArrivals(profileFor('front-loaded'), 3000, new Rng(13)))
 
-  it('puts more than half the crowd in the first quarter of the window', () => {
+  it('puts more than half the crowd in the first quarter and a trickle in the last', () => {
     expect(positions.filter((f) => f < 0.25).length / positions.length).toBeGreaterThan(0.5)
-  })
-
-  it('leaves only a trickle in the last quarter', () => {
     expect(positions.filter((f) => f >= 0.75).length / positions.length).toBeLessThan(0.2)
   })
 
-  it('has its median well before the midpoint a uniform profile would give', () => {
-    // u^2.2 has median 0.5^2.2 ~= 0.218 and mean 1/3.2 = 0.3125. Anything near
-    // 0.5 means the exponent has been lost and this is uniform in disguise.
+  it('sits well before the midpoint a uniform profile would give', () => {
+    // u^2.2 has median 0.5^2.2 ~= 0.22 and mean 1/3.2 ~= 0.31. A median near
+    // 0.5 would mean the exponent has been lost and this is uniform in disguise.
     expect(median(positions)).toBeLessThan(0.25)
     expect(mean(positions)).toBeGreaterThan(0.28)
     expect(mean(positions)).toBeLessThan(0.34)
   })
 
-  it('decays monotonically across the window', () => {
-    const bins = histogram(times, 4)
+  it('thins out steadily rather than stopping dead', () => {
+    const bins = histogram(scheduleArrivals(profileFor('front-loaded'), 3000, new Rng(13)), 4)
     expect(bins[0]).toBeGreaterThan(bins[1])
     expect(bins[1]).toBeGreaterThan(bins[2])
     expect(bins[2]).toBeGreaterThan(bins[3])
+    expect(bins[3]).toBeGreaterThan(0)
   })
 })
 
@@ -305,11 +330,11 @@ describe('peak arrivals', () => {
     }
   })
 
-  it('defaults to a mid-window peak with an 0.18 spread', () => {
+  it('defaults to a mid-window peak that holds most of the crowd', () => {
     const positions = fractions(scheduleArrivals(profileFor('peak'), 3000, new Rng(5)))
     expect(mean(positions)).toBeCloseTo(0.5, 1)
-    // One standard deviation of a normal holds ~68% of the mass; this is the
-    // assertion that catches a "peak" that has quietly flattened out.
+    // One standard deviation of a normal holds ~68% of the mass. Too little and
+    // the peak has flattened into a uniform run; too much and it is a spike.
     const withinOneSpread = positions.filter((f) => Math.abs(f - 0.5) <= 0.18).length
     expect(withinOneSpread / positions.length).toBeGreaterThan(0.6)
     expect(withinOneSpread / positions.length).toBeLessThan(0.78)
@@ -324,13 +349,14 @@ describe('peak arrivals', () => {
     expect(nearPeak(tight)).toBeGreaterThan(nearPeak(wide) * 2)
   })
 
-  it('floors the spread so a zero spread is still sampled, not degenerate', () => {
+  it('floors a zero spread so the peak is sampled rather than degenerate', () => {
     const positions = fractions(
       scheduleArrivals(profileFor('peak', { spread: 0 }), 2000, new Rng(5)),
     )
-    expect(Math.max(...positions) - Math.min(...positions)).toBeGreaterThan(0)
-    // 0.02 of the window, so a few sigma either side of the peak at most.
-    expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(0.2)
+    const range = Math.max(...positions) - Math.min(...positions)
+    expect(range).toBeGreaterThan(0)
+    // The floor is 0.02 of the window, so a few sigma either side at most.
+    expect(range).toBeLessThan(0.2)
   })
 
   it('clamps a peak outside the window to its edge', () => {
@@ -341,26 +367,47 @@ describe('peak arrivals', () => {
     expect(median(early)).toBeLessThan(0.25)
     expect(Math.min(...early)).toBeGreaterThanOrEqual(0)
   })
+
+  it('stacks a quarter of the crowd on one instant when the spread is very wide', () => {
+    // SUSPECTED BUG: truncatedNormal resamples 16 times and then gives up and
+    // returns the clamped *mean*, so a spread wide enough that most samples
+    // miss [0, 1] hands hundreds of people the identical arrival second — a
+    // fake surge in the very profile meant to model a gentle one. A spread over
+    // 1 has no UI control but survives a load: parseArrival passes it through
+    // unclamped. Correct would be to clamp the failed sample, or the spread.
+    const times = scheduleArrivals(profileFor('peak', { spread: 5 }), 2000, new Rng(5))
+    const onTheDot = times.filter((t) => t === WINDOW * 0.5)
+    expect(onTheDot.length).toBeGreaterThan(300)
+    // At a spread the UI can produce, nobody shares an instant with anybody.
+    const sane = scheduleArrivals(profileFor('peak'), 2000, new Rng(5))
+    expect(sane.filter((t) => t === WINDOW * 0.5)).toHaveLength(0)
+  })
 })
 
 describe('reproducibility', () => {
-  it.each(ALL_KINDS)('replays identically for the same seed (%s)', (kind) => {
-    const args = profileFor(kind, { waves: 3, peakAt: 0.4, spread: 0.1 })
-    expect(scheduleArrivals(args, 200, new Rng(1234))).toEqual(
-      scheduleArrivals(args, 200, new Rng(1234)),
+  it.each(ALL_KINDS)('replays a scenario identically for the same seed (%s)', (kind) => {
+    const profile = profileFor(kind, { waves: 3, peakAt: 0.4, spread: 0.1 })
+    expect(scheduleArrivals(profile, 200, new Rng(1234))).toEqual(
+      scheduleArrivals(profile, 200, new Rng(1234)),
     )
   })
 
   it.each(STOCHASTIC_KINDS)('actually moves when the seed changes (%s)', (kind) => {
-    const args = profileFor(kind, { waves: 3, peakAt: 0.4, spread: 0.1 })
-    expect(scheduleArrivals(args, 200, new Rng(1234))).not.toEqual(
-      scheduleArrivals(args, 200, new Rng(4321)),
+    const profile = profileFor(kind, { waves: 3, peakAt: 0.4, spread: 0.1 })
+    expect(scheduleArrivals(profile, 200, new Rng(1234))).not.toEqual(
+      scheduleArrivals(profile, 200, new Rng(4321)),
+    )
+  })
+
+  it.each(DETERMINISTIC_KINDS)('ignores the seed, having no random draws to make (%s)', (kind) => {
+    expect(scheduleArrivals(profileFor(kind), 40, new Rng(1))).toEqual(
+      scheduleArrivals(profileFor(kind), 40, new Rng(999999)),
     )
   })
 
   it('never reaches for Math.random', () => {
-    // AGENTS.md: every stochastic decision draws from the seeded Rng. One
-    // Math.random anywhere in here and a scenario stops replaying.
+    // One Math.random in here and a scenario stops replaying, which is the
+    // engine-wide claim the whole validation suite rests on.
     const random = vi.spyOn(Math, 'random').mockImplementation(() => {
       throw new Error('arrivals must draw from the seeded Rng')
     })
@@ -385,39 +432,30 @@ describe('splitting a headcount into groups', () => {
     }
   })
 
-  it('returns singletons when no group size is configured', () => {
+  it('sends people in on their own when nobody is grouped', () => {
     expect(splitIntoGroups(4, undefined, new Rng(1))).toEqual([1, 1, 1, 1])
-  })
-
-  it('returns singletons when the maximum group is one person', () => {
     expect(splitIntoGroups(4, { min: 1, max: 1 }, new Rng(1))).toEqual([1, 1, 1, 1])
   })
 
-  it('never exceeds the maximum group size', () => {
+  it('keeps every group inside the configured size but for the remainder', () => {
     for (let seed = 1; seed <= 25; seed++) {
-      const groups = splitIntoGroups(120, { min: 2, max: 5 }, new Rng(seed))
-      expect(Math.max(...groups)).toBeLessThanOrEqual(5)
+      const groups = splitIntoGroups(97, { min: 3, max: 6 }, new Rng(seed))
+      expect(groups.slice(0, -1).every((size) => size >= 3 && size <= 6)).toBe(true)
+      expect(Math.max(...groups)).toBeLessThanOrEqual(6)
       expect(Math.min(...groups)).toBeGreaterThanOrEqual(1)
     }
   })
 
-  it('holds every group but the last to the minimum size', () => {
-    for (let seed = 1; seed <= 25; seed++) {
-      const groups = splitIntoGroups(97, { min: 3, max: 6 }, new Rng(seed))
-      expect(groups.slice(0, -1).every((size) => size >= 3 && size <= 6)).toBe(true)
-    }
-  })
-
-  it('lets the remainder be smaller than the minimum rather than inventing a person', () => {
-    // The tail group takes whatever is left. Padding it up to `min` would add
-    // people the scenario did not ask for; rounding it away would lose some.
+  it('lets the last group be short rather than inventing a person', () => {
+    // Padding the tail up to `min` would add people the scenario never asked
+    // for; dropping it would lose the ones it did.
     const shortTail = Array.from({ length: 40 }, (_, i) =>
       splitIntoGroups(50, { min: 3, max: 6 }, new Rng(i + 1)),
     ).some((groups) => groups[groups.length - 1] < 3)
     expect(shortTail).toBe(true)
   })
 
-  it('produces about as many groups as the mean group size implies', () => {
+  it('makes about as many groups as the mean group size implies', () => {
     const counts = Array.from(
       { length: 40 },
       (_, i) => splitIntoGroups(400, { min: 2, max: 6 }, new Rng(i + 1)).length,
@@ -431,19 +469,17 @@ describe('splitting a headcount into groups', () => {
     expect(splitIntoGroups(0, undefined, new Rng(1))).toEqual([])
   })
 
-  it('gives a lone person their own group even when groups are large', () => {
+  it('gives a lone person their own group even where groups are large', () => {
     expect(splitIntoGroups(1, { min: 4, max: 8 }, new Rng(1))).toEqual([1])
   })
 
-  it('raises an inverted range to a fixed size instead of looping forever', () => {
-    // max < min would make rng.int draw from an empty range; the guard pulls
-    // max up to min so every group is exactly that size.
-    const groups = splitIntoGroups(20, { min: 5, max: 2 }, new Rng(1))
-    expect(groups).toEqual([5, 5, 5, 5])
+  it('raises an inverted size range to a fixed size instead of looping forever', () => {
+    // max below min would make rng.int draw from an empty range and return
+    // sizes of zero, which never empties `remaining`.
+    expect(splitIntoGroups(20, { min: 5, max: 2 }, new Rng(1))).toEqual([5, 5, 5, 5])
   })
 
-  it('floors the minimum at one so the loop always makes progress', () => {
-    // A min of 0 would let rng.int return 0, and `remaining` would never fall.
+  it('floors the minimum at one so the split always terminates', () => {
     for (const min of [0, -4]) {
       const groups = splitIntoGroups(30, { min, max: 3 }, new Rng(1))
       expect(groups.reduce((a, b) => a + b, 0)).toBe(30)
@@ -451,7 +487,7 @@ describe('splitting a headcount into groups', () => {
     }
   })
 
-  it('rounds fractional group bounds', () => {
+  it('rounds a fractional size range to whole people', () => {
     const groups = splitIntoGroups(60, { min: 2.4, max: 3.6 }, new Rng(1))
     expect(Math.min(...groups.slice(0, -1))).toBeGreaterThanOrEqual(2)
     expect(Math.max(...groups)).toBeLessThanOrEqual(4)

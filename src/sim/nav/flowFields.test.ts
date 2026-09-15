@@ -139,6 +139,22 @@ describe('hardCoreCorrection', () => {
     // A kernel far wider than a body barely notices the hole in it.
     expect(hardCoreCorrection(NOMINAL_BODY_RADIUS, 20)).toBeCloseTo(1, 3)
   })
+
+  it('is exactly 1 when bodies are points, and only bodies lift it off the textbook kernel', () => {
+    // Nothing is excluded when nobody occupies room, so there is nothing to put
+    // back and the estimator is already unbiased. A factor that came out a hair
+    // off 1 here would bias every density the product reports, including the
+    // heads-in-a-polygon figures printed beside them, which need no correction.
+    expect(hardCoreCorrection(0, BANDWIDTH)).toBe(1)
+    expect(hardCoreCorrection(0, 0.25)).toBe(1)
+
+    const grid = hallGrid()
+    const points = new DensityField(grid, BANDWIDTH, undefined, 0)
+    points.update(Float32Array.from([6.15, 6.15]), 1, 0)
+    // Point bodies leave the plain Gaussian peak of 1 / 2*pi*sigma^2, which is
+    // the baseline the 1.24 correction is measured against.
+    expect(Math.max(...points.values)).toBeCloseTo(1 / (2 * Math.PI * BANDWIDTH * BANDWIDTH), 5)
+  })
 })
 
 describe('DensityField', () => {
@@ -309,6 +325,40 @@ describe('DensityField', () => {
     field.reset()
     expect(sampleField(grid, field.values, 6, 6, 0)).toBe(0)
   })
+
+  it('keeps one person in a cupboard at a plausible density rather than an absurd one', () => {
+    const closet = createNavGrid({ minX: 0, minY: 0, maxX: 3, maxY: 3 }, 0.3)
+    const solid = new Uint8Array(cellCount(closet)).fill(1)
+    const pocket = cellAt(closet, 1.5, 1.5)
+    solid[pocket] = 0
+    const field = new DensityField(closet, BANDWIDTH, solid)
+    field.update(Float32Array.from([1.65, 1.65]), 1, 0)
+
+    const hall = new DensityField(hallGrid(), BANDWIDTH)
+    hall.update(Float32Array.from([6.15, 6.15]), 1, 0)
+    const openPeak = Math.max(...hall.values)
+
+    // Three percent of this kernel lands on floor anybody can stand on, and
+    // dividing by that reports one person alone in a lift as 13.6 persons/m² —
+    // past jam density, the crush overlay firing on somebody standing by
+    // themselves. The floor on the division holds them to three and a bit times
+    // their open-floor peak instead.
+    expect(field.values[pocket]).toBeCloseTo(openPeak / 0.3, 5)
+    expect(field.values[pocket]).toBeLessThan(1.4)
+    expect(crowdSafetyLevel(field.values[pocket])).toBe('safe')
+  })
+
+  it('leaves the reading as it stands for a walker who is off the grid', () => {
+    const grid = hallGrid()
+    const field = new DensityField(grid, BANDWIDTH)
+    field.update(Float32Array.from([6, 6]), 1, 0)
+
+    // Somebody outside the nav grid has no coverage cell to scale their own
+    // body by, so the sample survives untouched instead of coming back NaN and
+    // poisoning the speed they are given.
+    expect(field.othersAt(-3, 6, 2.5, 0)).toBe(2.5)
+    expect(field.othersAt(6, 40, 2.5, PACE_LOOKAHEAD)).toBe(2.5)
+  })
 })
 
 describe('PACE_LOOKAHEAD', () => {
@@ -324,6 +374,43 @@ describe('PACE_LOOKAHEAD', () => {
     const own = Math.exp(-(PACE_LOOKAHEAD * PACE_LOOKAHEAD) / (2 * BANDWIDTH * BANDWIDTH))
     expect(own).toBeGreaterThan(0.6)
     expect(own).toBeLessThan(0.95)
+  })
+
+  it('reads the floor a walker is heading into, not the bunch at their back', () => {
+    const grid = hallGrid()
+    const field = new DensityField(grid, BANDWIDTH, corridorMask(grid, 4.5, 7.5))
+    // Somebody at the front of a bunch: twenty people packed half a metre apart
+    // behind them, open corridor ahead.
+    const bunch = crowd(4, 5, 5.6, 7.1, 0.5)
+    const people = Float32Array.from([6, 6, ...bunch])
+    field.update(people, headcount(people), 0)
+
+    const read = (x: number, distance: number): number =>
+      field.othersAt(x, 6, sampleField(grid, field.values, x, 6, 0), distance)
+    const ahead = read(6 + PACE_LOOKAHEAD, PACE_LOOKAHEAD)
+    const ring = read(6, 0)
+    const behind = read(6 - PACE_LOOKAHEAD, PACE_LOOKAHEAD)
+
+    expect(ahead).toBeCloseTo(0.79, 1)
+    expect(ring).toBeCloseTo(1.73, 1)
+    expect(behind).toBeCloseTo(2.92, 1)
+    // Same walker, same instant, and the same amount of their own body taken
+    // off both readings: the whole of the gap is where the sample was taken.
+    expect(behind - ahead).toBeCloseTo(
+      sampleField(grid, field.values, 6 - PACE_LOOKAHEAD, 6, 0) -
+        sampleField(grid, field.values, 6 + PACE_LOOKAHEAD, 6, 0),
+      9,
+    )
+
+    // And that is what sets the pace. Reading forward, this walker keeps seven
+    // eighths of their free speed and pulls away from the bunch, which is what
+    // dissolves it. A ring would halve their speed on the strength of people
+    // who are behind them, closing the gap and packing the bunch tighter — the
+    // loop with the sign the wrong way round that clots a steady corridor into
+    // platoons, each reporting a density nobody in it is actually walking in.
+    expect(speedFromDensity(ahead)).toBeGreaterThan(0.85)
+    expect(speedFromDensity(ring)).toBeLessThan(0.55)
+    expect(speedFromDensity(behind)).toBeLessThan(0.3)
   })
 })
 
@@ -440,5 +527,118 @@ describe('FlowFieldCache', () => {
     cache.update(20, jam)
     expect(refreshedAt(cache, 'a')).toBe(20)
     expect(refreshedAt(cache, 'c')).toBeNaN()
+  })
+
+  it('counts a clear corridor down a second per metre, without a step anywhere along it', () => {
+    const { grid, cache } = room((_x, y) => y < 2 || y > 4)
+    const goalCell = cellAt(grid, 11.5, 3)
+    cache.ensure('east', [goalCell])
+    const goal = cellCenter(grid, goalCell % grid.cols, Math.floor(goalCell / grid.cols))
+
+    let previous = Infinity
+    let samples = 0
+    for (let x = 0.4; x <= goal.x; x += 0.05) {
+      const cost = cache.cost('east', { x, y: 3 })
+      expect(cost).toBeLessThan(previous)
+      // Traversal speed is 1 m/s here, so five centimetres of corridor is fifty
+      // milliseconds of cost — at every sub-cell position, not only at cell
+      // centres. A walker descending this field crosses cell boundaries all the
+      // way down it and must not feel one. The last couple of metres are left
+      // out of the even count-down: the analytic disc seeded around the goal
+      // flattens the cone there, and the field still falls, just not by 50 ms a
+      // step.
+      if (samples > 0 && x < 9) expect(previous - cost).toBeCloseTo(0.05, 3)
+      previous = cost
+      samples++
+    }
+    expect(samples).toBeGreaterThan(200)
+    // Eleven metres of corridor, and the marching solve reads a tenth of a
+    // percent long over the whole of it — and long rather than short, so a door
+    // this far off never flatters itself against a nearer one.
+    const straight = goal.x - 0.4
+    expect(cache.cost('east', { x: 0.4, y: 3 })).toBeGreaterThanOrEqual(straight)
+    expect(cache.cost('east', { x: 0.4, y: 3 }) / straight).toBeLessThan(1.001)
+
+    // Past the destination the walk costs more again, so somebody who overshoots
+    // is turned round rather than sent on to the far wall.
+    expect(cache.cost('east', { x: goal.x + 0.3, y: 3 })).toBeGreaterThan(previous)
+  })
+
+  it('has no direction left to give once somebody is standing on the destination', () => {
+    const { grid, cache } = room()
+    const goalCell = cellAt(grid, 11.5, 3)
+    cache.ensure('east', [goalCell])
+    const goal = cellCenter(grid, goalCell % grid.cols, Math.floor(goalCell / grid.cols))
+
+    // The potential is flat at its own minimum. A normalised gradient there is
+    // noise, so the cache says nothing and the caller steers at the exact spot
+    // it was aiming for instead of being shoved in whichever way the float went.
+    expect(cache.direction('east', goal, 0)).toBeNull()
+    // Nothing left to walk, either: they are standing on it.
+    expect(cache.cost('east', goal)).toBe(0)
+    const approach = requireRoute(cache.direction('east', { x: goal.x - 1, y: goal.y }, 0))
+    expect(approach.dx).toBeCloseTo(1, 2)
+    expect(approach.cost).toBeCloseTo(1, 1)
+
+    // Off the grid entirely — pushed outside the venue bounds — is unreachable,
+    // not nearby.
+    expect(cache.cost('east', { x: 40, y: 3 })).toBe(Infinity)
+    expect(cache.direction('east', { x: 40, y: 3 }, 1)).toBeNull()
+  })
+
+  it('hands back the field it already solved instead of solving it again', () => {
+    const { grid, cache } = room()
+    const field = cache.ensure('east', [cellAt(grid, 11.5, 3)])
+    const potential = field.staticPotential
+    // The two potentials start as separate arrays, so a congested re-solve can
+    // never clobber the shortest path everybody else is following.
+    expect(field.congestedPotential).not.toBe(potential)
+
+    // Registering the destination again is what a venue with a dozen of them
+    // does on every setup pass: it gets the field back, not another solve.
+    const again = cache.ensure('east', [cellAt(grid, 0.5, 3)])
+    expect(again).toBe(field)
+    expect(again.staticPotential).toBe(potential)
+    // Including the goal it was solved for — a re-registration is a lookup, and
+    // the new cells are ignored.
+    expect(again.goalCells).toEqual([cellAt(grid, 11.5, 3)])
+
+    cache.cost('east', { x: 3, y: 3 }, 1)
+    cache.direction('east', { x: 3, y: 3 }, 1)
+    expect(cache.get('east')?.staticPotential).toBe(potential)
+
+    const jam = congestionAt(grid, 4, (x) => x > 5 && x < 7)
+    cache.update(10, jam)
+    const congested = field.congestedPotential
+    expect(congested).not.toBe(potential)
+
+    // Inside the two-second replan interval nothing is re-solved at all: this is
+    // the budget that keeps a tick from turning into a dozen eikonal solves.
+    cache.update(11.5, jam)
+    expect(field.congestedPotential).toBe(congested)
+    expect(field.refreshedAt).toBe(10)
+
+    // When it does come due, only the congested field is rebuilt.
+    cache.update(12.5, jam)
+    expect(field.congestedPotential).not.toBe(congested)
+    expect(field.staticPotential).toBe(potential)
+    expect(field.refreshedAt).toBe(12.5)
+  })
+
+  it('never solves a congested field for a scenario with congestion switched off', () => {
+    const { grid, cache } = room()
+    cache.setOptions({ congestionWeight: 0 })
+    const field = cache.ensure('east', [cellAt(grid, 11.5, 3)])
+    const congested = field.congestedPotential
+
+    cache.update(
+      100,
+      congestionAt(grid, 5, () => true),
+    )
+    expect(field.congestedPotential).toBe(congested)
+    expect(field.refreshedAt).toBe(-Infinity)
+    // Congestion-aware people get the empty-venue answer, because that is the
+    // only one this run has — never a stale one dressed up as current.
+    expect(cache.cost('east', { x: 6, y: 3 }, 1)).toBe(cache.cost('east', { x: 6, y: 3 }, 0))
   })
 })

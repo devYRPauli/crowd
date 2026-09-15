@@ -134,8 +134,8 @@ does not get one.
 | **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.00 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
 | **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2328 m against a 0.23 m body | pass                 |
 | **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 4.3% (adult, 1.398 vs 1.34 m/s); all seven profiles within 4.3%; overall sd 0.328 vs 0.327 implied     | pass                 |
-| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.267** · 2.0 m: **1.243**                                                                                | pass                 |
-|                                  |                                                       | 0.8 m: 0.958 · 1.0 m: 1.023 · 1.2 m: 1.164                                                                         | **fail, below band** |
+| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.2 m: **1.251** · 1.5 m: **1.252** · 2.0 m: **1.318**                                                             | pass                 |
+|                                  |                                                       | 0.8 m: 1.011 · 1.0 m: 1.019                                                                                        | **fail, below band** |
 | TC2, TC3, TC8, TC13              | Stairs and multi-storey egress                        | —                                                                                                                  | not modelled         |
 | TC4                              | Fundamental diagram                                   | measured above, though not in RiMEA's own corridor geometry                                                        | partial              |
 | TC5, TC9, TC10, TC11, TC14, TC15 | Personal data, exit choice, evacuation demonstrations | —                                                                                                                  | not written yet      |
@@ -169,6 +169,17 @@ touch — gave part of that back: 1.2 m went from 1.245 to 1.164. That is the
 right direction for the model to move even though it is the wrong direction for
 this number, because a crowd that will not press really does get through a door
 more slowly.
+
+**And the last of it was an exit bug, found by measuring egress properly.**
+People used to stop existing the moment they reached a threshold, which left the
+floor beyond every opening permanently empty; the person in the gap saw clear
+space ahead and walked out at free speed. Giving them a body for a metre past the
+line (`EXIT_TAIL`) restored the back pressure that makes an opening a bottleneck
+and took the 1.2 m door from 1.164 to **1.251**, inside the band, where it now
+passes as an ordinary test rather than an expected failure. The same change took
+a 3'0" exit door from 2.98 persons/m/s — more than double anything observed — to
+1.10. See `docs/EXPERIMENTS.md` for how it was found and
+`src/sim/validation/egress.test.ts` for the measurement that now holds it.
 
 **And some is a limit that stands.** The engine keeps 0.23 m between a body and
 a wall where SFPE observes people accepting 0.15 m, which bites hardest at the
