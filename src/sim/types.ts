@@ -96,6 +96,31 @@ export interface ServiceSummary {
   unserved: number
 }
 
+/** What happened inside one measurement area over the whole run. */
+export interface AreaSummary {
+  id: string
+  name: string
+  areaSqm: number
+  /** Most people inside at any one moment. */
+  peakOccupancy: number
+  /** Time-averaged number of people inside. */
+  meanOccupancy: number
+  peakDensity: number
+  meanDensity: number
+  /** Mean speed of people while they were inside, in m/s. */
+  meanSpeed: number
+  /** Total person-seconds spent inside. */
+  personSeconds: number
+  /** Seconds spent at or worse than level of service E. */
+  secondsAtLosE: number
+  /** Seconds spent at level of service F. */
+  secondsAtLosF: number
+  /** Seconds the area was at or above 4 persons/m2. */
+  secondsAtCrushRisk: number
+  /** Worst level of service reached. */
+  worstLos: string
+}
+
 export interface RunSummary {
   durationS: number
   seed: number
@@ -115,6 +140,7 @@ export interface RunSummary {
   /** Share of simulated person-seconds spent in each level of service. */
   losShare: Record<string, number>
   services: ServiceSummary[]
+  areas: AreaSummary[]
   warnings: string[]
 }
 

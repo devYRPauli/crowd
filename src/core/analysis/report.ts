@@ -103,6 +103,44 @@ export const toCsv = ({ document, summary }: ReportInput): string => {
     lines.push('')
   }
 
+  if (summary.areas.length > 0) {
+    lines.push(
+      csvRow([
+        'Measured area',
+        'Floor area (m2)',
+        'Peak people',
+        'Mean people',
+        'Peak density',
+        'Mean density',
+        'Mean speed (m/s)',
+        'Person-seconds',
+        'Seconds at LOS E+',
+        'Seconds at LOS F',
+        'Seconds at 4+/m2',
+        'Worst LOS',
+      ]),
+    )
+    for (const area of summary.areas) {
+      lines.push(
+        csvRow([
+          area.name,
+          area.areaSqm.toFixed(2),
+          area.peakOccupancy,
+          area.meanOccupancy.toFixed(2),
+          area.peakDensity.toFixed(3),
+          area.meanDensity.toFixed(3),
+          area.meanSpeed.toFixed(3),
+          area.personSeconds.toFixed(1),
+          area.secondsAtLosE.toFixed(1),
+          area.secondsAtLosF.toFixed(1),
+          area.secondsAtCrushRisk.toFixed(1),
+          area.worstLos,
+        ]),
+      )
+    }
+    lines.push('')
+  }
+
   if (summary.warnings.length > 0) {
     lines.push(csvRow(['Warnings']))
     for (const warning of summary.warnings) lines.push(csvRow([warning]))
@@ -214,6 +252,21 @@ export const toBrief = (input: ReportInput): string => {
         `• ${service.name}: ${service.served} served across ${service.servers} ` +
           `${service.servers === 1 ? 'position' : 'positions'}, mean wait ${formatDuration(service.meanWait)}, ` +
           `longest ${formatDuration(service.maxWait)}, busy ${(service.utilisation * 100).toFixed(0)}% of the time.`,
+      )
+    }
+    lines.push('')
+  }
+
+  if (summary.areas.length > 0) {
+    lines.push('Measured areas')
+    lines.push('-'.repeat(14))
+    for (const area of summary.areas) {
+      lines.push(
+        `• ${area.name} (${formatArea(area.areaSqm, units)}): peaked at ${area.peakOccupancy} people, ` +
+          `${area.peakDensity.toFixed(1)} per m², worst level of service ${area.worstLos}.` +
+          (area.secondsAtCrushRisk > 0
+            ? ` At or above 4 per m² for ${formatDuration(area.secondsAtCrushRisk)}.`
+            : ''),
       )
     }
     lines.push('')

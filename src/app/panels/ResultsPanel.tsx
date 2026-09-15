@@ -386,6 +386,57 @@ export const ResultsPanel = ({
               </div>
             ) : null}
 
+            {summary.areas.length > 0 ? (
+              <div className="section">
+                <div className="section-title">Measured areas</div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Area</th>
+                      <th style={{ textAlign: 'right' }}>Peak</th>
+                      <th style={{ textAlign: 'right' }}>Peak density</th>
+                      <th style={{ textAlign: 'right' }}>Worst</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.areas.map((area) => {
+                      const band = LOS_TABLES.walkway.find((entry) => entry.level === area.worstLos)
+                      return (
+                        <tr
+                          key={area.id}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => setSelection([{ kind: 'zone', id: area.id }])}
+                        >
+                          <td>{area.name}</td>
+                          <td className="num">{area.peakOccupancy}</td>
+                          <td className="num">{formatNumber(area.peakDensity, 2)}</td>
+                          <td className="num" style={{ color: band?.color }}>
+                            {area.worstLos}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {summary.areas.some((area) => area.secondsAtCrushRisk > 0) ? (
+                  <p className="hint">
+                    {summary.areas
+                      .filter((area) => area.secondsAtCrushRisk > 0)
+                      .map(
+                        (area) =>
+                          `${area.name} was at 4 people per m² or more for ${formatDuration(area.secondsAtCrushRisk)}.`,
+                      )
+                      .join(' ')}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="hint">
+                Draw a measurement area to get numbers for one part of the venue — a doorway, a
+                dance floor, the space in front of a stage.
+              </p>
+            )}
+
             <div className="section">
               <div className="section-title">People in the venue</div>
               <Sparkline series={activeSeries} label="People inside" />

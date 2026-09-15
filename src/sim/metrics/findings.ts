@@ -146,6 +146,27 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
     })
   }
 
+  // --- measured areas ------------------------------------------------------
+  for (const area of summary.areas) {
+    if (area.secondsAtCrushRisk > 10) {
+      findings.push({
+        id: `area-crush-${area.id}`,
+        severity: 'high',
+        headline: `${area.name} held 4 people per m² or more for ${formatDuration(area.secondsAtCrushRisk)}`,
+        detail: `It peaked at ${area.peakDensity.toFixed(1)} per m² with ${area.peakOccupancy} people in ${area.areaSqm.toFixed(0)} m². This is the density band where stewarding is normally planned.`,
+        targetId: area.id,
+      })
+    } else if (area.secondsAtLosF > 60) {
+      findings.push({
+        id: `area-los-${area.id}`,
+        severity: 'medium',
+        headline: `${area.name} sat at level of service F for ${formatDuration(area.secondsAtLosF)}`,
+        detail: `Peak ${area.peakDensity.toFixed(1)} per m², and people inside averaged ${area.meanSpeed.toFixed(2)} m/s against a free-flow speed of about 1.34.`,
+        targetId: area.id,
+      })
+    }
+  }
+
   // --- flow ----------------------------------------------------------------
   const queuePeak = peakOf(series.queueTotal)
   if (queuePeak.value >= 20) {

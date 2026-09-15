@@ -20,7 +20,9 @@ import type { ItineraryStep, Plan, Scenario } from '../core/model/types'
 import type { Vec2 } from '../core/math/vec2'
 import { Rng, distributionMean, sampleDistribution } from '../core/math/random'
 import { distance, normalize } from '../core/math/vec2'
+import type { Bounds } from '../core/math/geometry'
 import {
+  boundsOf,
   closestPointOnPolyline,
   distanceToPolygonEdge,
   pointAlongPolyline,
@@ -50,12 +52,13 @@ import {
   agentStateIndex,
   type AgentJourney,
   type AgentState,
+  type AreaSummary,
   type RunSummary,
   type ServiceSummary,
   type SimOptions,
   type SimStats,
 } from './types'
-import { WALKWAY_LOS, losFor, losIndex } from './metrics/los'
+import { CROWD_SAFETY, WALKWAY_LOS, losFor, losIndex } from './metrics/los'
 
 /** How close counts as having arrived at an exact target. */
 const ARRIVE_RADIUS = 0.34
@@ -130,6 +133,23 @@ interface PendingArrival {
   groupId: number
 }
 
+/** Running totals for one measurement area. */
+interface AreaState {
+  record: DestinationRecord
+  bounds: Bounds
+  peakOccupancy: number
+  occupancySeconds: number
+  peakDensity: number
+  densitySeconds: number
+  speedSeconds: number
+  personSeconds: number
+  secondsAtLosE: number
+  secondsAtLosF: number
+  secondsAtCrushRisk: number
+  worstLosIndex: number
+  elapsed: number
+}
+
 interface QueueState {
   record: QueueRecord
   /** Agent ids in queue order, head first. */
@@ -171,6 +191,7 @@ export class Simulation {
   private pending: PendingArrival[] = []
   private pendingCursor = 0
   private queues = new Map<string, QueueState>()
+  private areas: AreaState[] = []
   private seatTaken: Uint8Array
 
   private time = 0
@@ -230,6 +251,24 @@ export class Simulation {
         overflowPositions: new Map(),
       })
     }
+
+    // Measurement areas report what happened inside them, so a planner can ask
+    // about the doorway or the dance floor rather than about the whole venue.
+    this.areas = this.world.measures.map((record) => ({
+      record,
+      bounds: boundsOf(record.polygon),
+      peakOccupancy: 0,
+      occupancySeconds: 0,
+      peakDensity: 0,
+      densitySeconds: 0,
+      speedSeconds: 0,
+      personSeconds: 0,
+      secondsAtLosE: 0,
+      secondsAtLosF: 0,
+      secondsAtCrushRisk: 0,
+      worstLosIndex: 0,
+      elapsed: 0,
+    }))
 
     this.prepareFields()
     this.buildSchedule()
@@ -805,6 +844,7 @@ export class Simulation {
     this.steer(dt)
     this.integrate(dt)
     this.relaxOverlaps()
+    this.accumulateAreas(dt)
     this.accumulateLos(dt)
   }
 
@@ -1381,6 +1421,51 @@ export class Simulation {
     }
   }
 
+  /**
+   * Per-area statistics.
+   *
+   * Occupancy counts the people actually inside the polygon, and the area's
+   * density is derived from that count rather than sampled from the density
+   * field: the field is smoothed over 0.7 m and would bleed a crowd standing
+   * just outside the line into the measurement.
+   */
+  private accumulateAreas(dt: number): void {
+    if (this.areas.length === 0) return
+    for (const area of this.areas) {
+      let inside = 0
+      let speedSum = 0
+      for (const id of this.live) {
+        const agent = this.agents[id]
+        if (
+          agent.x < area.bounds.minX ||
+          agent.x > area.bounds.maxX ||
+          agent.y < area.bounds.minY ||
+          agent.y > area.bounds.maxY
+        ) {
+          continue
+        }
+        if (!pointInPolygon({ x: agent.x, y: agent.y }, area.record.polygon)) continue
+        inside++
+        speedSum += Math.hypot(agent.vx, agent.vy)
+      }
+
+      const density = area.record.area > 0 ? inside / area.record.area : 0
+      area.elapsed += dt
+      area.peakOccupancy = Math.max(area.peakOccupancy, inside)
+      area.occupancySeconds += inside * dt
+      area.peakDensity = Math.max(area.peakDensity, density)
+      area.densitySeconds += density * dt
+      area.speedSeconds += speedSum * dt
+      area.personSeconds += inside * dt
+
+      const band = losIndex(density)
+      area.worstLosIndex = Math.max(area.worstLosIndex, band)
+      if (band >= WALKWAY_LOS.length - 1) area.secondsAtLosF += dt
+      if (band >= WALKWAY_LOS.length - 2) area.secondsAtLosE += dt
+      if (density >= CROWD_SAFETY.warnDensity) area.secondsAtCrushRisk += dt
+    }
+  }
+
   private accumulateLos(dt: number): void {
     for (const id of this.live) {
       const agent = this.agents[id]
@@ -1527,6 +1612,28 @@ export class Simulation {
     }
   }
 
+  /** What happened inside each measurement area over the whole run. */
+  private areaSummaries(): AreaSummary[] {
+    return this.areas.map((area) => {
+      const elapsed = Math.max(area.elapsed, 1e-6)
+      return {
+        id: area.record.id,
+        name: area.record.name,
+        areaSqm: area.record.area,
+        peakOccupancy: area.peakOccupancy,
+        meanOccupancy: area.occupancySeconds / elapsed,
+        peakDensity: area.peakDensity,
+        meanDensity: area.densitySeconds / elapsed,
+        meanSpeed: area.personSeconds > 0 ? area.speedSeconds / area.personSeconds : 0,
+        personSeconds: area.personSeconds,
+        secondsAtLosE: area.secondsAtLosE,
+        secondsAtLosF: area.secondsAtLosF,
+        secondsAtCrushRisk: area.secondsAtCrushRisk,
+        worstLos: WALKWAY_LOS[area.worstLosIndex].level,
+      }
+    })
+  }
+
   private serviceSummaries(): ServiceSummary[] {
     return [...this.queues.values()].map((queue) => ({
       id: queue.record.id,
@@ -1606,6 +1713,7 @@ export class Simulation {
       peakDensity: this.peakDensity,
       losShare,
       services,
+      areas: this.areaSummaries(),
       warnings,
     }
   }
