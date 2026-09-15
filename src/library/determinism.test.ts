@@ -23,7 +23,18 @@ import { Simulation } from '../sim/engine'
 const numbersOnly = (summary: unknown): unknown =>
   JSON.parse(JSON.stringify(summary).replace(/"id":"[^"]*"/g, '"id":"-"'))
 
-const run = (id: string): unknown => {
+/**
+ * Hand the event loop back for a tick.
+ *
+ * A test that keeps the worker's event loop to itself for longer than vitest's
+ * RPC timeout makes the runner report an unhandled error — "Timeout calling
+ * onTaskUpdate" — even though every assertion passed, because the reporter
+ * never got an answer. These runs are long synchronous loops and this file is
+ * the longest of them, so they let go periodically.
+ */
+const breathe = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+const run = async (id: string): Promise<unknown> => {
   const doc = TEMPLATES.find((template) => template.id === id)!.build()
   // Scaled down to keep this cheap; determinism does not depend on the size.
   const scenario = {
@@ -37,16 +48,19 @@ const run = (id: string): unknown => {
     })),
   }
   const sim = new Simulation(doc.plan, scenario)
-  for (let i = 0; i < 4000 && !sim.isFinished; i++) sim.step(0.25)
+  for (let i = 0; i < 4000 && !sim.isFinished; i++) {
+    sim.step(0.25)
+    if (i % 400 === 0) await breathe()
+  }
   return numbersOnly(sim.summary())
 }
 
 describe('determinism', () => {
   it.each(TEMPLATES.map((template) => [template.id] as const))(
     '%s produces the same numbers from a second build of the same plan',
-    (id) => {
-      const first = run(id)
-      expect(run(id)).toEqual(first)
+    async (id) => {
+      const first = await run(id)
+      expect(await run(id)).toEqual(first)
     },
     120_000,
   )
