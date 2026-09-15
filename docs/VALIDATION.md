@@ -134,8 +134,8 @@ does not get one.
 | **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.00 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
 | **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2328 m against a 0.23 m body | pass                 |
 | **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 4.3% (adult, 1.398 vs 1.34 m/s); all seven profiles within 4.3%; overall sd 0.328 vs 0.327 implied     | pass                 |
-| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.379** · 2.0 m: **1.318**                                                                                | pass                 |
-|                                  |                                                       | 0.8 m: 1.078 · 1.0 m: 0.996 · 1.2 m: 1.040                                                                         | **fail, below band** |
+| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.382** · 2.0 m: **1.318**                                                                                | pass                 |
+|                                  |                                                       | 0.8 m: 1.074 · 1.0 m: 0.996 · 1.2 m: 1.126                                                                         | **fail, below band** |
 | TC2, TC3, TC8, TC13              | Stairs and multi-storey egress                        | —                                                                                                                  | not modelled         |
 | TC4                              | Fundamental diagram                                   | measured above, though not in RiMEA's own corridor geometry                                                        | partial              |
 | TC5, TC9, TC10, TC11, TC14, TC15 | Personal data, exit choice, evacuation demonstrations | —                                                                                                                  | not written yet      |
@@ -150,16 +150,40 @@ covered below under its own name rather than the standard's.
 
 ### The narrow openings, stated plainly
 
-Doors of 1.2 m and under pass 1.0–1.1 persons/m/s where the standard wants
-1.2–1.4: about 15–20% too few people, too slowly. Wider openings are in band, so
-this is specifically a narrow-door result, and it is in the direction that
-understates rather than overstates what a door will carry.
+Doors of 1.2 m and under pass 1.0–1.13 persons/m/s where the standard wants
+1.2–1.4: 6% low at 1.2 m, 11% at 0.8 m, 17% at 1.0 m. Wider openings are in
+band, so this is specifically a narrow-door result, and it is in the direction
+that understates rather than overstates what a door will carry.
 
-The suite keeps the band and marks these failing with the measured number. It is
-worth being blunt about what that means: **do not use this model to size a door
-narrower than about 1.5 m.** The hand calculation alongside it — SFPE hydraulic,
-with the 150 mm boundary layer taken off each side — is the better instrument at
-that width, and the tool reports both precisely so the disagreement is visible.
+**Where it comes from.** The navigation grid keeps a body centre 0.26 m off any
+wall, so a 1.0 m door offers a 0.48 m channel — two centimetres more than two
+bodies need. The file staggers instead of doubling and the door meters at about
+one lane. Charged against _effective_ width instead (clear width less the SFPE
+150 mm boundary layer each side) the same runs read 1.42–1.72 persons/m/s, above
+the band: the engine moves a single file at about the right rate, and the error
+is in how much of an opening it treats as usable.
+
+**Why it is not simply widened.** Two experiments, both recorded in the test
+file so nobody repeats them. Removing the navigation clearance entirely lifts
+the 0.8 m door to 1.487 persons/m/s and strands 17 of 20 people at the corner in
+TC6. Reducing it to the 150 mm boundary layer — with proximity to a wall charged
+as a traversal cost instead, so routes still prefer open floor — makes the narrow
+openings _worse_: 0.81 and 0.78 persons/m/s. Routing a body to 0.15 m of a jamb
+when the body exclusion pushes it back out to a full 0.23 m radius puts churn at
+exactly the point that meters the flow.
+
+So the navigation grid cannot claim width the body exclusion will not let a body
+occupy, and the real lever is the 0.23 m the engine keeps between a body and a
+wall, where SFPE observes people accepting 0.15 m. Relaxing that buys the flow at
+the price of shoulders visibly inside walls — 0.08 m of it, where TC6 allows
+0.05 m — which is a bad trade for a tool whose output people watch, and a worse
+one to make quietly.
+
+It stands as a stated limit instead, and it is worth being blunt about what it
+means: **do not use this model to size a door narrower than about 1.5 m.** The
+hand calculation alongside it — SFPE hydraulic, with the 150 mm boundary layer
+taken off each side — is the better instrument at that width, and the tool
+reports both precisely so the disagreement is visible.
 
 ---
 

@@ -425,39 +425,54 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   }
 
   /**
-   * KNOWN GAP. Measured 0.892 p/m/s of clear width (0.713 p/s) against a target
-   * of 1.2–1.4 p/m/s — 26% below the bottom of the band. A 0.8 m clear opening
-   * leaves 0.28 m of unblocked navigation grid once `NAV_CLEARANCE` (0.26 m) is
-   * taken off each side, so people thread it strictly one at a time at a 1.4 s
-   * headway where observation gives 0.6–0.8 s. Charged against the *effective*
-   * width instead (clear width less a 0.15 m boundary layer each side, the SFPE
-   * convention) the same run reads 1.43 p/m/s, just over the top of the band —
+   * KNOWN GAP. MEASURED 1.074 p/m/s of clear width (0.859 p/s); TARGET 1.2–1.4
+   * — 11% below the bottom of the band. A 0.8 m clear opening leaves 0.28 m of
+   * unblocked navigation grid once `NAV_CLEARANCE` (0.26 m) is taken off each
+   * side, so people thread it strictly one at a time. Charged against the
+   * *effective* width instead (clear width less a 0.15 m boundary layer each
+   * side, the SFPE convention) the same run reads 1.718 p/m/s, above the band —
    * so the engine moves a single file at about the right rate and the error is
    * in how much of an opening it treats as usable, not in the locomotion.
    *
-   * Confirmed by experiment: setting `NAV_CLEARANCE` to 0 raises this width to
-   * 1.487 p/m/s and the 1.0 m width to 1.179. That is not the fix — zero
-   * clearance strands people at the corner in TC6, 17 of 20 — but it does
-   * locate the error in the clearance budget charged at an opening's edges.
+   * Two experiments locate it and neither is the fix.
+   *
+   * Setting `NAV_CLEARANCE` to 0 raised this width to 1.487 p/m/s and the 1.0 m
+   * width to 1.179, and stranded 17 of 20 people at the corner in TC6.
+   *
+   * Setting it to the 0.15 m boundary layer — with proximity to a wall charged
+   * as a traversal cost instead, so routes still prefer open floor — made the
+   * narrow openings *worse*, not better: 0.809 p/m/s here and 0.776 at 1.0 m.
+   * The reason is the useful one. Routing a body centre to 0.15 m of a jamb
+   * when `relaxOverlaps` pushes it back out to a full 0.23 m radius puts churn
+   * at exactly the point that meters the flow. The navigation grid cannot claim
+   * width the body exclusion will not let a body occupy, so the two numbers are
+   * bound together, and the real lever is the 0.23 m the engine keeps between a
+   * body and a wall where SFPE observes people accepting 0.15 m. Relaxing that
+   * would buy the flow at the price of shoulders visibly inside walls — TC6
+   * allows 0.05 m of that and this would need 0.08 m — which is a bad trade for
+   * a tool whose output people watch. It stands as a stated limit instead.
    */
   it.fails('TC12: 0.8 m opening passes 1.2–1.4 p/m/s', bandTest(0.8))
 
   /**
-   * KNOWN GAP. Measured 0.903 p/m/s (0.903 p/s) against a target of 1.2–1.4
-   * p/m/s — 25% below the band. Same cause as the 0.8 m case: the usable
-   * navigation channel is 0.48 m, still single file. Against effective width it
-   * reads 1.29 p/m/s, inside the band. Note the near-identical *absolute* flow
-   * at 0.8 m and 1.0 m (0.71 vs 0.90 p/s): widening a door by 0.2 m buys almost
-   * nothing until the channel is wide enough for two abreast, which is the shape
-   * of the defect.
+   * KNOWN GAP, and the worst of the three. MEASURED 0.996 p/m/s (0.996 p/s);
+   * TARGET 1.2–1.4 — 17% below the band. Same cause as the 0.8 m case: the
+   * usable navigation channel is 0.48 m, two centimetres more than two bodies
+   * need, so the file staggers rather than doubling and the door meters at
+   * roughly one lane. Against effective width it reads 1.423 p/m/s, above the
+   * band. Note how little the absolute flow gains from the extra 0.2 m of door
+   * over the 0.8 m case — 0.86 to 1.00 people a second — which is the shape of
+   * the defect: widening a door buys almost nothing until the channel is wide
+   * enough for two abreast with room to spare.
    */
   it.fails('TC12: 1.0 m opening passes 1.2–1.4 p/m/s', bandTest(1.0))
 
   /**
    * KNOWN GAP, and this is the second of the two widths RiMEA TC12 names.
-   * Measured 1.133 p/m/s (1.360 p/s) against 1.2–1.4 — 6% below the band, much
+   * MEASURED 1.126 p/m/s (1.351 p/s); TARGET 1.2–1.4 — 6% below the band, much
    * closer than the narrower openings because 1.2 m leaves a 0.68 m channel and
-   * the file starts to stagger. Against effective width it reads 1.51 p/m/s.
+   * two abreast fits with room to stagger. Against effective width it reads
+   * 1.501 p/m/s. Everything from here up is in band.
    */
   it.fails('TC12: 1.2 m opening passes 1.2–1.4 p/m/s', bandTest(1.2))
 
