@@ -439,6 +439,16 @@ export const sampleField = (
 }
 
 /**
+ * Clamp a world coordinate onto the band spanned by the cell centres of one
+ * axis — the same clamp `sampleField` applies internally.
+ */
+const centreBand = (v: number, origin: number, cellSize: number, n: number): number => {
+  const lo = origin + cellSize * 0.5
+  const hi = origin + (n - 0.5) * cellSize
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+/**
  * Bilinearly sample the potential and return the downhill unit direction at a
  * world point (the direction of travel towards the goal), plus the sampled
  * potential. Returns null when the sample point sits in an unreachable region;
@@ -453,28 +463,42 @@ export const sampleGradient = (
   const value = sampleField(grid, potential, x, y, Infinity)
   if (!Number.isFinite(value)) return null
 
+  const { originX, originY, cellSize, cols, rows } = grid
   // Half a cell: wide enough to step off the bilinear kink at a cell boundary,
   // narrow enough not to reach across a wall into an unrelated corridor.
-  const h = grid.cellSize * 0.5
-  const west = sampleField(grid, potential, x - h, y, Infinity)
-  const east = sampleField(grid, potential, x + h, y, Infinity)
-  const south = sampleField(grid, potential, x, y - h, Infinity)
-  const north = sampleField(grid, potential, x, y + h, Infinity)
+  const h = cellSize * 0.5
+  // Probe from the cell-centre band rather than from the raw point. `sampleField`
+  // holds the outer half-cell at the edge cell's value, so a probe pair straddling
+  // the border reads the same cell twice: the perpendicular component would cancel
+  // to zero and steering would slide along the border instead of turning inward.
+  const px = centreBand(x, originX, cellSize, cols)
+  const py = centreBand(y, originY, cellSize, rows)
+  const xw = centreBand(px - h, originX, cellSize, cols)
+  const xe = centreBand(px + h, originX, cellSize, cols)
+  const ys = centreBand(py - h, originY, cellSize, rows)
+  const yn = centreBand(py + h, originY, cellSize, rows)
 
-  // One-sided wherever the far side is walled off or off-grid.
-  const hasWest = Number.isFinite(west)
-  const hasEast = Number.isFinite(east)
+  const west = sampleField(grid, potential, xw, py, Infinity)
+  const east = sampleField(grid, potential, xe, py, Infinity)
+  const south = sampleField(grid, potential, px, ys, Infinity)
+  const north = sampleField(grid, potential, px, yn, Infinity)
+
+  // One-sided wherever the far side is walled off, or where the band ran out and
+  // the probe collapsed back onto the sample point. Each difference is divided by
+  // the span it actually covers, which that clamp can shorten.
+  const hasWest = xw < px && Number.isFinite(west)
+  const hasEast = xe > px && Number.isFinite(east)
   let gx = 0
-  if (hasWest && hasEast) gx = (east - west) / (2 * h)
-  else if (hasEast) gx = (east - value) / h
-  else if (hasWest) gx = (value - west) / h
+  if (hasWest && hasEast) gx = (east - west) / (xe - xw)
+  else if (hasEast) gx = (east - value) / (xe - px)
+  else if (hasWest) gx = (value - west) / (px - xw)
 
-  const hasSouth = Number.isFinite(south)
-  const hasNorth = Number.isFinite(north)
+  const hasSouth = ys < py && Number.isFinite(south)
+  const hasNorth = yn > py && Number.isFinite(north)
   let gy = 0
-  if (hasSouth && hasNorth) gy = (north - south) / (2 * h)
-  else if (hasNorth) gy = (north - value) / h
-  else if (hasSouth) gy = (value - south) / h
+  if (hasSouth && hasNorth) gy = (north - south) / (yn - ys)
+  else if (hasNorth) gy = (north - value) / (yn - py)
+  else if (hasSouth) gy = (value - south) / (py - ys)
 
   const len = Math.hypot(gx, gy)
   if (len < 1e-9) return { dx: 0, dy: 0, value }

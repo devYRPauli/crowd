@@ -27,6 +27,7 @@ import {
   isFurnitureBlocking,
   planBounds,
   planSeats,
+  servicePositions,
   serverPositions,
   serviceFacing,
   servicePolygon,
@@ -60,9 +61,14 @@ export interface QueueRecord {
   name: string
   /** Counter footprint, for drawing and for obstacle building. */
   polygon: Polygon
-  /** Where staff stand. */
+  /** Where staff stand, behind the counter. */
   servers: Vec2[]
+  /** Where a person stands to be served, in front of the counter. */
+  stations: Vec2[]
   serverCount: number
+  /** The queue centreline, head first. */
+  line: Vec2[]
+  lineLength: number
   /** Waiting positions, head first. */
   slots: Vec2[]
   /** Direction people face while queuing, per slot. */
@@ -241,7 +247,10 @@ export const buildWorld = (
 
   const obstaclePolygons = collectObstaclePolygons(plan)
   for (const poly of obstaclePolygons) {
-    rasterizePolygon(grid, poly, solid, 1, 0)
+    // Dilate by half a cell before rasterising: a 150 mm wall is thinner than a
+    // grid cell and would otherwise fall between cell centres and vanish from
+    // the mask entirely, taking the clearance field with it.
+    rasterizePolygon(grid, poly, solid, 1, cellSize * 0.5)
     rasterizePolygon(grid, poly, navBlocked, 1, NAV_CLEARANCE)
   }
 
@@ -264,7 +273,18 @@ export const buildWorld = (
     for (let i = 0; i < cells; i++) if (mask[i]) baseSpeed[i] = Math.min(baseSpeed[i], 1 / cost)
   }
 
-  const clearance = clearanceField(grid, solid)
+  // Signed clearance: positive is metres to the nearest solid, negative is
+  // metres inside one. Keeping the sign means the gradient still points out of
+  // a wall when somebody has been pressed into it, which is exactly the case
+  // where a plain distance field gives no useful direction at all.
+  const outside = clearanceField(grid, solid)
+  const inverted = new Uint8Array(cells)
+  for (let i = 0; i < cells; i++) inverted[i] = solid[i] ? 0 : 1
+  const inside = clearanceField(grid, inverted)
+  const clearance = new Float32Array(cells)
+  for (let i = 0; i < cells; i++) {
+    clearance[i] = solid[i] ? -inside[i] : outside[i]
+  }
 
   const entries: DestinationRecord[] = []
   const exits: DestinationRecord[] = []
@@ -299,7 +319,10 @@ export const buildWorld = (
       id: sp.id,
       name: sp.name,
       polygon: servicePolygon(sp),
+      line,
+      lineLength: length,
       servers: serverPositions(sp),
+      stations: servicePositions(sp),
       serverCount: Math.max(1, Math.floor(sp.servers)),
       slots,
       slotFacing,
@@ -377,11 +400,8 @@ export const samplePointInDestination = (
 }
 
 /** Where a person stands to be served at a given server position. */
-export const servicePositionFor = (queue: QueueRecord, serverIndex: number): Vec2 => {
-  const server = queue.servers[serverIndex % queue.servers.length]
-  const towardsQueue = normalize(sub(queue.slots[0], server))
-  return add(server, scale(towardsQueue, 0.95))
-}
+export const servicePositionFor = (queue: QueueRecord, serverIndex: number): Vec2 =>
+  queue.stations[serverIndex % queue.stations.length]
 
 export const queueSlotPosition = (queue: QueueRecord, slot: number): Vec2 => {
   if (slot < queue.slots.length) return queue.slots[slot]

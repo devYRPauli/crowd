@@ -8,6 +8,9 @@
  * stands for, so hit-testing needs no side tables.
  */
 
+import type {
+  Object3D,
+  Texture} from 'three';
 import {
   BoxGeometry,
   BufferAttribute,
@@ -20,9 +23,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
-  Object3D,
   PlaneGeometry,
-  Texture,
   TextureLoader,
 } from 'three'
 import type { CrowdDocument, Plan, PlanObjectRef } from '../core/model/types'

@@ -7,7 +7,8 @@
  * simulation already models the wall, so the two can never drift apart.
  */
 
-import { BoxGeometry, BufferGeometry, Matrix4, Shape, ShapeGeometry, Euler } from 'three'
+import type { BufferGeometry} from 'three';
+import { BoxGeometry, Matrix4, Shape, ShapeGeometry, Euler } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { Opening, Plan, Wall } from '../../core/model/types'
 import { isWalkableOpening, solidSpans, wallAngle, wallLength } from '../../core/model/planGeometry'

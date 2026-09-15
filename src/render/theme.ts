@@ -123,20 +123,9 @@ export const AGENT_STATE_COLORS = {
 
 export type AgentStateName = keyof typeof AGENT_STATE_COLORS
 
-/** Fruin's level-of-service bands, with the colours used on the density map. */
-export const LOS_BANDS = [
-  { level: 'A', maxDensity: 0.31, color: '#2f9e5f', label: 'Free flow' },
-  { level: 'B', maxDensity: 0.43, color: '#8cc63f', label: 'Minor conflicts' },
-  { level: 'C', maxDensity: 0.72, color: '#f2c744', label: 'Restricted' },
-  { level: 'D', maxDensity: 1.08, color: '#ef8b3c', label: 'Speed restricted' },
-  { level: 'E', maxDensity: 2.17, color: '#e0603f', label: 'Shuffling' },
-  { level: 'F', maxDensity: Infinity, color: '#a32f4a', label: 'Breakdown' },
-] as const
-
-export const losLevelFor = (density: number): (typeof LOS_BANDS)[number] => {
-  for (const band of LOS_BANDS) if (density <= band.maxDensity) return band
-  return LOS_BANDS[LOS_BANDS.length - 1]
-}
+/** Re-exported so the renderer and the UI classify density the same way. */
+export { LOS_TABLES, losFor, losIndex, LOS_COLORS, CROWD_SAFETY, crowdSafetyLevel } from '../sim/metrics/los'
+export type { FacilityType, LosBand } from '../sim/metrics/los'
 
 /** Shared material cache, rebuilt when the theme changes. */
 export class MaterialLibrary {

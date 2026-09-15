@@ -220,16 +220,25 @@ export const servicePolygon = (point: ServicePoint, inflate = 0): Polygon =>
 /** Unit vector pointing away from the counter face, towards the people served. */
 export const serviceFacing = (point: ServicePoint): Vec2 => fromAngle(point.rotation - Math.PI / 2)
 
-/** Positions staff stand behind, spread across the counter. */
-export const serverPositions = (point: ServicePoint): Vec2[] => {
+const serverOffsets = (point: ServicePoint): Vec2[] => {
   const along = fromAngle(point.rotation)
-  const out = fromAngle(point.rotation - Math.PI / 2)
   const n = Math.max(1, Math.floor(point.servers))
   return Array.from({ length: n }, (_, i) => {
     const t = n === 1 ? 0 : (i / (n - 1) - 0.5) * (point.width - 0.6)
-    const base = add(point.position, scale(along, t))
-    return add(base, scale(out, point.depth / 2 + 0.55))
+    return add(point.position, scale(along, t))
   })
+}
+
+/** Where staff stand: behind the counter, on the opposite side from the queue. */
+export const serverPositions = (point: ServicePoint): Vec2[] => {
+  const out = serviceFacing(point)
+  return serverOffsets(point).map((base) => add(base, scale(out, -(point.depth / 2 + 0.5))))
+}
+
+/** Where a person stands to be served: in front of the counter, facing it. */
+export const servicePositions = (point: ServicePoint): Vec2[] => {
+  const out = serviceFacing(point)
+  return serverOffsets(point).map((base) => add(base, scale(out, point.depth / 2 + 0.45)))
 }
 
 /** The queue centreline, generated straight out from the counter when unset. */

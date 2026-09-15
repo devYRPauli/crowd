@@ -6,7 +6,7 @@
  */
 
 import type { Vec2 } from './vec2'
-import { cross, distanceSq, dot, sub } from './vec2'
+import { cross, distance, distanceSq, dot, sub } from './vec2'
 
 export type Polygon = Vec2[]
 
@@ -270,6 +270,28 @@ export const samplePolyline = (points: readonly Vec2[], spacing: number, count?:
   const out: Vec2[] = []
   for (let i = 0; i < n; i++) out.push(pointAlongPolyline(points, i * spacing))
   return out
+}
+
+/** Closest point on a polyline, with its arc length from the head. */
+export const closestPointOnPolyline = (
+  points: readonly Vec2[],
+  p: Vec2,
+): { point: Vec2; arc: number; distance: number } => {
+  if (points.length === 0) return { point: { x: 0, y: 0 }, arc: 0, distance: Infinity }
+  if (points.length === 1) return { point: { ...points[0] }, arc: 0, distance: distance(p, points[0]) }
+  let best = { point: { ...points[0] }, arc: 0, distance: Infinity }
+  let travelled = 0
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y)
+    const t = projectOnSegment(p, a, b)
+    const point = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+    const d = distance(p, point)
+    if (d < best.distance) best = { point, arc: travelled + t * segLen, distance: d }
+    travelled += segLen
+  }
+  return best
 }
 
 /** Direction of travel at arc-length `s` along a polyline. */

@@ -393,3 +393,51 @@ describe('sampleField', () => {
     expect(sampleField(grid, new Float32Array(4).fill(Infinity), 1, 1, -1)).toBe(-1)
   })
 })
+
+describe('sampleGradient', () => {
+  it('keeps the direction true at the grid border', () => {
+    // A planar potential: the downhill direction is the same at every point, so
+    // any deviation is the sampler's own. `sampleField` holds the outer half-cell
+    // at the edge cell's value, so a probe pair straddling the border reads one
+    // cell twice — the component across the border cancels, and steering either
+    // slides along the border or reads flat outright at a corner.
+    const grid = createNavGrid({ minX: 0, minY: 0, maxX: 10, maxY: 10 }, 0.25)
+    const field = new Float32Array(cellCount(grid))
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const centre = cellCenter(grid, col, row)
+        field[gridIndex(grid, col, row)] = 0.6 * centre.x + 0.8 * centre.y
+      }
+    }
+
+    const onTheEdge: Vec2[] = [
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+      { x: 10, y: 0 },
+      { x: 0, y: 4.3 },
+      { x: 4.3, y: 0 },
+      { x: 10, y: 4.3 },
+      { x: 4.3, y: 10 },
+      { x: 0.05, y: 6.7 }, // inside the clamped outer half-cell
+      { x: 5, y: 5 }, // interior control
+    ]
+    for (const p of onTheEdge) {
+      const sample = sampleGradient(grid, field, p.x, p.y)
+      expect(sample).not.toBeNull()
+      expect(sample!.dx).toBeCloseTo(-0.6, 5)
+      expect(sample!.dy).toBeCloseTo(-0.8, 5)
+    }
+
+    // A hair outside is still off the grid, not a clamped reading.
+    expect(sampleGradient(grid, field, -0.001, 5)).toBeNull()
+    expect(sampleGradient(grid, field, 5, 10.001)).toBeNull()
+  })
+
+  it('reads flat where the field genuinely is', () => {
+    const grid = createNavGrid({ minX: 0, minY: 0, maxX: 4, maxY: 4 }, 0.5)
+    const flat = new Float32Array(cellCount(grid)).fill(3)
+    expect(sampleGradient(grid, flat, 2, 2)).toEqual({ dx: 0, dy: 0, value: 3 })
+    expect(sampleGradient(grid, flat, 0, 0)).toEqual({ dx: 0, dy: 0, value: 3 })
+  })
+})
