@@ -3,7 +3,7 @@
  *
  * This is most of what separates a drawing tool that feels precise from one
  * that feels approximate. Candidates are gathered from the geometry already in
- * the plan — wall ends, wall centrelines, object centres and edges — and the
+ * the plan — wall ends, wall faces, object centres and edges — and the
  * closest one within a *screen-space* tolerance wins, so snapping behaves the
  * same whether the user is zoomed to a whole floor or to a doorway.
  *
@@ -12,7 +12,7 @@
  */
 
 import type { Vec2 } from '../core/math/vec2'
-import { add, distance, normalize, scale, sub } from '../core/math/vec2'
+import { add, distance, normalize, perp, scale, sub } from '../core/math/vec2'
 import { closestPointOnSegment, projectOnSegment } from '../core/math/geometry'
 import type { CrowdDocument, Wall } from '../core/model/types'
 import { furnitureVisualPolygon, servicePolygon, wallLength } from '../core/model/planGeometry'
@@ -53,7 +53,10 @@ export interface SnapOptions {
   tolerancePx?: number
   /** Anchor for angle and length constraints while drawing. */
   anchor?: Vec2 | null
-  /** Constrain to multiples of this angle from the anchor, in degrees. 0 disables. */
+  /**
+   * Constrain to multiples of this angle from the anchor, in degrees.
+   * Defaults to the document's setting; 0 disables.
+   */
   angleSnapDeg?: number
   /** Ignore these object ids when gathering candidates (e.g. the one being dragged). */
   exclude?: ReadonlySet<string>
@@ -134,11 +137,23 @@ const gatherCandidates = (
         label: 'Wall midpoint',
       })
     }
-    const onWall = closestPointOnSegment(raw, wall.a, wall.b)
-    if (distance(onWall, raw) <= tolerance + wall.thickness) {
+    // The user aims at the wall's face, which lies half a thickness off the
+    // centreline on their side of it. Measuring to the centreline and then
+    // allowing a whole thickness of slack put world metres into a grab radius
+    // that is meant to be screen pixels: a thick wall reached further than a
+    // thin one at the same zoom, and zooming in could never tighten it.
+    const centre = closestPointOnSegment(raw, wall.a, wall.b)
+    const offset = distance(raw, centre)
+    // Dead on the centreline there is no side to prefer, so take one rather than
+    // returning the centreline itself — otherwise the middle of a thick wall
+    // snaps while a millimetre either way does not.
+    const side =
+      offset > 1e-9 ? scale(sub(raw, centre), 1 / offset) : perp(normalize(sub(wall.b, wall.a)))
+    const edge = add(centre, scale(side, wall.thickness / 2))
+    if (distance(edge, raw) <= tolerance) {
       const t = projectOnSegment(raw, wall.a, wall.b)
       out.push({
-        point: onWall,
+        point: edge,
         kind: 'edge',
         priority: PRIORITY.edge,
         wall: { wall, offset: t * wallLength(wall) },
@@ -250,8 +265,8 @@ const gatherAlignment = (
       priority: PRIORITY['align-y'],
       guides: [
         {
-          from: { x: Math.min(bestX?.x ?? raw.x, raw.x) - GUIDE_LENGTH, y: bestY.y },
-          to: { x: Math.max(raw.x, raw.x) + GUIDE_LENGTH, y: bestY.y },
+          from: { x: Math.min(bestY.x, raw.x) - GUIDE_LENGTH, y: bestY.y },
+          to: { x: Math.max(bestY.x, raw.x) + GUIDE_LENGTH, y: bestY.y },
           kind: 'align-y',
         },
       ],
@@ -281,6 +296,7 @@ export const snapPoint = (doc: CrowdDocument, raw: Vec2, options: SnapOptions): 
   const objectSnap = options.objectSnap ?? doc.settings.snapToObjects
   const gridSnap = options.gridSnap ?? doc.settings.snapToGrid
   const gridSize = options.gridSize ?? doc.settings.gridSize
+  const angleSnapDeg = options.angleSnapDeg ?? doc.settings.angleSnapDeg
 
   const candidates: Candidate[] = []
   if (objectSnap) {
@@ -290,8 +306,8 @@ export const snapPoint = (doc: CrowdDocument, raw: Vec2, options: SnapOptions): 
     }
   }
 
-  if (options.anchor && (options.angleSnapDeg ?? 0) > 0) {
-    const constrained = constrainAngle(options.anchor, raw, options.angleSnapDeg ?? 0)
+  if (options.anchor && angleSnapDeg > 0) {
+    const constrained = constrainAngle(options.anchor, raw, angleSnapDeg)
     if (distance(constrained, raw) <= tolerance * 1.6) {
       candidates.push({
         point: constrained,

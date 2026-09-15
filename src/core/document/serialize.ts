@@ -11,6 +11,7 @@
 import type {
   ArrivalProfile,
   CrowdDocument,
+  DocumentSettings,
   FurnitureItem,
   ItineraryStep,
   Opening,
@@ -42,6 +43,15 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 const num = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
+
+/**
+ * An absent optional number and an unusable one are the same thing. NaN and
+ * ±Infinity pass a `typeof` test, and an optional field that admits them hands
+ * the engine a service time or a routing cost that poisons a whole run instead
+ * of failing the load.
+ */
+const optNum = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
 
 const str = (value: unknown, fallback: string): string =>
   typeof value === 'string' && value.length > 0 ? value : fallback
@@ -75,12 +85,15 @@ const parseDistribution = (value: unknown, fallbackMean: number): Distribution |
   const kind = DISTRIBUTION_KINDS.includes(value.kind as never)
     ? (value.kind as Distribution['kind'])
     : 'lognormal'
+  const sd = optNum(value.sd)
+  const min = optNum(value.min)
+  const max = optNum(value.max)
   return {
     kind,
     mean: Math.max(0, num(value.mean, fallbackMean)),
-    ...(typeof value.sd === 'number' ? { sd: Math.max(0, value.sd) } : {}),
-    ...(typeof value.min === 'number' ? { min: value.min } : {}),
-    ...(typeof value.max === 'number' ? { max: value.max } : {}),
+    ...(sd !== undefined ? { sd: Math.max(0, sd) } : {}),
+    ...(min !== undefined ? { min } : {}),
+    ...(max !== undefined ? { max } : {}),
   }
 }
 
@@ -103,7 +116,16 @@ const parseWall = (raw: unknown): Wall | null => {
   }
 }
 
-const parseOpening = (raw: unknown, wallIds: Set<string>): Opening | null => {
+/**
+ * Sized from the settings of the file it came out of, not from the app-wide
+ * defaults: a venue whose doors are 2.4 m says so in its own settings, and a
+ * door that lost its width on the way in has to come back that wide.
+ */
+const parseOpening = (
+  raw: unknown,
+  wallIds: Set<string>,
+  settings: DocumentSettings,
+): Opening | null => {
   if (!isObject(raw)) return null
   const wallId = str(raw.wallId, '')
   if (!wallIds.has(wallId)) return null
@@ -112,27 +134,20 @@ const parseOpening = (raw: unknown, wallIds: Set<string>): Opening | null => {
   )
     ? (raw.kind as Opening['kind'])
     : 'door'
+  const isWindow = kind === 'window'
   return {
     id: str(raw.id, newId('open')),
     wallId,
     offset: Math.max(0, num(raw.offset, 1)),
     width: Math.max(
       0.1,
-      num(
-        raw.width,
-        kind === 'window' ? DEFAULT_SETTINGS.defaultWindowWidth : DEFAULT_SETTINGS.defaultDoorWidth,
-      ),
+      num(raw.width, isWindow ? settings.defaultWindowWidth : settings.defaultDoorWidth),
     ),
     height: Math.max(
       0.1,
-      num(
-        raw.height,
-        kind === 'window'
-          ? DEFAULT_SETTINGS.defaultWindowHeight
-          : DEFAULT_SETTINGS.defaultDoorHeight,
-      ),
+      num(raw.height, isWindow ? settings.defaultWindowHeight : settings.defaultDoorHeight),
     ),
-    sill: Math.max(0, num(raw.sill, kind === 'window' ? DEFAULT_SETTINGS.defaultWindowSill : 0)),
+    sill: Math.max(0, num(raw.sill, isWindow ? settings.defaultWindowSill : 0)),
     kind,
     ...(typeof raw.swing === 'string' ? { swing: raw.swing as Opening['swing'] } : {}),
     ...(raw.use === 'entry' || raw.use === 'exit' || raw.use === 'both'
@@ -175,6 +190,8 @@ const parseZone = (raw: unknown): Zone | null => {
   ).includes(raw.kind as never)
     ? (raw.kind as Zone['kind'])
     : 'waypoint'
+  const cost = optNum(raw.cost)
+  const capacity = optNum(raw.capacity)
   return {
     id: str(raw.id, newId('zone')),
     kind,
@@ -182,15 +199,17 @@ const parseZone = (raw: unknown): Zone | null => {
     polygon,
     ...(typeof raw.color === 'string' ? { color: raw.color } : {}),
     ...(raw.locked === true ? { locked: true } : {}),
-    ...(typeof raw.cost === 'number' ? { cost: raw.cost } : {}),
+    ...(cost !== undefined ? { cost } : {}),
     ...(parseDistribution(raw.dwell, 60) ? { dwell: parseDistribution(raw.dwell, 60) } : {}),
-    ...(typeof raw.capacity === 'number' ? { capacity: raw.capacity } : {}),
+    ...(capacity !== undefined ? { capacity } : {}),
   }
 }
 
 const parseServicePoint = (raw: unknown): ServicePoint | null => {
   if (!isObject(raw)) return null
   const queue = points(raw.queue)
+  const opensAt = optNum(raw.opensAt)
+  const closesAt = optNum(raw.closesAt)
   return {
     id: str(raw.id, newId('svc')),
     name: str(raw.name, 'Service point'),
@@ -204,8 +223,8 @@ const parseServicePoint = (raw: unknown): ServicePoint | null => {
     queueSpacing: Math.max(0.3, num(raw.queueSpacing, 0.6)),
     ...(typeof raw.color === 'string' ? { color: raw.color } : {}),
     ...(raw.locked === true ? { locked: true } : {}),
-    ...(typeof raw.opensAt === 'number' ? { opensAt: raw.opensAt } : {}),
-    ...(typeof raw.closesAt === 'number' ? { closesAt: raw.closesAt } : {}),
+    ...(opensAt !== undefined ? { opensAt } : {}),
+    ...(closesAt !== undefined ? { closesAt } : {}),
   }
 }
 
@@ -216,13 +235,16 @@ const parseArrival = (raw: unknown): ArrivalProfile => {
   ).includes(raw.kind as never)
     ? (raw.kind as ArrivalProfile['kind'])
     : 'uniform'
+  const waves = optNum(raw.waves)
+  const peakAt = optNum(raw.peakAt)
+  const spread = optNum(raw.spread)
   return {
     kind,
     startS: Math.max(0, num(raw.startS, 0)),
     windowS: Math.max(0, num(raw.windowS, 600)),
-    ...(typeof raw.waves === 'number' ? { waves: Math.max(1, Math.round(raw.waves)) } : {}),
-    ...(typeof raw.peakAt === 'number' ? { peakAt: raw.peakAt } : {}),
-    ...(typeof raw.spread === 'number' ? { spread: raw.spread } : {}),
+    ...(waves !== undefined ? { waves: Math.max(1, Math.round(waves)) } : {}),
+    ...(peakAt !== undefined ? { peakAt } : {}),
+    ...(spread !== undefined ? { spread } : {}),
   }
 }
 
@@ -232,6 +254,7 @@ const parseItineraryStep = (raw: unknown): ItineraryStep | null => {
     ? (raw.kind as ItineraryStep['kind'])
     : null
   if (!kind) return null
+  const probability = optNum(raw.probability)
   return {
     id: str(raw.id, newId('step')),
     kind,
@@ -239,7 +262,7 @@ const parseItineraryStep = (raw: unknown): ItineraryStep | null => {
     ...(Array.isArray(raw.targetIds)
       ? { targetIds: raw.targetIds.filter((v): v is string => typeof v === 'string') }
       : {}),
-    ...(typeof raw.probability === 'number' ? { probability: raw.probability } : {}),
+    ...(probability !== undefined ? { probability } : {}),
     ...(parseDistribution(raw.duration, 60)
       ? { duration: parseDistribution(raw.duration, 60) }
       : {}),
@@ -321,11 +344,55 @@ const parseScenario = (raw: unknown): Scenario => {
       replanIntervalS: Math.max(0.25, num(routing.replanIntervalS, 2)),
       routeVariety: Math.min(1, Math.max(0, num(routing.routeVariety, 0.25))),
     },
-    evacuationAtS:
-      typeof raw.evacuationAtS === 'number' && Number.isFinite(raw.evacuationAtS)
-        ? raw.evacuationAtS
-        : null,
+    evacuationAtS: optNum(raw.evacuationAtS) ?? null,
   }
+}
+
+const parseSettings = (value: unknown): DocumentSettings => {
+  const raw = isObject(value) ? value : {}
+  return {
+    units: raw.units === 'imperial' ? 'imperial' : 'metric',
+    gridSize: Math.max(0.05, num(raw.gridSize, DEFAULT_SETTINGS.gridSize)),
+    snapToGrid: bool(raw.snapToGrid, true),
+    snapToObjects: bool(raw.snapToObjects, true),
+    angleSnapDeg: Math.max(0, num(raw.angleSnapDeg, 15)),
+    defaultWallHeight: Math.max(
+      0.5,
+      num(raw.defaultWallHeight, DEFAULT_SETTINGS.defaultWallHeight),
+    ),
+    defaultWallThickness: Math.max(
+      0.02,
+      num(raw.defaultWallThickness, DEFAULT_SETTINGS.defaultWallThickness),
+    ),
+    defaultDoorWidth: Math.max(0.3, num(raw.defaultDoorWidth, DEFAULT_SETTINGS.defaultDoorWidth)),
+    defaultDoorHeight: Math.max(
+      0.5,
+      num(raw.defaultDoorHeight, DEFAULT_SETTINGS.defaultDoorHeight),
+    ),
+    defaultWindowWidth: Math.max(
+      0.1,
+      num(raw.defaultWindowWidth, DEFAULT_SETTINGS.defaultWindowWidth),
+    ),
+    defaultWindowHeight: Math.max(
+      0.1,
+      num(raw.defaultWindowHeight, DEFAULT_SETTINGS.defaultWindowHeight),
+    ),
+    defaultWindowSill: Math.max(0, num(raw.defaultWindowSill, DEFAULT_SETTINGS.defaultWindowSill)),
+  }
+}
+
+/** Parses a list of plan objects, keeping count of how many it had to discard. */
+const parseList = <T>(
+  value: unknown,
+  parse: (raw: unknown) => T | null,
+): { items: T[]; dropped: number } => {
+  const entries = array(value)
+  const items: T[] = []
+  for (const entry of entries) {
+    const parsed = parse(entry)
+    if (parsed !== null) items.push(parsed)
+  }
+  return { items, dropped: entries.length - items.length }
 }
 
 /** Parse anything into a usable document, reporting what had to be repaired. */
@@ -346,33 +413,53 @@ export const parseDocument = (input: unknown): ParseResult => {
     )
   }
 
+  // Settings first: an opening that was saved without a width is sized from the
+  // defaults of the file it arrived in, not from the app's.
+  const settings = parseSettings(raw.settings)
+
   const planRaw = isObject(raw.plan) ? raw.plan : {}
-  const walls = array(planRaw.walls)
-    .map(parseWall)
-    .filter((w): w is Wall => w !== null)
-  const wallIds = new Set(walls.map((w) => w.id))
-  const openingsRaw = array(planRaw.openings)
-  const openings = openingsRaw
-    .map((o) => parseOpening(o, wallIds))
-    .filter((o): o is Opening => o !== null)
-  if (openings.length !== openingsRaw.length) {
-    warnings.push(
-      `${openingsRaw.length - openings.length} opening(s) referenced a missing wall and were dropped.`,
-    )
+  const walls = parseList(planRaw.walls, parseWall)
+  const wallIds = new Set(walls.items.map((w) => w.id))
+  const openings = parseList(planRaw.openings, (o) => parseOpening(o, wallIds, settings))
+  const furniture = parseList(planRaw.furniture, parseFurniture)
+  const zones = parseList(planRaw.zones, parseZone)
+  const servicePoints = parseList(planRaw.servicePoints, parseServicePoint)
+
+  // Everything that fell out of a damaged file is accounted for, counted under
+  // the kind it was: a wall that goes without a word takes its doors with it,
+  // and the reader is left wondering why the venue came back smaller.
+  const losses: Array<[number, string]> = [
+    [
+      walls.dropped,
+      `${walls.dropped} wall(s) had no length or could not be read and were dropped.`,
+    ],
+    [
+      openings.dropped,
+      `${openings.dropped} opening(s) referenced a missing wall or could not be read and were dropped.`,
+    ],
+    [
+      furniture.dropped,
+      `${furniture.dropped} furniture item(s) could not be read and were dropped.`,
+    ],
+    [
+      zones.dropped,
+      `${zones.dropped} zone(s) had fewer than three corners or could not be read and were dropped.`,
+    ],
+    [
+      servicePoints.dropped,
+      `${servicePoints.dropped} service point(s) could not be read and were dropped.`,
+    ],
+  ]
+  for (const [count, message] of losses) {
+    if (count > 0) warnings.push(message)
   }
 
   const plan: Plan = {
-    walls,
-    openings,
-    furniture: array(planRaw.furniture)
-      .map(parseFurniture)
-      .filter((f): f is FurnitureItem => f !== null),
-    zones: array(planRaw.zones)
-      .map(parseZone)
-      .filter((z): z is Zone => z !== null),
-    servicePoints: array(planRaw.servicePoints)
-      .map(parseServicePoint)
-      .filter((s): s is ServicePoint => s !== null),
+    walls: walls.items,
+    openings: openings.items,
+    furniture: furniture.items,
+    zones: zones.items,
+    servicePoints: servicePoints.items,
   }
   if (isObject(planRaw.backdrop) && typeof planRaw.backdrop.src === 'string') {
     plan.backdrop = {
@@ -387,7 +474,6 @@ export const parseDocument = (input: unknown): ParseResult => {
     }
   }
 
-  const settingsRaw = isObject(raw.settings) ? raw.settings : {}
   const now = new Date().toISOString()
 
   return {
@@ -397,41 +483,7 @@ export const parseDocument = (input: unknown): ParseResult => {
       name: str(raw.name, 'Untitled venue'),
       createdAt: str(raw.createdAt, now),
       updatedAt: now,
-      settings: {
-        units: settingsRaw.units === 'imperial' ? 'imperial' : 'metric',
-        gridSize: Math.max(0.05, num(settingsRaw.gridSize, DEFAULT_SETTINGS.gridSize)),
-        snapToGrid: bool(settingsRaw.snapToGrid, true),
-        snapToObjects: bool(settingsRaw.snapToObjects, true),
-        angleSnapDeg: Math.max(0, num(settingsRaw.angleSnapDeg, 15)),
-        defaultWallHeight: Math.max(
-          0.5,
-          num(settingsRaw.defaultWallHeight, DEFAULT_SETTINGS.defaultWallHeight),
-        ),
-        defaultWallThickness: Math.max(
-          0.02,
-          num(settingsRaw.defaultWallThickness, DEFAULT_SETTINGS.defaultWallThickness),
-        ),
-        defaultDoorWidth: Math.max(
-          0.3,
-          num(settingsRaw.defaultDoorWidth, DEFAULT_SETTINGS.defaultDoorWidth),
-        ),
-        defaultDoorHeight: Math.max(
-          0.5,
-          num(settingsRaw.defaultDoorHeight, DEFAULT_SETTINGS.defaultDoorHeight),
-        ),
-        defaultWindowWidth: Math.max(
-          0.1,
-          num(settingsRaw.defaultWindowWidth, DEFAULT_SETTINGS.defaultWindowWidth),
-        ),
-        defaultWindowHeight: Math.max(
-          0.1,
-          num(settingsRaw.defaultWindowHeight, DEFAULT_SETTINGS.defaultWindowHeight),
-        ),
-        defaultWindowSill: Math.max(
-          0,
-          num(settingsRaw.defaultWindowSill, DEFAULT_SETTINGS.defaultWindowSill),
-        ),
-      },
+      settings,
       plan,
       scenario: parseScenario(raw.scenario),
     },
