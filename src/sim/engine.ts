@@ -847,6 +847,17 @@ export class Simulation {
       const ahead = queue.waiting.length + queue.servers.filter((id) => id >= 0).length
       const serviceMean = distributionMean(queue.record.serviceTime)
       const wait = (ahead * serviceMean) / Math.max(1, queue.record.serverCount)
+      // Walk and wait are added here, and taken as a maximum when choosing
+      // between exits, and that difference is deliberate rather than drift.
+      // Strictly the line moves while you walk to it, so a maximum is the
+      // better estimate of your own wait, and for exits it is worth a third off
+      // the time to clear a hall. For counters it was measured and it is not:
+      // mean wait fell a tenth, but total desk utilisation fell from 3.00 to
+      // 2.13 across four registration desks, because a maximum sends people to
+      // a far desk whose queue will have drained by the time they arrive and
+      // leaves the near one idle meanwhile. Better for the person, worse for
+      // the venue. Doors have no such problem — nobody serves a door — so they
+      // get the sharper estimate and counters keep the conservative one.
       const cost = (Number.isFinite(walk) ? walk : 120) + wait
       if (cost < bestCost) {
         bestCost = cost
