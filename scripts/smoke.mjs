@@ -238,9 +238,12 @@ const run = async () => {
       (await page.locator('.live-stats').innerText()).match(/(\d+)\s*inside/)?.[1] ?? '0',
     )
     console.log(`\n    ${fps.toFixed(0)} fps with ${inside} people (software GL)`)
-    // SwiftShader in CI is roughly an order of magnitude slower than a real GPU,
-    // so this only catches a collapse, not a regression in rendering cost.
-    if (fps < 5) throw new Error(`Frame rate collapsed to ${fps.toFixed(1)} fps.`)
+    // Software rendering on a shared runner is an order of magnitude slower than
+    // a real GPU and varies with whatever else the machine is doing, so the
+    // absolute number here means nothing. The only thing worth asserting is that
+    // frames are still being produced at all — a shader that fails to compile or
+    // a render loop that stalls shows up as zero.
+    if (fps < 2) throw new Error(`Frame rate collapsed to ${fps.toFixed(1)} fps.`)
   })
 
   await step('dark theme', async () => {

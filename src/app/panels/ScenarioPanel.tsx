@@ -20,6 +20,7 @@ import type { ArrivalKind, ItineraryStep, Population } from '../../core/model/ty
 import { Checkbox, Field, NumberInput, Select, Slider } from '../components/ui'
 import { formatDuration } from '../../core/model/units'
 import { PlusIcon, TrashIcon } from '../components/icons'
+import { BriefBox } from './BriefBox'
 
 const ARRIVAL_LABELS: Record<ArrivalKind, string> = {
   uniform: 'Evenly spread',
@@ -393,6 +394,8 @@ export const ScenarioPanel = () => {
         <span className="badge is-accent">{total} people</span>
       </div>
       <div className="panel-body">
+        <BriefBox />
+
         <div className="section">
           <div className="row">
             <Field label="Run length">
