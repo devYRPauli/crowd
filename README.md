@@ -241,9 +241,11 @@ other test.
   persons/m²** where the curve's own peak is 1.225 at 1.75 — capacity being the
   number a model like this is most likely to be quoted on.
 - **RiMEA 3.0 cases** TC1 (corridor speed), TC6 (90° corner), TC7 (demographic
-  speeds) and TC12 (bottleneck flow), plus a single-exit evacuation. TC2–TC3 and
-  TC8–TC15 involve stairs and multi-storey geometry, which this version does not
-  model; they are listed as not applicable rather than omitted.
+  speeds) and TC12 (bottleneck flow), plus a single-exit evacuation that is
+  CROWD's own check rather than a RiMEA case. TC2, TC3, TC8 and TC13 turn on
+  stairs, which this version does not model and will not fake as a sloped
+  corridor; the rest are listed as not written yet rather than omitted, with
+  escape-route choice (TC11) called out as the gap that matters most.
 - **ORCA** is verified by differential fuzzing against an independent
   transliteration of the RVO2 reference, and its test suite is mutation-tested.
 - **Determinism**, because a comparison that is partly noise is worse than no

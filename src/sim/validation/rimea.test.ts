@@ -45,10 +45,12 @@
  *    gap that matters most: the engine routes people to a chosen exit and
  *    nothing in this file tests that choice.
  *
- * Determinism: every population is given a fixed `id`, because the engine seeds
- * a sub-stream from it (`rng.branch('population:' + id)`). `createPopulation()`
- * mints a random id, which would make the profile mix and arrival draws differ
- * between runs of the same test.
+ * Determinism: the engine seeds a sub-stream per population from its position
+ * in the scenario rather than from its id, so a case that builds its plan and
+ * its populations the same way twice measures the same thing twice. It used to
+ * key on the id, which `createPopulation()` mints from `Math.random`, and then
+ * the arrival times and profile draws differed between two runs of the same
+ * test; `library/determinism.test.ts` is the regression test for that.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest'

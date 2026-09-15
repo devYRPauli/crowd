@@ -123,18 +123,30 @@ at nearly twice the right density — to within 1% of the curve.
 
 ## RiMEA 3.0
 
-The RiMEA 3.0 test cases this single-storey model can attempt. TC2–TC3 and
-TC8–TC15 involve stairs and multi-storey geometry, which it does not model;
-they are listed here as not applicable rather than quietly omitted.
+The RiMEA 3.0 cases this single-storey model attempts. Citing the wrong clause
+of a standard is the same kind of lie as loosening a threshold, so the numbering
+below was checked against the guideline's published test list and against the
+JuPedSim reference notebooks, and a case that could not be matched to a number
+does not get one.
 
-| Case                       | Criterion                                            | Measured                                                                                                           |                      |
-| -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------- |
-| **TC1** Corridor speed     | 40 m in 40 ± 1 s at 1.0 m/s                          | 40.00 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
-| **TC6** 90° corner         | Nobody walks through a wall                          | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2328 m against a 0.23 m body | pass                 |
-| **TC7** Demographic speeds | Per-profile free-flow mean within 10% of its profile | Worst error 4.3% (adult, 1.398 vs 1.34 m/s); all seven profiles within 4.3%; overall sd 0.328 vs 0.327 implied     | pass                 |
-| **TC12** Bottleneck flow   | 1.2–1.4 persons/m/s of clear width                   | 1.5 m: **1.379** · 2.0 m: **1.318**                                                                                | pass                 |
-|                            |                                                      | 0.8 m: 1.078 · 1.0 m: 0.996 · 1.2 m: 1.040                                                                         | **fail, below band** |
-| TC2, TC3, TC8–TC15         | Stairs, multi-storey egress                          | —                                                                                                                  | not applicable       |
+| Case                             | Criterion                                             | Measured                                                                                                           |                      |
+| -------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.00 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
+| **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2328 m against a 0.23 m body | pass                 |
+| **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 4.3% (adult, 1.398 vs 1.34 m/s); all seven profiles within 4.3%; overall sd 0.328 vs 0.327 implied     | pass                 |
+| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.379** · 2.0 m: **1.318**                                                                                | pass                 |
+|                                  |                                                       | 0.8 m: 1.078 · 1.0 m: 0.996 · 1.2 m: 1.040                                                                         | **fail, below band** |
+| TC2, TC3, TC8, TC13              | Stairs and multi-storey egress                        | —                                                                                                                  | not modelled         |
+| TC4                              | Fundamental diagram                                   | measured above, though not in RiMEA's own corridor geometry                                                        | partial              |
+| TC5, TC9, TC10, TC11, TC14, TC15 | Personal data, exit choice, evacuation demonstrations | —                                                                                                                  | not written yet      |
+
+TC2, TC3, TC8 and TC13 turn on stairs: walking speed up and down one, a
+multi-floor building, the fundamental diagram on a stair. This version models a
+single floor plate — the plan has no storeys and the navigation grid is one 2-D
+raster — and faking a stair as a sloped corridor would produce numbers that look
+like RiMEA results and mean nothing. Of the cases simply not written, **TC11,
+choice of escape route, is the gap that matters most**: the engine routes people
+to a chosen exit and nothing yet tests that choice.
 
 ### The narrow openings, stated plainly
 
