@@ -11,6 +11,7 @@ import type {
   DocumentSettings,
   FurnitureItem,
   Opening,
+  ItineraryStep,
   Plan,
   PlanObjectRef,
   Population,
@@ -169,23 +170,44 @@ export const removeObjects = (
   }
   if (doc.plan.backdrop && !dropBackdrop) plan.backdrop = doc.plan.backdrop
 
-  // Itineraries and entry lists can reference deleted zones or counters.
-  const removedTargets = new Set([...zoneIds, ...serviceIds])
+  // Itineraries and entry lists can reference deleted zones, counters — or
+  // doors, since a door marked as a way in or out is a destination in its own
+  // right. Openings that go with their wall count as deleted too, which is how
+  // a population ends up pointing at a doorway nobody meant to remove.
+  const goneOpenings = doc.plan.openings
+    .filter((opening) => openingIds.has(opening.id) || wallIds.has(opening.wallId))
+    .map((opening) => opening.id)
+  const removedTargets = new Set([...zoneIds, ...serviceIds, ...goneOpenings])
+
   const populations = doc.scenario.populations.map((pop) => {
     const entryIds = pop.entryIds.filter((id) => !removedTargets.has(id))
-    const itinerary = pop.itinerary
-      .map((step) =>
-        step.targetIds
-          ? { ...step, targetIds: step.targetIds.filter((id) => !removedTargets.has(id)) }
-          : step,
-      )
-      .filter((step) => {
-        if (step.targetIds && step.targetIds.length > 0) return true
-        return !step.targetId || !removedTargets.has(step.targetId)
-      })
-    return entryIds.length === pop.entryIds.length && itinerary.length === pop.itinerary.length
-      ? pop
-      : { ...pop, entryIds, itinerary }
+    let changed = entryIds.length !== pop.entryIds.length
+    const itinerary: ItineraryStep[] = []
+    for (const step of pop.itinerary) {
+      if (step.targetIds) {
+        const targetIds = step.targetIds.filter((id) => !removedTargets.has(id))
+        if (targetIds.length === step.targetIds.length) {
+          itinerary.push(step)
+          continue
+        }
+        changed = true
+        // A step that named counters and has none left has nothing to do. The
+        // same step written with a single `targetId` is dropped for exactly
+        // that reason, and two spellings of one thing must not disagree.
+        if (targetIds.length > 0) itinerary.push({ ...step, targetIds })
+        continue
+      }
+      if (step.targetId && removedTargets.has(step.targetId)) {
+        changed = true
+        continue
+      }
+      itinerary.push(step)
+    }
+    // Deciding this on lengths alone missed the case that matters: pruning ids
+    // out of a step does not change how many steps there are, so the pruned
+    // itinerary was computed and then thrown away, and the plan lost a counter
+    // the itinerary still named.
+    return changed ? { ...pop, entryIds, itinerary } : pop
   })
 
   return {

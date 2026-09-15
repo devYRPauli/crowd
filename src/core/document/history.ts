@@ -58,13 +58,25 @@ export const canUndo = <T>(history: History<T>): boolean => history.past.length 
 
 export const canRedo = <T>(history: History<T>): boolean => history.future.length > 0
 
+/**
+ * A step you have moved to is a finished step.
+ *
+ * Whatever gesture produced it ended long ago, so its coalesce key has to go
+ * with it. Left in place, the next edit that happens to use the same key — and
+ * the tools use fixed strings, 'nudge' and 'move-selection' — merges into it
+ * instead of pushing a new step, which silently makes the state the user just
+ * came back to unreachable.
+ */
+const restored = <T>(entry: HistoryEntry<T>): HistoryEntry<T> =>
+  entry.coalesceKey === undefined ? entry : { ...entry, coalesceKey: undefined }
+
 export const undo = <T>(history: History<T>): History<T> => {
   if (history.past.length === 0) return history
   const previous = history.past[history.past.length - 1]
   return {
     ...history,
     past: history.past.slice(0, -1),
-    present: previous,
+    present: restored(previous),
     future: [history.present, ...history.future],
   }
 }
@@ -75,7 +87,7 @@ export const redo = <T>(history: History<T>): History<T> => {
   return {
     ...history,
     past: [...history.past, history.present],
-    present: next,
+    present: restored(next),
     future: rest,
   }
 }
