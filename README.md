@@ -284,8 +284,11 @@ This is an exploratory planning model, not a safety certification.
   floor rather than reproducing the mistake.
 - **Group behaviour is limited.** People can arrive in groups, but there is no
   explicit cohesion model keeping a family together through a crowd.
-- **No explicit balking or reneging.** People join the queue they are sent to and
-  wait.
+- **No balking or reneging at a counter.** Somebody heading for a door will
+  change doors when the queue at one makes the walk to the other worth it, but
+  somebody who has joined a service queue stays in it however long the line
+  gets. Real people give up, so waiting times at a badly under-provisioned
+  counter come out longer here than they would be.
 - Runs are capped at 6,000 people to keep a browser tab responsive; the run says
   so when it caps.
 

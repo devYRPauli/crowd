@@ -283,9 +283,11 @@ Stated so that nobody has to infer it from silence.
   multi-storey egress.
 - **Group cohesion.** People can arrive in groups; nothing keeps a family
   together through a crowd, and nothing here measures whether it should.
-- **Balking and reneging.** Nobody looks at a long queue and leaves. Waiting
-  times in a badly under-provisioned venue will therefore be longer than real
-  ones, because real people give up.
+- **Balking and reneging at a counter.** People do change which door they leave
+  by when the queue at one makes the walk to the other worth it — that is
+  measured above — but nobody who has joined a service queue ever gives up on
+  it. Waiting times at a badly under-provisioned counter will therefore come out
+  longer than real ones.
 - **Counterflow and crossing flows.** The fundamental diagram above is
   unidirectional. Bidirectional lane formation is not measured.
 - **Code figures.** Occupant load, egress width and capacity are model-code
