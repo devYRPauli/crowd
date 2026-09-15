@@ -372,7 +372,7 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
    * This lives here rather than only in the per-width tests because an
    * `it.fails` test is green whenever its body throws, and it does not care
    * which way it threw. Two mutants proved that matters, both at the 0.8 m
-   * width, which is marked `it.fails` for being 26% *under* the band: deleting
+   * width, which is marked `it.fails` for being 16% *under* the band: deleting
    * the density slowdown (`speedFromDensity` in `preferredVelocity`) took it to
    * 1.998 p/m/s, and halving every agent's radius took it to 1.830. Each is
    * roughly double the true figure and each left the suite green, because
@@ -425,8 +425,8 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   }
 
   /**
-   * KNOWN GAP. MEASURED 1.074 p/m/s of clear width (0.859 p/s); TARGET 1.2–1.4
-   * — 11% below the bottom of the band. A 0.8 m clear opening leaves 0.28 m of
+   * KNOWN GAP. MEASURED 1.011 p/m/s of clear width; TARGET 1.2–1.4 — 16% below
+   * the bottom of the band. A 0.8 m clear opening leaves 0.28 m of
    * unblocked navigation grid once `NAV_CLEARANCE` (0.26 m) is taken off each
    * side, so people thread it strictly one at a time. Charged against the
    * *effective* width instead (clear width less a 0.15 m boundary layer each
@@ -455,8 +455,8 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   it.fails('TC12: 0.8 m opening passes 1.2–1.4 p/m/s', bandTest(0.8))
 
   /**
-   * KNOWN GAP, and the worst of the three. MEASURED 0.996 p/m/s (0.996 p/s);
-   * TARGET 1.2–1.4 — 17% below the band. Same cause as the 0.8 m case: the
+   * KNOWN GAP, and the worst of the two that remain. MEASURED 1.019 p/m/s;
+   * TARGET 1.2–1.4 — 15% below the band. Same cause as the 0.8 m case: the
    * usable navigation channel is 0.48 m, two centimetres more than two bodies
    * need, so the file staggers rather than doubling and the door meters at
    * roughly one lane. Against effective width it reads 1.423 p/m/s, above the
@@ -468,22 +468,26 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   it.fails('TC12: 1.0 m opening passes 1.2–1.4 p/m/s', bandTest(1.0))
 
   /**
-   * KNOWN GAP, narrowly, and the second of the two widths RiMEA TC12 names.
-   * MEASURED 1.164 p/m/s; TARGET 1.2–1.4 — 3% under.
+   * IN BAND. MEASURED 1.251 p/m/s; TARGET 1.2–1.4. The second of the two widths
+   * RiMEA TC12 names, and the one that took the longest to earn.
    *
-   * This one has been either side of the line and it is worth recording which
-   * way each change moved it, because both were real. Sizing the navigation
-   * grid by the opening rather than fixing it at 0.3 m took it from 1.126 to
-   * 1.245 and inside the band. Then modelling personal space — people keeping a
-   * few centimetres clear of a stranger rather than closing until they touch —
-   * took it back to 1.164. That is a behaviour this model did not have and
-   * should, and it costs throughput at a narrow door exactly as it should: a
+   * It has been either side of the line and every move is worth recording,
+   * because each was a real change to the model rather than a change to the
+   * threshold. Sizing the navigation grid by the opening rather than fixing it
+   * at 0.3 m took it from 1.126 to 1.245. Modelling personal space — people
+   * keeping a few centimetres clear of a stranger rather than closing until
+   * they touch — took it back down to 1.164, which is what it should cost: a
    * crowd that will not press is a crowd that gets through more slowly.
    *
-   * 1.5 m and up stay in band with it. Against effective width this reads
-   * 1.55 p/m/s.
+   * What finally carried it was making people keep their bodies for a metre
+   * past the threshold instead of vanishing on it (`EXIT_TAIL`). Deleting them
+   * on the line left the floor beyond every opening permanently empty, so the
+   * person in the gap saw clear space ahead and walked out at free speed. The
+   * back pressure is real now and this width reads 1.251.
+   *
+   * 1.5 m and 2.0 m sit in band with it.
    */
-  it.fails('TC12: 1.2 m opening passes 1.2–1.4 p/m/s', bandTest(1.2))
+  it('TC12: 1.2 m opening passes 1.2–1.4 p/m/s', bandTest(1.2))
 
   it('TC12: 1.5 m opening passes 1.2–1.4 p/m/s', bandTest(1.5))
 

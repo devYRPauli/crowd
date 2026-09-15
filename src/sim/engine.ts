@@ -24,7 +24,6 @@ import type { Bounds } from '../core/math/geometry'
 import {
   boundsOf,
   closestPointOnPolyline,
-  distanceToPolygonEdge,
   pointAlongPolyline,
   pointInPolygon,
 } from '../core/math/geometry'
@@ -64,6 +63,31 @@ import { CROWD_SAFETY, WALKWAY_LOS, losFor, losIndex } from './metrics/los'
 
 /** How close counts as having arrived at an exact target. */
 const ARRIVE_RADIUS = 0.34
+
+/**
+ * How far past the doorway somebody goes on taking up room.
+ *
+ * A doorway meters a crowd because the people already through it are still
+ * there, in the way, a step further on. Delete them the instant they reach the
+ * threshold and the space beyond the door is permanently empty: the person in
+ * the gap sees clear floor ahead — the pace model looks `PACE_LOOKAHEAD` in
+ * front — and walks out at full speed. Measured, that put a 3'0" leaf at 2.98
+ * persons/m/s against the 1.2–1.4 the literature reports, and this engine's own
+ * corridors peak at 1.19.
+ *
+ * So they keep their body for a metre after the threshold, which is enough to
+ * hold the back pressure that makes a door a bottleneck. They are counted as
+ * having left at the threshold, not here, because that is when they left.
+ */
+const EXIT_TAIL = 1.0
+
+/**
+ * Give up on the tail after this long.
+ *
+ * Somebody who gets through the door and straight into an obstruction would
+ * otherwise stand in the tail forever, holding the doorway shut behind them.
+ */
+const EXIT_TAIL_TIMEOUT = 10
 /**
  * Within this range a person steers straight at their target instead of
  * following the field — but only if the straight line is actually walkable.
@@ -132,6 +156,12 @@ interface Agent {
   distance: number
   stoppedTime: number
   queueTime: number
+  /** When they reached the doorway, which is when they count as having left. */
+  leftAt: number | null
+  /** Where they were standing at that moment; the tail is measured from it. */
+  leftFrom: Vec2 | null
+  /** The exit they came through, kept because the tail clears `fieldTarget`. */
+  leftVia: string | null
   /** How many times this person has been re-planned after getting stuck. */
   replanCount: number
   /** True once they have given up on their itinerary, so it is reported once. */
@@ -540,6 +570,9 @@ export class Simulation {
       serverIndex: -1,
       seatIndex: -1,
       joinedQueueAt: 0,
+      leftAt: null,
+      leftFrom: null,
+      leftVia: null,
       distance: 0,
       stoppedTime: 0,
       queueTime: 0,
@@ -1245,7 +1278,14 @@ export class Simulation {
           const step = this.itineraryOf(agent)[agent.stepIndex]
           if (agent.stepIndex >= this.itineraryOf(agent).length) {
             // Heading for the exit.
-            if (arrived || this.atAnyExit(agent)) this.finish(agent, i)
+            // Containment only: `arrived` is a fixed radius around a point, so
+            // it would re-widen a narrow door and pinch a wide one.
+            if (agent.leftFrom === null && this.atAnyExit(agent)) this.beginLeaving(agent)
+            if (agent.leftFrom !== null) {
+              const out = distance({ x: agent.x, y: agent.y }, agent.leftFrom)
+              const stalled = this.time - (agent.leftAt ?? this.time) > EXIT_TAIL_TIMEOUT
+              if (out >= EXIT_TAIL || stalled) this.finish(agent, i)
+            }
             break
           }
           if (!arrived) break
@@ -1300,20 +1340,59 @@ export class Simulation {
    * them to reach an exact point leaves a handful of people stranded at every
    * exit — which then shows up as an evacuation that never finishes.
    */
+  /**
+   * Has this person actually left?
+   *
+   * The polygon of a door exit is the gap itself — the leaf's clear width,
+   * straddling the wall — so standing inside it means standing in the doorway,
+   * which is the one place a crowd has to come through one or two abreast. That
+   * is what makes a door meter a crowd, and it is the whole basis of an egress
+   * figure.
+   *
+   * This used to accept anyone within `radius + 0.35` of the polygon's *edge*,
+   * which quietly dilated every doorway by 1.16 m of capture front and let
+   * people vanish while still out on the open floor. A 2'0" door and an 8'0"
+   * pair then cleared a hall at almost the same rate — four times the width
+   * bought 1.3 times the flow — and every egress number the tool produced was
+   * between five and ten times too optimistic. Width has to bite, so the test
+   * is containment, with no margin.
+   */
   private atAnyExit(agent: Agent): boolean {
     const point = { x: agent.x, y: agent.y }
-    const reach = agent.radius + 0.35
     for (const exit of this.world.exits) {
       if (pointInPolygon(point, exit.polygon)) return true
-      if (distanceToPolygonEdge(point, exit.polygon) <= reach) return true
     }
     return false
   }
 
+  /**
+   * Walk somebody out of the doorway they have just reached.
+   *
+   * They are pointed straight on, well past the tail, so that the last stride
+   * easing in `desiredVelocity` never slows them inside the gap, and taken off
+   * the flow field, which would otherwise keep steering them at the threshold
+   * they are standing in.
+   */
+  private beginLeaving(agent: Agent): void {
+    agent.leftAt = this.time
+    agent.leftFrom = { x: agent.x, y: agent.y }
+    agent.leftVia = agent.fieldTarget
+    const speed = Math.hypot(agent.vx, agent.vy)
+    const heading = speed > 0.05 ? Math.atan2(agent.vy, agent.vx) : agent.heading
+    const far = EXIT_TAIL * 6
+    agent.exactTarget = {
+      x: agent.x + Math.cos(heading) * far,
+      y: agent.y + Math.sin(heading) * far,
+    }
+    agent.fieldTarget = null
+  }
+
   private finish(agent: Agent, liveIndex: number): void {
     agent.state = 'done'
-    agent.finishedAt = this.time
-    const load = agent.fieldTarget ? this.exitLoads.get(agent.fieldTarget) : undefined
+    // Timed at the threshold: the tail past it is bookkeeping, not journey.
+    agent.finishedAt = agent.leftAt ?? this.time
+    const via = agent.leftVia ?? agent.fieldTarget
+    const load = via ? this.exitLoads.get(via) : undefined
     if (load) {
       if (load.through === 0) load.firstAt = this.time
       load.through++
