@@ -22,6 +22,7 @@ import type {
   Backdrop,
 } from '../model/types'
 import { wallLength } from '../model/planGeometry'
+import { OPENING_JAMB } from '../model/standards'
 
 type PlanPatch = Partial<Plan>
 
@@ -49,38 +50,81 @@ export const addWall = (doc: CrowdDocument, wall: Wall): CrowdDocument =>
 export const addWalls = (doc: CrowdDocument, walls: Wall[]): CrowdDocument =>
   walls.length === 0 ? doc : withPlan(doc, { walls: [...doc.plan.walls, ...walls] })
 
+/**
+ * An opening cut to fit the wall it is in.
+ *
+ * A door is cut into a wall, not instead of one: something has to carry the
+ * head and a leaf needs a jamb to hang from, so a sliver of wall survives
+ * either side. Without that the width could be the whole wall, which deletes
+ * the wall from the plan without deleting it from the document; the offset
+ * could push an opening off the end; and a doorway could stand taller than the
+ * wall it was cut into.
+ *
+ * Every path that can change either the opening or its wall goes through this,
+ * because a plan arrives from a file and a tool as well as from the inspector.
+ */
+const fitToWall = (opening: Opening, wall: Wall): Opening => {
+  const length = wallLength(wall)
+  const width = Math.max(0.05, Math.min(opening.width, length - 2 * OPENING_JAMB))
+  const half = width / 2
+  const offset = Math.min(
+    Math.max(opening.offset, Math.min(half + OPENING_JAMB, length / 2)),
+    Math.max(Math.min(half + OPENING_JAMB, length / 2), length - half - OPENING_JAMB),
+  )
+  const sill = Math.max(0, Math.min(opening.sill, Math.max(0, wall.height - 0.1)))
+  const height = Math.max(0.1, Math.min(opening.height, wall.height - sill))
+  return width === opening.width &&
+    offset === opening.offset &&
+    sill === opening.sill &&
+    height === opening.height
+    ? opening
+    : { ...opening, width, offset, sill, height }
+}
+
+/** Re-fit every opening in a wall, leaving the array identical if none moved. */
+const fitOpenings = (openings: readonly Opening[], wall: Wall): Opening[] | null => {
+  let changed = false
+  const next = openings.map((opening) => {
+    if (opening.wallId !== wall.id) return opening
+    const fitted = fitToWall(opening, wall)
+    if (fitted !== opening) changed = true
+    return fitted
+  })
+  return changed ? next : null
+}
+
 export const updateWall = (doc: CrowdDocument, id: string, patch: Partial<Wall>): CrowdDocument => {
   const walls = replaceById(doc.plan.walls, id, patch)
   if (walls === doc.plan.walls) return doc
-  // Openings are positioned along the wall; keep them inside a shortened wall.
   const wall = walls.find((w) => w.id === id)
   if (!wall) return withPlan(doc, { walls })
-  const length = wallLength(wall)
-  const openings = doc.plan.openings.map((opening) => {
-    if (opening.wallId !== id) return opening
-    const halfWidth = Math.min(opening.width, length) / 2
-    const offset = Math.min(
-      Math.max(opening.offset, halfWidth),
-      Math.max(halfWidth, length - halfWidth),
-    )
-    const width = Math.min(opening.width, length)
-    return offset === opening.offset && width === opening.width
-      ? opening
-      : { ...opening, offset, width }
-  })
-  return withPlan(doc, { walls, openings })
+  const openings = fitOpenings(doc.plan.openings, wall)
+  return withPlan(doc, openings ? { walls, openings } : { walls })
 }
 
 // --- openings ----------------------------------------------------------------
 
-export const addOpening = (doc: CrowdDocument, opening: Opening): CrowdDocument =>
-  withPlan(doc, { openings: [...doc.plan.openings, opening] })
+export const addOpening = (doc: CrowdDocument, opening: Opening): CrowdDocument => {
+  const wall = doc.plan.walls.find((w) => w.id === opening.wallId)
+  const fitted = wall ? fitToWall(opening, wall) : opening
+  return withPlan(doc, { openings: [...doc.plan.openings, fitted] })
+}
 
 export const updateOpening = (
   doc: CrowdDocument,
   id: string,
   patch: Partial<Opening>,
-): CrowdDocument => withPlan(doc, { openings: replaceById(doc.plan.openings, id, patch) })
+): CrowdDocument => {
+  const openings = replaceById(doc.plan.openings, id, patch)
+  if (openings === doc.plan.openings) return doc
+  const changed = openings.find((opening) => opening.id === id)
+  const wall = changed && doc.plan.walls.find((w) => w.id === changed.wallId)
+  if (!changed || !wall) return withPlan(doc, { openings })
+  const fitted = fitToWall(changed, wall)
+  return withPlan(doc, {
+    openings: fitted === changed ? openings : openings.map((o) => (o.id === id ? fitted : o)),
+  })
+}
 
 // --- furniture ---------------------------------------------------------------
 

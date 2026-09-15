@@ -33,7 +33,12 @@ import {
 import { PlanBuilder, step } from '../../library/planBuilder'
 import { createDocument, createPopulation } from '../model/defaults'
 import { wallLength } from '../model/planGeometry'
-import { DEFAULT_DOOR_WIDTH, DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS } from '../model/standards'
+import {
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
+  OPENING_JAMB,
+} from '../model/standards'
 import type { Backdrop, CrowdDocument, ItineraryStep, Opening, Wall } from '../model/types'
 
 /** A 10 x 8 room with a door, a window, a chair, an entry zone and two counters. */
@@ -114,8 +119,8 @@ describe('structural sharing', () => {
       // opening in the plan to re-clamp the ones on this wall, and `map` hands
       // back a new array even when it changed nothing. See the reported miss.
       name: 'updateWall',
-      rebuilds: ['walls', 'openings'],
-      edit: (f) => updateWall(f.doc, f.room.north.id, { height: 3.2 }),
+      rebuilds: ['walls'],
+      edit: (f) => updateWall(f.doc, f.room.north.id, { kind: 'partition' }),
     },
     {
       name: 'addOpening',
@@ -242,19 +247,20 @@ describe('walls and the openings cut into them', () => {
     const door = openingById(next, f.door.id)
 
     expect(door.width).toBeCloseTo(DEFAULT_DOOR_WIDTH, 6)
-    expect(door.offset).toBeCloseTo(5 - DEFAULT_DOOR_WIDTH / 2, 6)
+    expect(door.offset).toBeCloseTo(5 - DEFAULT_DOOR_WIDTH / 2 - OPENING_JAMB, 6)
     expect(openingById(f.doc, f.door.id).offset).toBe(5)
   })
 
-  it('narrows a door that no longer fits, and centres what is left', () => {
+  it('narrows a door that no longer fits, and leaves a jamb either side', () => {
     const f = scene()
-    // Half a metre of wall cannot hold a 3'0" leaf. The clamp lets the door
-    // span the whole wall, which leaves no jamb either side — the state the
-    // inspector's width box explicitly refuses to let you type.
+    // Half a metre of wall cannot hold a 3'0" leaf. It used to be allowed to
+    // span the whole wall, which leaves nothing to carry the head and nothing
+    // for the leaf to hang from — and deletes the wall from the plan without
+    // deleting it from the document.
     const next = updateWall(f.doc, f.room.south.id, { b: { x: 0.5, y: 0 } })
     const door = openingById(next, f.door.id)
 
-    expect(door.width).toBeCloseTo(0.5, 6)
+    expect(door.width).toBeCloseTo(0.5 - 2 * OPENING_JAMB, 6)
     expect(door.offset).toBeCloseTo(0.25, 6)
   })
 
@@ -264,46 +270,53 @@ describe('walls and the openings cut into them', () => {
     const wall = collapsed.plan.walls.find((w) => w.id === f.room.south.id)
 
     expect(wall && wallLength(wall)).toBe(0)
-    expect(openingById(collapsed, f.door.id)).toMatchObject({ width: 0, offset: 0 })
+    // Nothing fits in a wall of no length, so the door shrinks to the floor the
+    // fit allows rather than to literally nothing.
+    expect(openingById(collapsed, f.door.id)).toMatchObject({ width: 0.05, offset: 0 })
 
-    // Dragging the endpoint back out restores the wall but not the doorway:
-    // the width was clamped to zero on the way through and nothing remembers
-    // what it was. Only undo gets the door back.
+    // Dragging the endpoint back out restores the wall but not the doorway: the
+    // width was squeezed on the way through and nothing remembers what it was.
+    // Only undo gets the door back.
     const reopened = updateWall(collapsed, f.room.south.id, { b: { x: 10, y: 0 } })
-    expect(openingById(reopened, f.door.id).width).toBe(0)
+    expect(openingById(reopened, f.door.id).width).toBe(0.05)
   })
 
-  it('leaves every opening object alone when the wall edit moves none of them', () => {
+  it('keeps the whole openings array when a wall edit moves none of them', () => {
     const f = scene()
-    const next = updateWall(f.doc, f.room.south.id, { height: 3.2 })
+    const next = updateWall(f.doc, f.room.south.id, { kind: 'partition' })
 
-    // Each opening survives by reference...
-    for (const [index, opening] of next.plan.openings.entries()) {
-      expect(opening).toBe(f.doc.plan.openings[index])
-    }
-    // ...but the array around them does not. Asserted as-is: this is the
-    // structural-sharing miss reported against updateWall.
-    expect(next.plan.openings).not.toBe(f.doc.plan.openings)
+    // The renderer diffs by array identity, so a wall edit that touches no
+    // opening must not hand it a rebuilt array to walk.
+    expect(next.plan.openings).toBe(f.doc.plan.openings)
   })
 
-  it('does not clamp an opening edit; the next wall edit is what repairs it', () => {
+  it('cuts an opening to fit as it is edited, not at the next wall edit', () => {
     const f = scene()
-    // Reachable today: the inspector's stock-size picker applies a width
-    // without checking the wall, so a 6'0" pair can land in a 1 m wall.
+    // The inspector's stock-size picker applies a width without knowing the
+    // wall, so a 6'0" pair can be aimed at a 1 m wall. It used to be stored as
+    // typed and only repaired the next time the wall itself was touched, which
+    // means a plan could be saved, loaded and simulated in the broken state.
     const wide = updateOpening(f.doc, f.door.id, { width: 24 })
-    expect(openingById(wide, f.door.id).width).toBe(24)
-
-    const repaired = updateWall(wide, f.room.south.id, { kind: 'partition' })
-    expect(openingById(repaired, f.door.id).width).toBeCloseTo(10, 6)
-    expect(openingById(repaired, f.door.id).offset).toBeCloseTo(5, 6)
+    expect(openingById(wide, f.door.id).width).toBeCloseTo(10 - 2 * OPENING_JAMB, 6)
+    expect(openingById(wide, f.door.id).offset).toBeCloseTo(5, 6)
   })
 
   it('pulls an opening back from beyond the end of its wall', () => {
     const f = scene()
     const off = updateOpening(f.doc, f.door.id, { offset: 40 })
-    const next = updateWall(off, f.room.south.id, { kind: 'glass' })
 
-    expect(openingById(next, f.door.id).offset).toBeCloseTo(10 - DEFAULT_DOOR_WIDTH / 2, 6)
+    expect(openingById(off, f.door.id).offset).toBeCloseTo(
+      10 - DEFAULT_DOOR_WIDTH / 2 - OPENING_JAMB,
+      6,
+    )
+  })
+
+  it('will not let a doorway stand taller than the wall it is cut into', () => {
+    const f = scene()
+    const wall = f.doc.plan.walls.find((w) => w.id === f.room.south.id)
+    const tall = updateOpening(f.doc, f.door.id, { height: 40 })
+
+    expect(openingById(tall, f.door.id).height).toBeCloseTo(wall?.height ?? 0, 6)
   })
 })
 
@@ -431,10 +444,11 @@ describe('edits that hit nothing', () => {
 
   it('returns a new wrapper for every other miss, sharing all the arrays', () => {
     const f = scene()
-    // updateWall short-circuits, the rest do not. Harmless for the data, but it
-    // is the difference between a no-op and an undo step. Asserted as-is.
+    // updateWall and updateOpening short-circuit, the rest do not. Harmless for
+    // the data, but it is the difference between a no-op and an undo step.
+    // Asserted as-is for the ones that still rebuild.
+    expect(updateOpening(f.doc, 'open_gone', { width: 1 })).toBe(f.doc)
     for (const next of [
-      updateOpening(f.doc, 'open_gone', { width: 1 }),
       updateFurniture(f.doc, 'item_gone', { rotation: 1 }),
       updateZone(f.doc, 'zone_gone', { name: 'Nowhere' }),
       updateServicePoint(f.doc, 'svc_gone', { servers: 3 }),
@@ -576,7 +590,10 @@ describe('updateObject', () => {
     // must not be a way to shorten a wall without re-clamping its doors.
     const next = updateObject(f.doc, { kind: 'wall', id: f.room.south.id }, { b: { x: 5, y: 0 } })
 
-    expect(openingById(next, f.door.id).offset).toBeCloseTo(5 - DEFAULT_DOOR_WIDTH / 2, 6)
+    expect(openingById(next, f.door.id).offset).toBeCloseTo(
+      5 - DEFAULT_DOOR_WIDTH / 2 - OPENING_JAMB,
+      6,
+    )
   })
 })
 
