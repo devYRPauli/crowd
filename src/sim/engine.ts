@@ -75,6 +75,8 @@ const ARRIVE_RADIUS = 0.34
  */
 const DIRECT_RANGE = 3.5
 const NEIGHBOUR_RANGE = 5.0
+/** Velocity passes spent keeping bodies from walking into each other. */
+const CONTACT_PASSES = 2
 /** Seconds between a person reconsidering which way out they are heading. */
 const EXIT_REVIEW_INTERVAL = 6
 /**
@@ -1103,6 +1105,7 @@ export class Simulation {
     this.updateDensity()
     this.fields.update(this.time, this.density.values)
     this.steer(dt)
+    this.resolveContacts(dt)
     this.integrate(dt)
     this.updateExitLoads()
     this.relaxOverlaps()
@@ -1651,6 +1654,75 @@ export class Simulation {
         agent.walkTime = 0
         agent.bestDistance = Infinity
       }
+    }
+  }
+
+  /**
+   * Nobody walks into anybody.
+   *
+   * ORCA guarantees no new collision only while its linear program is
+   * feasible. In a crush it is not, and the relaxed fallback returns the
+   * least-bad velocity it can find — which, when a hundred people are pressing
+   * at one door, is still a velocity that closes the gap. `relaxOverlaps` then
+   * has to undo the overlap afterwards against a capped budget, and in a real
+   * crush it cannot keep up: a single-exit evacuation measured pairs 0.271 m
+   * inside each other on a 0.46 m pair distance, which is most of a body.
+   *
+   * So contact is resolved where it is cheap to resolve — in velocity, before
+   * anybody moves, and *before* the overlap exists rather than after. A pair is
+   * allowed to close only as fast as the gap between them permits in one step:
+   * approach until they touch, and no faster. Waiting until they already
+   * overlap is a step too late, because a pair a millimetre clear of contact is
+   * not yet overlapping and can cross most of a body in the tick that follows.
+   *
+   * Only the closing part of the relative velocity is touched. Everything along
+   * the tangent survives, so a crowd still slides and shuffles past itself and
+   * this cannot deadlock anybody the way zeroing a velocity outright would.
+   *
+   * Two passes, because contact comes in chains: fixing A against B changes B,
+   * which was also being held off C. Two is most of the benefit; the positional
+   * relaxation after integration mops up what is left.
+   */
+  private resolveContacts(dt: number): void {
+    const count = this.live.length
+    if (count < 2 || dt <= 0) return
+    for (let pass = 0; pass < CONTACT_PASSES; pass++) {
+      let touched = false
+      for (let i = 0; i < count; i++) {
+        const agent = this.agents[this.live[i]]
+        this.hash.query(agent.x, agent.y, agent.radius * 2 + 0.6, (otherId) => {
+          if (otherId <= agent.id) return
+          const other = this.agents[otherId]
+          if (!other || other.state === 'done') return
+          const dx = other.x - agent.x
+          const dy = other.y - agent.y
+          const distanceSq = dx * dx + dy * dy
+          if (distanceSq < 1e-12) return
+          const length = Math.sqrt(distanceSq)
+          const touching = agent.radius + other.radius
+          const nx = dx / length
+          const ny = dy / length
+          // Along the line between them, positive is separating.
+          const closing = (other.vx - agent.vx) * nx + (other.vy - agent.vy) * ny
+          // The fastest they may close and still not be inside each other after
+          // this step. Negative while there is a gap to spend.
+          const allowed = (touching - length) / dt
+          if (closing >= allowed) return
+          // Someone seated or being served holds their place; the mover gives way.
+          const agentFixed = agent.state === 'seated' || agent.state === 'served'
+          const otherFixed = other.state === 'seated' || other.state === 'served'
+          if (agentFixed && otherFixed) return
+          const agentShare = agentFixed ? 0 : otherFixed ? 1 : 0.5
+          const otherShare = otherFixed ? 0 : agentFixed ? 1 : 0.5
+          const correction = allowed - closing
+          agent.vx -= nx * correction * agentShare
+          agent.vy -= ny * correction * agentShare
+          other.vx += nx * correction * otherShare
+          other.vy += ny * correction * otherShare
+          touched = true
+        })
+      }
+      if (!touched) break
     }
   }
 

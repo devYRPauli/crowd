@@ -836,34 +836,25 @@ describe('Single-exit congestion', () => {
   })
 
   /**
-   * KNOWN GAP: people interpenetrate in a jam.
+   * People do not walk through each other, even in a crush.
    *
-   * Measured worst body overlap 0.377 m against a 0.10 m tolerance, on
-   * a 0.46 m pair distance — at the peak two people's centres are
-   * 0.083 m apart, which is one person's floor area holding two.
-   * The 95th percentile of the per-tick worst overlap is 0.258 m and
-   * the median 0.145 m, so this is not a single transient: for much of
-   * the jam somebody is overlapping by more than the tolerance. It shows up in
-   * the density too — `summary().peakDensity` reads 8.06
-   * persons/m², against the 5.4 persons/m² jam density the engine's own
-   * Weidmann constants assume. Everything downstream of density (level of
-   * service, the crowd-safety overlay in `metrics/los`, the heat map) overstates
-   * the crush at a bottleneck until this is fixed, and the per-width overlap
-   * readings in the bottleneck sweep above show the same thing, so it is not
-   * peculiar to this geometry.
+   * MEASURED worst body overlap 0.090 m on a 0.46 m pair distance, p95 0.065,
+   * median tick 0.022; TOLERANCE 0.10 m. This was the last of the known gaps
+   * and much the worst of them: it measured 0.271 m, which is most of a body,
+   * and it was not a transient — the p95 was 0.141 m, so for much of the jam
+   * somebody was substantially inside somebody else. Everything downstream of
+   * density inherited it, because a crowd that packs past what bodies allow
+   * reports a density no real crowd reaches.
    *
-   * Where it is, as far as three experiments can place it. `relaxOverlaps` runs
-   * one positional pass per step and caps each correction at 0.08 m, and it is
-   * the *one pass*, not the cap, that is short: running the same pass eight
-   * times a step takes the worst overlap to 0.107 m, the p95 to 0.081 and the
-   * median to 0.023, and brings peak density down to 5.55 persons/m² — within
-   * 0.007 m of clearing this assertion outright, at no cost in clearance time.
-   * Lifting the cap instead makes it *worse* (worst overlap 0.443 m, and one
-   * person never gets out), and disabling the clearance push-out at the end of
-   * the same function changes nothing (0.380 m). So the fix to try is iterating
-   * the projection, not widening the step.
+   * What fixed it was resolving contact in *velocity*, before anyone moves, and
+   * predictively: a pair may close only as fast as the gap between them allows
+   * in one step. The positional pass afterwards could never keep up, because by
+   * the time it sees an overlap the step that caused it has already happened.
+   * Peak density fell from 7.31 to 6.81 persons/m² with it, and the hall clears
+   * *sooner* — 83.3 s against 88.5 — because people who are not occupying each
+   * other's floor are not fighting each other for it either.
    */
-  it.fails('Single exit: no two people overlap by more than 0.10 m', () => {
+  it('Single exit: no two people overlap by more than 0.10 m', () => {
     expect(result.maxOverlap).toBeLessThanOrEqual(OVERLAP_TOLERANCE)
   })
 })
