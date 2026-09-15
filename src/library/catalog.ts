@@ -123,7 +123,9 @@ const TABLES: CatalogItem[] = [
     id: 'table-round-6',
     name: 'Round table (6)',
     category: 'tables',
-    size: { width: 1.5, depth: 1.5, height: 0.75 },
+    // A true 5 ft round. The trade sets these for eight; six is the
+    // comfortable setting and what this one is named for.
+    size: { width: 1.524, depth: 1.524, height: 0.75 },
     blocking: true,
     footprint: 'circle',
     inset: 0,
@@ -140,7 +142,11 @@ const TABLES: CatalogItem[] = [
     id: 'table-round-8',
     name: 'Banquet round (8)',
     category: 'tables',
-    size: { width: 1.8, depth: 1.8, height: 0.75 },
+    // A true 6 ft round — the sibling `table-rect-6ft` spells the same size
+    // 1.83, and two items claiming one imperial dimension should not round it
+    // differently. The trade sets these for ten; eight is the comfortable
+    // setting and what this one is named for.
+    size: { width: 1.829, depth: 1.829, height: 0.75 },
     blocking: true,
     footprint: 'circle',
     inset: 0,
@@ -174,7 +180,10 @@ const TABLES: CatalogItem[] = [
     id: 'table-square-4',
     name: 'Square table (4)',
     category: 'tables',
-    size: { width: 0.8, depth: 0.8, height: 0.75 },
+    // 3 ft square. A 0.8 m square is a two-top in any real cafe: it gives each
+    // of four diners 0.8 m of edge but only about 0.4 m of frontage once the
+    // corners are taken off.
+    size: { width: 0.914, depth: 0.914, height: 0.75 },
     blocking: true,
     footprint: 'rect',
     inset: 0,
@@ -722,7 +731,9 @@ const STRUCTURE: CatalogItem[] = [
     id: 'stage',
     name: 'Stage platform',
     category: 'structure',
-    size: { width: 6.0, depth: 4.0, height: 0.6 },
+    // Staging is assembled from 8 x 4 ft decks, so a stage is a multiple of
+    // them: this is four decks, 16 ft by 8 ft. 6.0 x 4.0 tiles from nothing.
+    size: { width: 4.877, depth: 2.438, height: 0.6 },
     blocking: true,
     footprint: 'rect',
     inset: 0,

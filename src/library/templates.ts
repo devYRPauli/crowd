@@ -78,7 +78,7 @@ const baseRouting: Scenario['routing'] = {
 
 const coffeeBar = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, ft(46), ft(33))
+  const room = b.room(0, 0, ft(46), ft(33), { height: ft(10) })
   const street = b.door(room.south, 2.0, ft(6), 'door', 'both')
   b.window(room.west, 3, ft(8))
   b.window(room.west, 7, ft(8))
@@ -153,7 +153,7 @@ const coffeeBar = (): CrowdDocument => {
 
 const conference = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, ft(99), ft(66))
+  const hall = b.room(0, 0, ft(99), ft(66), { height: ft(14) })
   const mainDoor = b.door(hall.south, 4, ft(8), 'door', 'both')
   const sideDoor = b.door(hall.south, 12, ft(8), 'door', 'both')
   // Partition between the foyer and the session room.
@@ -193,7 +193,11 @@ const conference = (): CrowdDocument => {
 
   // Session room.
   b.place('stage', 15, 18.4, 0, { size: { width: 10, depth: 2.6, height: 0.5 } })
-  b.place('projector-screen', 15, 19.4, 0, { size: { width: 6, depth: 0.2, height: 3.4 } })
+  // 16 ft wide, 16:9, and it has to fit under a 14 ft ceiling: this one used
+  // to be 3.4 m tall in a 3.2 m room.
+  b.place('projector-screen', 15, 19.4, 0, {
+    size: { width: ft(16), depth: 0.2, height: ft(9) },
+  })
   b.place('lectern', 19.5, 18.6)
   for (let row = 0; row < 7; row++) {
     b.place('seat-row', 9.5, 13.4 + row * 0.95, Math.PI, {
@@ -237,7 +241,7 @@ const conference = (): CrowdDocument => {
 
 const gallery = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, ft(79), ft(53))
+  const room = b.room(0, 0, ft(79), ft(53), { height: ft(12) })
   const frontDoor = b.door(room.south, 3, ft(8), 'door', 'both')
   b.door(room.east, 8, ft(5))
   // Interior partitions that make a route rather than one big box.
@@ -268,8 +272,15 @@ const gallery = (): CrowdDocument => {
   ] as Array<[number, number, number]>) {
     b.place('artwork', x, y, rot)
   }
-  b.place('column-round', 12, 8)
-  b.place('column-round', 18, 4)
+  for (const at of [
+    { x: 12, y: 8 },
+    { x: 18, y: 4 },
+  ]) {
+    // A column runs floor to ceiling; the catalog cannot know which ceiling.
+    b.place('column-round', at.x, at.y, 0, {
+      size: { width: 0.5, depth: 0.5, height: ft(12) },
+    })
+  }
 
   const bar = b.service(
     'Drinks bar',
@@ -332,7 +343,7 @@ const gallery = (): CrowdDocument => {
 
 const pollingStation = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, ft(60), ft(40))
+  const room = b.room(0, 0, ft(60), ft(40), { height: ft(10) })
   const wayIn = b.door(room.south, 3, ft(6), 'door', 'entry')
   const wayOut = b.door(room.north, 15, ft(6), 'door', 'exit')
 
@@ -366,7 +377,12 @@ const pollingStation = (): CrowdDocument => {
   }
   b.place('bin', 17.0, 1.0)
   b.place('floor-sign', 3.4, 2.6, Math.PI / 4)
-  b.place('barrier', 11.0, 4.6, Math.PI / 2, { size: { width: 3.2, depth: 0.12, height: 1.1 } })
+  // Two barriers end to end. One is 2 m; 3.2 m is one and a half of them.
+  for (const y of [3.6, 5.6]) {
+    b.place('barrier', 11.0, y, Math.PI / 2, {
+      size: { width: 2.0, depth: 0.12, height: 1.1 },
+    })
+  }
 
   const booths = b.zone('waypoint', 11.4, 5.4, 16.6, 10.4, 'Voting booths', {
     dwell: { kind: 'lognormal', mean: 110, sd: 45, min: 35 },
@@ -421,8 +437,11 @@ const concourse = (): CrowdDocument => {
   b.place('bench', 5, 3.0, 0, { size: { width: 2.4, depth: 0.45, height: 0.45 } })
   b.place('bench', 8, 3.0, 0, { size: { width: 2.4, depth: 0.45, height: 0.45 } })
   b.place('screen-tv', 20, 2.0, 0, { size: { width: 2.4, depth: 0.3, height: 2.4 } })
-  b.place('column-square', 15, 9)
-  b.place('column-square', 25, 9)
+  for (const x of [15, 25]) {
+    b.place('column-square', x, 9, 0, {
+      size: { width: 0.6, depth: 0.6, height: ft(16) },
+    })
+  }
   b.place('bin', 35, 2)
   b.place('plant-tree', 34, 16)
 
@@ -490,14 +509,16 @@ const concourse = (): CrowdDocument => {
 
 const banquet = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, ft(92), ft(66))
+  const hall = b.room(0, 0, ft(92), ft(66), { height: ft(16) })
   const mainDoors = b.door(hall.south, 6, ft(8), 'door', 'both')
   const secondDoors = b.door(hall.south, 22, ft(8), 'door', 'both')
   b.door(hall.east, 10, ft(5), 'door', 'exit')
 
   b.place('stage', 14, 18.2, 0, { size: { width: 9, depth: 3.0, height: 0.6 } })
   b.place('lectern', 17.5, 18.4)
-  b.place('projector-screen', 14, 19.5, 0, { size: { width: 5.5, depth: 0.2, height: 3.2 } })
+  b.place('projector-screen', 14, 19.5, 0, {
+    size: { width: ft(18), depth: 0.2, height: ft(10, 2) },
+  })
 
   // Eight banquet rounds of ten, on a 5 m grid with a clear centre aisle.
   const seatingZone = b.zone('seating', 1.5, 3.0, 26.5, 15.5, 'Dining floor')
