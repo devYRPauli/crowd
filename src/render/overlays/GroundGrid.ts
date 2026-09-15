@@ -82,7 +82,9 @@ export class GroundGrid {
     this.mesh = new Mesh(geometry, this.material)
     this.mesh.name = 'ground-grid'
     this.mesh.renderOrder = -100
-    this.mesh.position.y = -0.005
+    // Well below the floor slab: at 5 mm the two z-fight at venue scale and the
+    // grid shows through the rooms, which makes a drawn floor look unbuilt.
+    this.mesh.position.y = -0.06
     this.mesh.matrixAutoUpdate = false
     this.mesh.updateMatrix()
   }

@@ -135,13 +135,20 @@ export class CameraRig {
     this.apply()
   }
 
+  /**
+   * Half the visible height at the target plane, in metres.
+   *
+   * The orthographic camera is sized from the perspective camera's field of
+   * view rather than from the distance directly, so the two projections frame
+   * exactly the same extent and switching between plan and 3D does not jump.
+   */
+  private halfExtent(): number {
+    return Math.tan(MathUtils.degToRad(this.perspectiveCamera.fov) / 2) * this.state.distance
+  }
+
   /** Metres per screen pixel at the target plane — used for panning and snap tolerances. */
   worldPerPixel(): number {
-    if (this.isPlanView) {
-      return (this.state.distance * 2) / this.viewportHeight
-    }
-    const fov = MathUtils.degToRad(this.perspectiveCamera.fov)
-    return (2 * Math.tan(fov / 2) * this.state.distance) / this.viewportHeight
+    return (this.halfExtent() * 2) / this.viewportHeight
   }
 
   setPreset(preset: ViewPreset, animate = true): void {
@@ -164,7 +171,10 @@ export class CameraRig {
     next.target.set((bounds.minX + bounds.maxX) / 2, 0, (bounds.minY + bounds.maxY) / 2)
     const aspect = this.viewportWidth / this.viewportHeight
     const needed = Math.max(depth, width / Math.max(aspect, 0.2))
-    next.distance = clamp(needed * 0.72 + 4, this.minDistance, this.maxDistance)
+    // Frame the extent within the field of view, with a margin for the labels
+    // and panels that sit over the edges of the viewport.
+    const fit = needed / 2 / Math.tan(MathUtils.degToRad(this.perspectiveCamera.fov) / 2)
+    next.distance = clamp(fit * 1.25 + 2, this.minDistance, this.maxDistance)
     this.startTween(next, animate)
   }
 
@@ -240,7 +250,7 @@ export class CameraRig {
     this.perspectiveCamera.updateProjectionMatrix()
 
     const aspect = this.viewportWidth / this.viewportHeight
-    const halfHeight = distance
+    const halfHeight = this.halfExtent()
     const halfWidth = halfHeight * aspect
     this.orthographicCamera.left = -halfWidth
     this.orthographicCamera.right = halfWidth

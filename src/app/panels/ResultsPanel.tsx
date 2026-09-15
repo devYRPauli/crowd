@@ -1,0 +1,400 @@
+/**
+ * What the run found.
+ *
+ * Ordered by what a planner does next: the findings first, because they are the
+ * answer; then the numbers behind them; then the comparison against a saved
+ * run, because "is this better?" is the real question; then the code
+ * calculations, which are a cross-check on the simulation rather than an output
+ * of it.
+ */
+
+import { useMemo, useState } from 'react'
+import { useEditor } from '../../state/editorStore'
+import { useSimulation } from '../../state/simulationStore'
+import { deriveFindings } from '../../sim/metrics/findings'
+import {
+  computeCompliance,
+  OCCUPANT_LOAD_FACTORS,
+  type OccupancyId,
+} from '../../core/analysis/compliance'
+import { LOS_TABLES, type FacilityType } from '../../sim/metrics/los'
+import { formatArea, formatDuration, formatNumber, formatPercent } from '../../core/model/units'
+import { Checkbox, Field, NumberInput, Segmented, Select, Sparkline, Stat } from '../components/ui'
+import { TrashIcon } from '../components/icons'
+import type { RunSummary } from '../../sim/types'
+
+const compare = (
+  current: number,
+  previous: number,
+  lowerIsBetter = true,
+): { text: string; tone: 'better' | 'worse' | 'same' } => {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) {
+    return { text: '—', tone: 'same' }
+  }
+  const delta = current - previous
+  const pct = (delta / previous) * 100
+  if (Math.abs(pct) < 1) return { text: 'no change', tone: 'same' }
+  const better = lowerIsBetter ? delta < 0 : delta > 0
+  return {
+    text: `${delta > 0 ? '+' : ''}${pct.toFixed(0)}% vs baseline`,
+    tone: better ? 'better' : 'worse',
+  }
+}
+
+const SummaryStats = ({ summary, baseline }: { summary: RunSummary; baseline?: RunSummary }) => (
+  <div className="stat-grid">
+    <Stat
+      value={`${summary.completed}/${summary.totalPeople}`}
+      label="Completed"
+      delta={baseline ? compare(summary.completed, baseline.completed, false) : undefined}
+    />
+    <Stat
+      value={formatDuration(summary.meanJourney)}
+      label="Mean journey"
+      delta={baseline ? compare(summary.meanJourney, baseline.meanJourney) : undefined}
+    />
+    <Stat
+      value={formatDuration(summary.p95Journey)}
+      label="95th percentile"
+      delta={baseline ? compare(summary.p95Journey, baseline.p95Journey) : undefined}
+    />
+    <Stat
+      value={formatDuration(summary.meanWait)}
+      label="Mean queue wait"
+      delta={baseline ? compare(summary.meanWait, baseline.meanWait) : undefined}
+    />
+    <Stat
+      value={`${formatNumber(summary.peakDensity, 1)}/m²`}
+      label="Peak density"
+      delta={baseline ? compare(summary.peakDensity, baseline.peakDensity) : undefined}
+    />
+    <Stat
+      value={formatDuration(summary.clearanceTime)}
+      label="95% cleared by"
+      delta={baseline ? compare(summary.clearanceTime, baseline.clearanceTime) : undefined}
+    />
+  </div>
+)
+
+const LosLegend = ({ facility }: { facility: FacilityType }) => (
+  <div className="los-legend">
+    {LOS_TABLES[facility].map((band) => (
+      <div className="los-row" key={band.level}>
+        <span className="los-swatch" style={{ background: band.color }} />
+        <span className="los-level">{band.level}</span>
+        <span className="los-desc" title={band.description}>
+          {band.description}
+        </span>
+        <span className="los-value">
+          {Number.isFinite(band.maxDensity) ? `≤${band.maxDensity.toFixed(2)}` : '>'}
+        </span>
+      </div>
+    ))}
+  </div>
+)
+
+const CompliancePanel = () => {
+  const plan = useEditor((state) => state.document.plan)
+  const scenario = useEditor((state) => state.document.scenario)
+  const [occupancy, setOccupancy] = useState<OccupancyId>('assembly-tables')
+  const [sprinklered, setSprinklered] = useState(false)
+  const [minutes, setMinutes] = useState(8)
+
+  const attendance = scenario.populations.reduce((sum, p) => sum + p.count, 0)
+  const result = useMemo(
+    () =>
+      computeCompliance({
+        plan,
+        occupancy,
+        sprinklered,
+        plannedAttendance: attendance,
+        targetEgressMinutes: minutes,
+      }),
+    [plan, occupancy, sprinklered, attendance, minutes],
+  )
+
+  return (
+    <div className="section">
+      <div className="section-title">Code check</div>
+      <Field label="Use of the space">
+        <Select
+          value={occupancy}
+          onChange={setOccupancy}
+          options={OCCUPANT_LOAD_FACTORS.map((entry) => ({
+            value: entry.id,
+            label: `${entry.label} — ${entry.sqft} sq ft ${entry.basis}`,
+          }))}
+        />
+      </Field>
+      <div className="row">
+        <Field label="Egress target">
+          <NumberInput value={minutes} min={1} max={30} onCommit={setMinutes} suffix="min" />
+        </Field>
+        <div style={{ paddingBottom: 4 }}>
+          <Checkbox label="Sprinklered" checked={sprinklered} onChange={setSprinklered} />
+        </div>
+      </div>
+
+      <table className="table">
+        <tbody>
+          <tr>
+            <td>Enclosed floor area</td>
+            <td className="num">{formatArea(result.floorAreaSqm, 'metric')}</td>
+          </tr>
+          <tr>
+            <td>Occupant load (IBC)</td>
+            <td className="num">{result.calculatedOccupantLoad}</td>
+          </tr>
+          <tr>
+            <td>Design load used</td>
+            <td className="num">{result.designOccupantLoad}</td>
+          </tr>
+          <tr>
+            <td>Exits required / marked</td>
+            <td className="num">
+              {result.exitsRequired} / {result.exitsProvided}
+            </td>
+          </tr>
+          <tr>
+            <td>Egress width required</td>
+            <td className="num">{result.requiredWidthM.toFixed(2)} m</td>
+          </tr>
+          <tr>
+            <td>Doorway width drawn</td>
+            <td className="num">{result.totalExitWidthM.toFixed(2)} m</td>
+          </tr>
+          <tr>
+            <td title="After subtracting a 150 mm boundary layer from each side">
+              Effective width (SFPE)
+            </td>
+            <td className="num">{result.effectiveWidthM.toFixed(2)} m</td>
+          </tr>
+          <tr>
+            <td>Hand-calculated egress</td>
+            <td className="num">{formatDuration(result.hydraulicEgressSeconds)}</td>
+          </tr>
+          <tr>
+            <td>Green Guide capacity</td>
+            <td className="num">{result.greenGuideCapacity}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {result.issues.map((issue, index) => (
+        <div
+          key={index}
+          className={`finding is-${issue.severity === 'fail' ? 'high' : issue.severity === 'warn' ? 'medium' : 'low'}`}
+        >
+          <div className="body">
+            <div className="detail" style={{ marginTop: 0 }}>
+              {issue.message}
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <p className="hint">
+        Model-code indicative only. Local adoption and amendments vary, and approval rests with the
+        authority having jurisdiction.
+      </p>
+    </div>
+  )
+}
+
+export const ResultsPanel = ({
+  heatmapFacility,
+  onHeatmapFacility,
+}: {
+  heatmapFacility: FacilityType
+  onHeatmapFacility: (facility: FacilityType) => void
+}) => {
+  const document = useEditor((state) => state.document)
+  const setSelection = useEditor((state) => state.setSelection)
+  const summary = useSimulation((state) => state.summary)
+  const series = useSimulation((state) => state.series)
+  const savedRuns = useSimulation((state) => state.savedRuns)
+  const comparisonId = useSimulation((state) => state.comparisonId)
+  const setComparison = useSimulation((state) => state.setComparison)
+  const removeRun = useSimulation((state) => state.removeRun)
+  const saveCurrentRun = useSimulation((state) => state.saveCurrentRun)
+  const phase = useSimulation((state) => state.phase)
+  const totalPeople = useSimulation((state) => state.totalPeople)
+
+  const baseline = savedRuns.find((run) => run.id === comparisonId)
+
+  const findings = useMemo(
+    () => (summary && series ? deriveFindings({ summary, series, totalPeople }) : []),
+    [summary, series, totalPeople],
+  )
+
+  const queueSeries = useMemo(
+    () => (series ? Array.from(series.time, (t, i) => ({ x: t, y: series.queueTotal[i] })) : []),
+    [series],
+  )
+  const densitySeries = useMemo(
+    () => (series ? Array.from(series.time, (t, i) => ({ x: t, y: series.peakDensity[i] })) : []),
+    [series],
+  )
+  const activeSeries = useMemo(
+    () => (series ? Array.from(series.time, (t, i) => ({ x: t, y: series.active[i] })) : []),
+    [series],
+  )
+
+  return (
+    <>
+      <div className="panel-header">
+        <span className="panel-title">Results</span>
+        {summary ? (
+          <button
+            className="btn is-ghost"
+            onClick={() => saveCurrentRun(document.name || 'Run', document)}
+            title="Keep this run to compare against"
+          >
+            Save as baseline
+          </button>
+        ) : null}
+      </div>
+      <div className="panel-body">
+        {!summary ? (
+          <div className="empty">
+            {phase === 'running' || phase === 'preparing'
+              ? 'Running — results appear when it finishes.'
+              : 'No results yet. Press Run to rehearse this scenario.'}
+          </div>
+        ) : (
+          <>
+            {findings.length > 0 ? (
+              <div className="section">
+                <div className="section-title">What happened</div>
+                {findings.slice(0, 10).map((finding) => (
+                  <div
+                    key={finding.id}
+                    className={`finding is-${finding.severity}`}
+                    style={{ cursor: finding.targetId ? 'pointer' : 'default' }}
+                    onClick={() =>
+                      finding.targetId && setSelection([{ kind: 'service', id: finding.targetId }])
+                    }
+                  >
+                    <div className="body">
+                      <div className="headline">{finding.headline}</div>
+                      {finding.detail ? <div className="detail">{finding.detail}</div> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="section">
+              <div className="section-title">
+                <span>Summary</span>
+                {baseline ? <span className="badge is-accent">vs {baseline.label}</span> : null}
+              </div>
+              <SummaryStats summary={summary} baseline={baseline?.summary} />
+            </div>
+
+            {summary.services.length > 0 ? (
+              <div className="section">
+                <div className="section-title">Service points</div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Counter</th>
+                      <th style={{ textAlign: 'right' }}>Served</th>
+                      <th style={{ textAlign: 'right' }}>Mean wait</th>
+                      <th style={{ textAlign: 'right' }}>Busy</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.services.map((service) => (
+                      <tr
+                        key={service.id}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setSelection([{ kind: 'service', id: service.id }])}
+                      >
+                        <td>{service.name}</td>
+                        <td className="num">{service.served}</td>
+                        <td className="num">{formatDuration(service.meanWait)}</td>
+                        <td className="num">{formatPercent(service.utilisation)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <div className="section">
+              <div className="section-title">People in the venue</div>
+              <Sparkline series={activeSeries} label="People inside" />
+              <div className="section-title">Queueing</div>
+              <Sparkline series={queueSeries} color="var(--warn)" label="People queueing" />
+              <div className="section-title">Peak density</div>
+              <Sparkline series={densitySeries} color="var(--danger)" label="Peak density" />
+            </div>
+
+            <div className="section">
+              <div className="section-title">Level of service</div>
+              <Segmented
+                value={heatmapFacility}
+                onChange={onHeatmapFacility}
+                options={[
+                  { value: 'walkway', label: 'Walkway' },
+                  { value: 'queue', label: 'Queue' },
+                  { value: 'stair', label: 'Stair' },
+                ]}
+              />
+              <LosLegend facility={heatmapFacility} />
+              <table className="table">
+                <tbody>
+                  {Object.entries(summary.losShare).map(([level, share]) => (
+                    <tr key={level}>
+                      <td>Time at {level}</td>
+                      <td className="num">{formatPercent(share)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="hint">
+                Measured in person-seconds, so it reflects what people experienced rather than how
+                much floor was busy.
+              </p>
+            </div>
+          </>
+        )}
+
+        {savedRuns.length > 0 ? (
+          <div className="section">
+            <div className="section-title">Saved runs</div>
+            <div className="list">
+              {savedRuns.map((run) => (
+                <div
+                  key={run.id}
+                  className={`list-row${run.id === comparisonId ? ' is-active' : ''}`}
+                  onClick={() => setComparison(run.id === comparisonId ? null : run.id)}
+                >
+                  <span className="label">{run.label}</span>
+                  <span className="meta">{formatDuration(run.summary.meanJourney)}</span>
+                  <button
+                    className="btn is-ghost is-icon"
+                    title="Forget this run"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeRun(run.id)
+                    }}
+                  >
+                    <TrashIcon width={13} height={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="hint">
+              Select a run to compare against. Runs share the same seed, so differences come from
+              the layout rather than from luck.
+            </p>
+          </div>
+        ) : null}
+
+        <CompliancePanel />
+      </div>
+    </>
+  )
+}

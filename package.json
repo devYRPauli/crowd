@@ -2,7 +2,7 @@
   "name": "crowd",
   "version": "1.0.0",
   "private": true,
-  "description": "CROWD — Constraint-aware Rehearsal and Optimisation of Walking Dynamics. Design a space in 3D, then rehearse how people move through it.",
+  "description": "CROWD \u2014 Constraint-aware Rehearsal and Optimisation of Walking Dynamics. Design a space in 3D, then rehearse how people move through it.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "smoke": "vite build && vite preview --port 4173 --host 127.0.0.1 & sleep 4 && node scripts/smoke.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -35,6 +36,7 @@
     "eslint": "^9.37.0",
     "eslint-plugin-react-hooks": "^6.1.0",
     "globals": "^16.0.0",
+    "playwright": "^1.63.0",
     "prettier": "^3.6.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.46.0",

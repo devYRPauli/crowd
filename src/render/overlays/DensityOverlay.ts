@@ -50,7 +50,7 @@ uniform float uCriticalDensity;
 
 void main() {
   float density = texture2D(uDensity, vUv).r * uScale;
-  if (density < 0.02) discard;
+  if (density < 0.30) discard;
 
   vec3 color = uBands[5];
   for (int i = 0; i < 6; i++) {
@@ -61,8 +61,10 @@ void main() {
     else if (density >= uWarnDensity) color = mix(color, uWarnColor, 0.75);
   }
 
-  // Fade in over the first band so empty floor stays clean.
-  float alpha = uOpacity * smoothstep(0.02, 0.22, density);
+  // Do not paint free-flowing floor. Below Fruin's level of service A there is
+  // nothing to see, and a lone walker's own density halo would otherwise cover
+  // the room in green.
+  float alpha = uOpacity * smoothstep(0.30, 0.62, density);
   gl_FragColor = vec4(color, alpha);
   #include <colorspace_fragment>
 }

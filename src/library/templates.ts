@@ -199,6 +199,7 @@ const conference = (): CrowdDocument => {
   const entryA = b.zone('entry', 3.0, 0.3, 5.2, 1.8, 'Main entrance')
   const entryB = b.zone('entry', 11.0, 0.3, 13.2, 1.8, 'Side entrance')
   const exit = b.zone('exit', 3.0, 0.3, 5.2, 1.8, 'Main entrance (out)')
+  b.zone('exit', 11.0, 0.3, 13.2, 1.8, 'Side entrance (out)')
   const session = b.zone('seating', 5.0, 12.8, 25.0, 19.6, 'Session room')
   b.zone('keep-clear', 14.0, 12.4, 16.2, 19.8, 'Centre aisle', { cost: 5 })
   b.zone('measure', 0.4, 12.2, 29.6, 13.0, 'Session doorway')

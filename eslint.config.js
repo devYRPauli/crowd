@@ -33,4 +33,10 @@ export default tseslint.config(
     files: ['**/*.test.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
+  {
+    // Build and smoke scripts run under Node and drive a real browser.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+    rules: { 'no-console': 'off' },
+  },
 )
