@@ -9,14 +9,29 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildWorld, type BuildWorldOptions, type SimWorld } from './world'
+import {
+  NAV_CLEARANCE,
+  buildWorld,
+  collectObstaclePolygons,
+  isQueueRecord,
+  nearestFreeCell,
+  queueSlotFacing,
+  queueSlotPosition,
+  samplePointInDestination,
+  servicePositionFor,
+  type BuildWorldOptions,
+  type DestinationRecord,
+  type SimWorld,
+} from './world'
 import { PlanBuilder } from '../library/planBuilder'
 import { createScenario } from '../core/model/defaults'
 import { cellCenter, gridIndex, solveEikonal, worldToCell } from './nav/eikonal'
 import { planSeats } from '../core/model/planGeometry'
+import { computeNewVelocity } from './avoidance/orca'
 import { DEFAULT_DOOR_WIDTH, DEFAULT_DOUBLE_DOOR_WIDTH } from '../core/model/standards'
+import type { Distribution } from '../core/math/random'
 import type { Vec2 } from '../core/math/vec2'
-import type { Plan } from '../core/model/types'
+import type { Plan, ServicePoint } from '../core/model/types'
 
 const scenario = createScenario()
 
@@ -140,6 +155,20 @@ describe('grid resolution', () => {
     expect(compile(b.build()).grid.cellSize).toBeCloseTo(0.05, 6)
   })
 
+  it('falls back on the venue when there is no way in to size it by', () => {
+    const sealed = (side: number): Plan => {
+      const b = new PlanBuilder()
+      b.room(0, 0, side, side)
+      return b.build()
+    }
+
+    // With nothing to resolve, extent is all there is — and it is held between
+    // 0.2 m and 0.5 m either way. A small room does not get a needlessly fine
+    // grid, and a hangar does not get one too coarse to put a person on.
+    expect(compile(sealed(10)).grid.cellSize).toBeCloseTo(0.2, 6)
+    expect(compile(sealed(250)).grid.cellSize).toBeCloseTo(0.5, 6)
+  })
+
   it('refines for a hatch nobody can climb through', () => {
     // SUSPECTED BUG — asserted as it behaves today. `chooseCellSize` excludes
     // windows by kind, but `isWalkableOpening`, which is what decides whether
@@ -224,6 +253,20 @@ describe('doors people arrive and leave through', () => {
     expect(centres.some((c) => c.y > 0)).toBe(true)
   })
 
+  it('makes a door that works both ways one place, not two', () => {
+    const { plan, both } = marked()
+    const world = compile(plan)
+    const asEntry = world.entries.find((r) => r.id === both.id)!
+    const asExit = world.exits.find((r) => r.id === both.id)!
+
+    // The same record on both lists. Two copies would each carry their own goal
+    // cells, and `targets` — which is keyed by id — could only hold one of them,
+    // so an itinerary step aiming at this door would reach a different doorway
+    // from the one the arrivals used.
+    expect(asEntry).toBe(asExit)
+    expect(world.targets.get(both.id)).toBe(asEntry)
+  })
+
   it('keeps zone entries and exits alongside the door-based ones', () => {
     const b = new PlanBuilder()
     const room = b.room(0, 0, 20, 12)
@@ -287,6 +330,70 @@ describe('what is solid', () => {
     expect(world.clearance[cellAt(world, 6, 6)]).toBeLessThan(2.2)
   })
 
+  it('cuts a doorway out of the wall and leaves a window glazed', () => {
+    const pierced = (kind: 'door' | 'window'): Plan => {
+      const b = new PlanBuilder()
+      const room = b.room(0, 0, 20, 12)
+      if (kind === 'door') b.door(room.south, 10, DEFAULT_DOUBLE_DOOR_WIDTH)
+      else b.window(room.south, 10, DEFAULT_DOUBLE_DOOR_WIDTH)
+      return b.build()
+    }
+
+    const withDoor = compile(pierced('door'), { cellSize: 0.2 })
+    const withWindow = compile(pierced('window'), { cellSize: 0.2 })
+
+    // Four walls, and the doored one broken into the two stretches either side
+    // of the leaf. A window takes nothing out: the wall stays one piece.
+    expect(collectObstaclePolygons(pierced('door'))).toHaveLength(5)
+    expect(collectObstaclePolygons(pierced('window'))).toHaveLength(4)
+    expect(withDoor.solid[cellAt(withDoor, 10, 0)]).toBe(0)
+    expect(withWindow.solid[cellAt(withWindow, 10, 0)]).toBe(1)
+
+    // Seven metres of floor from a metre outside the wall to the middle of the
+    // room, or no way in at all — which is what a building with only windows is.
+    const outside = (world: SimWorld) =>
+      timeFrom(world, [cellAt(world, 10, -1)])[cellAt(world, 10, 6)]
+    expect(outside(withDoor)).toBeCloseTo(7, 1)
+    expect(outside(withWindow)).toBe(Infinity)
+  })
+
+  it('holds an agent centre a body clear of anything solid', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    b.zone('obstacle', 8, 5, 10, 7, 'Plinth')
+    const world = compile(b.build(), { cellSize: 0.1 })
+
+    // Two masks, and the difference between them is the body. `solid` is the
+    // geometry the clearance field and the metrics measure; `navBlocked` is
+    // where a centre may not sit, which is a radius further out. Conflating
+    // them puts people's shoulders inside the furniture.
+    expect(NAV_CLEARANCE).toBeCloseTo(0.26, 6)
+    expect(world.solid[cellAt(world, 10.15, 6)]).toBe(0)
+    expect(world.navBlocked[cellAt(world, 10.15, 6)]).toBe(1)
+    expect(world.navBlocked[cellAt(world, 10.45, 6)]).toBe(0)
+  })
+
+  it('takes the plan at its word about what people can walk through', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    const table = b.place('table-conference', 5, 6)
+    const propTable = b.place('table-conference', 15, 6, 0, { blocking: false })
+    const chair = b.place('chair', 10, 2)
+    const boltedChair = b.place('chair', 10, 10, 0, { blocking: true })
+    const world = compile(b.build(), { cellSize: 0.1 })
+
+    // The catalog's answer is only a default. A table drawn as scenery people
+    // pass behind, or a chair bolted to the floor, is the author overriding it,
+    // and the world has to honour that or the picture and the run disagree.
+    expect(world.solid[cellAt(world, table.position.x, table.position.y)]).toBe(1)
+    expect(world.solid[cellAt(world, propTable.position.x, propTable.position.y)]).toBe(0)
+    expect(world.solid[cellAt(world, chair.position.x, chair.position.y)]).toBe(0)
+    expect(world.solid[cellAt(world, boltedChair.position.x, boltedChair.position.y)]).toBe(1)
+    // Four walls plus the two items that block; the other two are not obstacles
+    // for ORCA either, not merely absent from the grid.
+    expect(world.obstaclePolygons).toHaveLength(6)
+  })
+
   it('leaves loose chairs walkable, so a ring of them cannot seal its table off', () => {
     const b = new PlanBuilder()
     const room = b.room(0, 0, 10, 10)
@@ -310,5 +417,465 @@ describe('what is solid', () => {
       (seat) => !Number.isFinite(time[cellAt(world, seat.position.x, seat.position.y)]),
     )
     expect(ids(stranded)).toEqual([])
+  })
+})
+
+describe('keep-clear zones', () => {
+  /** A room with a band across it the plan asks people to stay off. */
+  const banded = (cost?: number): Plan => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    b.zone('keep-clear', 0, 5, 20, 7, 'Fire lane', cost === undefined ? {} : { cost })
+    return b.build()
+  }
+
+  it('makes a fire lane expensive to cross without closing it', () => {
+    const lane = compile(banded(10), { cellSize: 0.2 })
+    const bare = (() => {
+      const b = new PlanBuilder()
+      b.room(0, 0, 20, 12)
+      return compile(b.build(), { cellSize: 0.2 })
+    })()
+
+    expect(lane.baseSpeed[cellAt(lane, 10, 6)]).toBeCloseTo(0.1, 6)
+    expect(lane.baseSpeed[cellAt(lane, 10, 2)]).toBe(1)
+    // Cost is not obstruction. An evacuation with nowhere else to go must still
+    // be able to come through here, slowly, rather than find the room sealed.
+    expect(lane.navBlocked[cellAt(lane, 10, 6)]).toBe(0)
+    expect(lane.solid[cellAt(lane, 10, 6)]).toBe(0)
+
+    // Ten metres of floor end to end: eight seconds of walking, plus two metres
+    // of lane at a tenth speed, which is twenty seconds of reason to go round.
+    expect(timeFrom(bare, [cellAt(bare, 10, 1)])[cellAt(bare, 10, 11)]).toBeCloseTo(10, 2)
+    expect(timeFrom(lane, [cellAt(lane, 10, 1)])[cellAt(lane, 10, 11)]).toBeCloseTo(28, 2)
+  })
+
+  it('never lets a keep-clear zone make anybody faster than open floor', () => {
+    const unstated = compile(banded(), { cellSize: 0.2 })
+    const generous = compile(banded(0.5), { cellSize: 0.2 })
+
+    expect(unstated.baseSpeed[cellAt(unstated, 10, 6)]).toBe(0.25)
+    // A cost under 1 would be a lane people preferred to walk down, which is
+    // not something "keep clear" can mean.
+    expect(generous.baseSpeed[cellAt(generous, 10, 6)]).toBe(1)
+  })
+
+  it('takes the stricter of two keep-clear zones where they overlap', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    b.zone('keep-clear', 4, 4, 12, 8, 'Cross aisle', { cost: 2 })
+    b.zone('keep-clear', 8, 4, 16, 8, 'Stage door', { cost: 8 })
+    const world = compile(b.build(), { cellSize: 0.2 })
+
+    expect(world.baseSpeed[cellAt(world, 6, 6)]).toBe(0.5)
+    expect(world.baseSpeed[cellAt(world, 14, 6)]).toBe(0.125)
+    // Last zone drawn wins would let a mild one laid on top quietly reopen the
+    // strict one underneath it.
+    expect(world.baseSpeed[cellAt(world, 10, 6)]).toBe(0.125)
+  })
+})
+
+describe('obstacle zones', () => {
+  const PLINTH: Vec2[] = [
+    { x: 8, y: 5 },
+    { x: 10, y: 5 },
+    { x: 10, y: 7 },
+    { x: 8, y: 7 },
+  ]
+
+  const withPlinth = (polygon: Vec2[]): SimWorld => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    const zone = b.zone('obstacle', 0, 0, 1, 1, 'Plinth')
+    const plan = b.build()
+    return compile(
+      { ...plan, zones: plan.zones.map((z) => (z.id === zone.id ? { ...z, polygon } : z)) },
+      { cellSize: 0.2 },
+    )
+  }
+
+  /** What local avoidance does to somebody walking due east straight at it. */
+  const walkInto = (world: SimWorld): Vec2 => {
+    const end = world.obstacles.length
+    return computeNewVelocity(
+      {
+        position: { x: 7.4, y: 6 },
+        velocity: { x: 1.2, y: 0 },
+        radius: 0.23,
+        maxSpeed: 1.4,
+        prefVelocity: { x: 1.2, y: 0 },
+        timeHorizon: 2,
+        timeHorizonObst: 1.5,
+        responsibility: 1,
+      },
+      [],
+      world.obstacles,
+      [end - 4, end - 3, end - 2, end - 1],
+    )
+  }
+
+  it('turns a plinth into something people route round and are pushed off', () => {
+    const world = withPlinth(PLINTH)
+
+    expect(world.solid[cellAt(world, 9, 6)]).toBe(1)
+    expect(world.navBlocked[cellAt(world, 9, 6)]).toBe(1)
+    expect(world.obstacles.slice(-4).map((o) => o.convex)).toEqual([true, true, true, true])
+    // Walked at head-on, the avoidance takes the walker sideways rather than
+    // letting them put a foot on it.
+    expect(walkInto(world).y).toBeLessThan(-0.5)
+  })
+
+  it('stops seeing a plinth whose outline was clicked the other way round', () => {
+    // SUSPECTED BUG. `buildObstacles` says it wants counter-clockwise loops, and
+    // every polygon `collectObstaclePolygons` builds for itself is one — but a
+    // zone carries whatever outline the author clicked, and the zone tool's
+    // free-form mode is happy to go clockwise. Reversed, each edge's solid side
+    // faces inward and every corner comes out concave, so local avoidance stops
+    // constraining anybody. The grid still blocks the cells, so routing goes
+    // round it and the run looks fine — until somebody shoved off their path
+    // walks through the plinth instead of being pushed off it, which is the one
+    // case obstacle avoidance exists for. `collectObstaclePolygons` should put
+    // zone polygons through `ensureWinding` as it does not today.
+    const clockwise = withPlinth([...PLINTH].reverse())
+
+    expect(clockwise.solid[cellAt(clockwise, 9, 6)]).toBe(1)
+    expect(clockwise.navBlocked[cellAt(clockwise, 9, 6)]).toBe(1)
+    expect(clockwise.obstacles.slice(-4).map((o) => o.convex)).toEqual([false, false, false, false])
+
+    const straightOn = walkInto(clockwise)
+    expect(straightOn.x).toBeCloseTo(1.2, 12)
+    expect(straightOn.y).toBeCloseTo(0, 12)
+  })
+})
+
+describe('where a destination puts people', () => {
+  it('prefers floor with room to stand to the slivers round a table', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 14, 14)
+    b.tableWithChairs('table-round-8', 7, 7)
+    b.zone('waypoint', 4, 4, 10, 10, 'Around the table')
+    const world = compile(b.build(), { cellSize: 0.1 })
+    const record = world.waypoints[0]
+
+    // Somebody sent to the gap between a chair and the table spends the whole
+    // run shuffling against furniture, so those cells go while roomy ones last.
+    expect(
+      Math.min(...record.goalCells.map((cell) => world.clearance[cell])),
+    ).toBeGreaterThanOrEqual(0.5)
+    // 6 m square of 0.1 m cells is 3600; most of it survives, the table and its
+    // ring of chairs do not.
+    expect(record.goalCells.length).toBeGreaterThan(2500)
+    expect(record.goalCells.length).toBeLessThan(3400)
+  })
+
+  it('still offers a genuinely tight space rather than nowhere at all', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    b.wall({ x: 9, y: 12 }, { x: 9, y: 9 })
+    b.wall({ x: 9.8, y: 12 }, { x: 9.8, y: 9 })
+    b.zone('waypoint', 9.2, 9.4, 9.6, 11.6, 'Alcove')
+    const world = compile(b.build(), { cellSize: 0.1 })
+    const record = world.waypoints[0]
+
+    // Nothing in a 0.8 m alcove has half a metre of clearance. Insisting on it
+    // would leave this destination one cell and stack everybody on that spot.
+    expect(record.goalCells.length).toBeGreaterThan(15)
+    expect(Math.max(...record.goalCells.map((cell) => world.clearance[cell]))).toBeLessThan(0.5)
+  })
+
+  it('falls back to the nearest floor when a destination is drawn on solid', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    const column = b.place('column-square', 10, 6)
+    b.zone('waypoint', 9.8, 5.8, 10.2, 6.2, 'On the column')
+    const world = compile(b.build(), { cellSize: 0.2 })
+    const record = world.waypoints[0]
+
+    // A zone snapped onto a column owns no cell of its own. One cell beside it
+    // beats none: an empty goal list is a flow field with no source, and
+    // everybody routed here would stand where they were instead.
+    expect(record.goalCells).toHaveLength(1)
+    expect(world.navBlocked[record.goalCells[0]]).toBe(0)
+    const c = centreOf(world, record.goalCells[0])
+    expect(Math.hypot(c.x - column.position.x, c.y - column.position.y)).toBeLessThan(1)
+  })
+
+  it('files a seating area with the destinations and carries what it holds', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    const stalls = b.zone('seating', 2, 2, 6, 6, 'Stalls')
+    const bar = b.zone('waypoint', 12, 2, 16, 6, 'Bar area', { capacity: 25 })
+    const world = compile(b.build(), { cellSize: 0.2 })
+
+    expect(ids(world.waypoints)).toEqual([stalls.id, bar.id])
+    expect(world.waypoints[0].kind).toBe('seating')
+    expect(world.waypoints[0].area).toBeCloseTo(16, 6)
+    expect(world.waypoints[0].center.x).toBeCloseTo(4, 6)
+    expect(world.waypoints[0].center.y).toBeCloseTo(4, 6)
+    // Capacity is what holds people back at a destination already full. A zone
+    // that never said one is unlimited, not full.
+    expect(world.waypoints[0].capacity).toBe(0)
+    expect(world.waypoints[1].capacity).toBe(25)
+  })
+
+  it('stands somebody inside a goal cell wherever the dice fall', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    b.zone('waypoint', 8, 5, 12, 7, 'Stage')
+    const world = compile(b.build(), { cellSize: 0.2 })
+    const record = world.waypoints[0]
+    const draw = (...values: number[]) => {
+      let i = 0
+      return () => values[i++ % values.length]
+    }
+
+    const jitter = world.grid.cellSize * 0.4
+    const lowest = samplePointInDestination(world, record, draw(0, 0, 0))
+    const first = centreOf(world, record.goalCells[0])
+    expect(lowest.x).toBeCloseTo(first.x - jitter / 2, 6)
+    expect(lowest.y).toBeCloseTo(first.y - jitter / 2, 6)
+
+    // The jitter spreads arrivals over the cell they were given, and has to stay
+    // inside it: half a cell further and people would be placed on a neighbour
+    // that the destination never checked, which can be solid.
+    for (const pick of [0, 0.25, 0.5, 0.75, 0.999]) {
+      const expected = record.goalCells[Math.floor(pick * record.goalCells.length)]
+      for (const spin of [0, 0.5, 1]) {
+        const p = samplePointInDestination(world, record, draw(pick, spin, spin))
+        expect(cellAt(world, p.x, p.y)).toBe(expected)
+      }
+    }
+
+    const nowhere: DestinationRecord = { ...record, goalCells: [] }
+    const centre = samplePointInDestination(world, nowhere, () => 0.5)
+    expect(centre).toEqual(nowhere.center)
+    // A copy. The caller walks the point it is handed around, and handing back
+    // the record's own centre would drag the destination across the plan.
+    expect(centre).not.toBe(nowhere.center)
+  })
+})
+
+describe('finding floor near a point', () => {
+  it('steps out of a column to the nearest cell somebody could stand on', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 12)
+    const column = b.place('column-square', 10, 6)
+    const world = compile(b.build(), { cellSize: 0.2 })
+
+    const cell = nearestFreeCell(world.grid, world.navBlocked, column.position)
+    const c = centreOf(world, cell)
+    expect(world.navBlocked[cell]).toBe(0)
+    // A 0.6 m column with the mask dilated by a body radius: the nearest floor
+    // is most of a metre out, and it is out, not the column's own centre back.
+    expect(Math.hypot(c.x - 10, c.y - 6)).toBeGreaterThan(0.5)
+    expect(Math.hypot(c.x - 10, c.y - 6)).toBeLessThan(1)
+
+    const offGrid = nearestFreeCell(world.grid, world.navBlocked, { x: 1000, y: 1000 })
+    expect(world.navBlocked[offGrid]).toBe(0)
+    expect(centreOf(world, offGrid).x).toBeLessThan(world.bounds.maxX)
+
+    // Nothing free anywhere is -1 and not cell zero, which a caller would
+    // happily place somebody on, in the corner of the margin fence.
+    const sealed = new Uint8Array(world.grid.cols * world.grid.rows).fill(1)
+    expect(nearestFreeCell(world.grid, sealed, { x: 10, y: 6 })).toBe(-1)
+  })
+})
+
+describe('places to sit', () => {
+  it('drops a seat nobody can reach and renumbers the rest', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 10, 10)
+    const middle = b.place('chair', 5, 5)
+    b.place('chair', 0.2, 5)
+    const corner = b.place('chair', 8, 8)
+    const plan = b.build()
+    const world = compile(plan, { cellSize: 0.1 })
+
+    // A chair shoved into the west wall is a seat on the drawing and a trap in
+    // the run: whoever is sent to it never arrives and never sits down.
+    expect(planSeats(plan)).toHaveLength(3)
+    expect(world.seats.map((seat) => seat.furnitureId)).toEqual([middle.id, corner.id])
+    // `index` is a position in this list, and the engine holds one while
+    // somebody walks to their seat. Numbering before the filter would seat them
+    // on the chair that was dropped.
+    expect(world.seats.map((seat) => seat.index)).toEqual([0, 1])
+  })
+})
+
+describe('queues at a counter', () => {
+  const SERVICE: Distribution = { kind: 'constant', mean: 20 }
+
+  /** A bar across the north of a room, its queue running back into the floor. */
+  const counter = (
+    options: Partial<ServicePoint> = {},
+    extras: (b: PlanBuilder) => void = () => {},
+  ) => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 20, 14)
+    extras(b)
+    const point = b.service('Bar', 10, 12, 0, 3, SERVICE, options)
+    return { plan: b.build(), point }
+  }
+
+  it('lines people up away from the counter with everybody facing it', () => {
+    const { plan, point } = counter()
+    const world = compile(plan, { cellSize: 0.1 })
+    const queue = world.queues[0]
+
+    // The counter faces -Y, so the line runs south from it, head first.
+    expect(queue.lineLength).toBeCloseTo(6, 6)
+    expect(queue.spacing).toBeCloseTo(0.65, 6)
+    expect(queue.slots).toHaveLength(10)
+    expect(queue.slots[0].y).toBeCloseTo(10.65, 6)
+    expect(queue.slots[9].y).toBeCloseTo(4.8, 6)
+    expect(queue.overflowAnchor).toBe(queue.slots[9])
+    expect(queue.overflowDirection.y).toBeCloseTo(-1, 6)
+    for (const facing of queue.slotFacing) expect(facing).toBeCloseTo(Math.PI / 2, 6)
+
+    // Staff behind the counter, the person being served in front of it, one of
+    // each per staffed position.
+    expect(queue.serverCount).toBe(3)
+    expect(queue.servers).toHaveLength(3)
+    expect(queue.stations).toHaveLength(3)
+    expect(queue.servers[0].y).toBeGreaterThan(point.position.y)
+    expect(queue.stations[0].y).toBeLessThan(point.position.y)
+    expect(servicePositionFor(queue, 3)).toBe(queue.stations[0])
+    expect(queue.serviceTime).toBe(point.serviceTime)
+  })
+
+  it('sends people to the back of the line rather than at the counter', () => {
+    const world = compile(counter().plan, { cellSize: 0.1 })
+    const queue = world.queues[0]
+    const centres = queue.goalCells.map((cell) => centreOf(world, cell))
+
+    expect(centres.length).toBeGreaterThan(50)
+    for (const c of centres) {
+      // A flow field aimed at the counter walks everybody into the side of the
+      // line. Aimed at the tail, they join it.
+      const reach = queue.spacing + world.grid.cellSize
+      expect(Math.abs(c.x - queue.overflowAnchor.x)).toBeLessThanOrEqual(reach)
+      expect(Math.abs(c.y - queue.overflowAnchor.y)).toBeLessThanOrEqual(reach)
+    }
+  })
+
+  it('keeps every waiting position on floor somebody can stand on', () => {
+    const clear = compile(counter().plan, { cellSize: 0.1 }).queues[0]
+    const blocked = compile(counter({}, (b) => b.place('column-square', 10, 8)).plan, {
+      cellSize: 0.1,
+    })
+    const obstructed = blocked.queues[0]
+
+    // The drawn line runs dead straight down the middle of the room...
+    expect(clear.slots.every((slot) => Math.abs(slot.x - 10) < 1e-9)).toBe(true)
+    // ...and through a column somebody later put in the way of it. The position
+    // that landed inside steps aside; it does not become a place nobody reaches
+    // and the line does not lose its length over it.
+    expect(obstructed.slots).toHaveLength(clear.slots.length)
+    expect(obstructed.slots.filter((slot) => Math.abs(slot.x - 10) > 0.3)).toHaveLength(1)
+    for (const slot of obstructed.slots) {
+      expect(blocked.navBlocked[cellAt(blocked, slot.x, slot.y)]).toBe(0)
+    }
+  })
+
+  it('carries the line on past its last drawn place when more people come', () => {
+    const world = compile(counter().plan, { cellSize: 0.1 })
+    const queue = world.queues[0]
+    const last = queue.slots.length
+
+    expect(queueSlotPosition(queue, last - 1)).toBe(queue.slots[last - 1])
+    expect(queueSlotPosition(queue, last).y).toBeCloseTo(4.8 - queue.spacing, 6)
+    expect(queueSlotPosition(queue, last + 1).y).toBeCloseTo(4.8 - 2 * queue.spacing, 6)
+    // Facing back up the line, the way everybody already in it faces. Somebody
+    // joining the overflow should not be the one person turned around.
+    expect(queueSlotFacing(queue, last)).toBeCloseTo(queue.slotFacing[0], 6)
+  })
+
+  it('will not pack a queue tighter than people stand or staff it with nobody', () => {
+    const world = compile(counter({ queueSpacing: 0.1, servers: 0.4 }).plan, { cellSize: 0.2 })
+    const queue = world.queues[0]
+
+    expect(queue.spacing).toBeCloseTo(0.35, 6)
+    expect(queue.serverCount).toBe(1)
+    expect(queue.stations).toHaveLength(1)
+    // A counter that never said when it works is open from the start and never
+    // shuts, rather than closed for the whole run.
+    expect(queue.opensAt).toBe(0)
+    expect(queue.closesAt).toBe(Infinity)
+
+    const scheduled = compile(counter({ opensAt: 60, closesAt: 600 }).plan, { cellSize: 0.2 })
+      .queues[0]
+    expect(scheduled.opensAt).toBe(60)
+    expect(scheduled.closesAt).toBe(600)
+  })
+
+  it('answers to its id in the same index as the places people are sent', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 14)
+    const way = b.door(room.south, 10, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    const point = b.service('Bar', 10, 12, 0, 2, SERVICE)
+    const world = compile(b.build(), { cellSize: 0.2 })
+
+    // An itinerary names a counter exactly as it names a room, so both live in
+    // one map and this is where the engine tells them apart.
+    expect(world.targets.get(point.id)).toBe(world.queues[0])
+    expect(isQueueRecord(world.targets.get(point.id)!)).toBe(true)
+    expect(isQueueRecord(world.targets.get(way.id)!)).toBe(false)
+  })
+})
+
+describe('what the world says about itself', () => {
+  const venue = (margin: number): SimWorld => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 12)
+    b.door(room.south, 10, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'entry')
+    return compile(b.build(), { cellSize: 0.2, margin })
+  }
+
+  it('fences the grid so nobody walks off the edge of the world', () => {
+    const world = venue(2)
+    const { grid } = world
+    for (let col = 0; col < grid.cols; col++) {
+      expect(world.navBlocked[gridIndex(grid, col, 0)]).toBe(1)
+      expect(world.navBlocked[gridIndex(grid, col, grid.rows - 1)]).toBe(1)
+    }
+    for (let row = 0; row < grid.rows; row++) {
+      expect(world.navBlocked[gridIndex(grid, 0, row)]).toBe(1)
+      expect(world.navBlocked[gridIndex(grid, grid.cols - 1, row)]).toBe(1)
+    }
+
+    // The fence is not geometry. Marking it solid would put a phantom wall in
+    // the clearance field, which is what corner-shaving and density read.
+    expect(world.solid[gridIndex(grid, 0, 0)]).toBe(0)
+    // And it leaves the approach outside the front door walkable, which is the
+    // whole reason there is a margin.
+    expect(world.navBlocked[cellAt(world, 10, -1)]).toBe(0)
+  })
+
+  it('reports the floor inside the venue, not the ground the grid covers', () => {
+    // The grid is drawn around the plan with a margin, because the world has to
+    // be open-sided for people to walk out of it, and every cell of that margin
+    // is unblocked. Counting those made this 20 x 12 m room report half as much
+    // floor again as it has — 367 m² against a real 240 less its walls — and
+    // report a different figure whenever `margin` changed, which is a simulation
+    // setting rather than a fact about the venue. It is printed as "Walkable
+    // floor area" beside the peak density, so it reads as the floor the crowd
+    // was standing on and every person per square metre worked out from it came
+    // out low.
+    const tight = venue(2)
+    const roomy = venue(6)
+
+    // 20 x 12 is 240 m² of outline, less what the walls themselves stand on.
+    expect(tight.stats.walkableArea).toBeGreaterThan(220)
+    expect(tight.stats.walkableArea).toBeLessThan(240)
+
+    // And the answer is a property of the venue, so the margin cannot move it.
+    expect(roomy.stats.walkableArea).toBeCloseTo(tight.stats.walkableArea, 6)
+
+    // `freeCells` still counts the whole grid; it is what the area is derived
+    // from that changed, and the two are deliberately no longer the same.
+    expect(tight.stats.freeCells + tight.stats.blockedCells).toBe(tight.grid.cols * tight.grid.rows)
+    expect(tight.stats.walkableArea).toBeLessThan(
+      tight.stats.freeCells * tight.grid.cellSize * tight.grid.cellSize,
+    )
   })
 })

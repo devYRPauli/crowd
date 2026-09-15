@@ -471,6 +471,35 @@ export const buildWorld = (
   let freeCells = 0
   for (let i = 0; i < cells; i++) if (!solid[i]) freeCells++
 
+  /**
+   * Floor inside the venue, which is not the same as unblocked grid.
+   *
+   * The grid is drawn around the plan with a margin, because the world has to
+   * be open-sided for people to walk out of it, and every cell of that margin
+   * is unblocked. Counting them made a 20 x 12 m room report half as much floor
+   * again as it has, and report something different when the margin — a
+   * simulation setting, not a fact about the venue — changed. The figure is
+   * printed as "Walkable floor area" beside the peak density, so it reads as
+   * the floor the crowd was actually standing on, and every person per square
+   * metre a reader worked out from it came out low.
+   */
+  const venueBounds = planBounds(plan, 0)
+  let insideCells = 0
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      if (solid[row * grid.cols + col]) continue
+      const c = cellCenter(grid, col, row)
+      if (
+        c.x >= venueBounds.minX &&
+        c.x <= venueBounds.maxX &&
+        c.y >= venueBounds.minY &&
+        c.y <= venueBounds.maxY
+      ) {
+        insideCells++
+      }
+    }
+  }
+
   const targets = new Map<string, DestinationRecord | QueueRecord>()
   for (const record of [...entries, ...exits, ...waypoints, ...measures])
     targets.set(record.id, record)
@@ -494,7 +523,7 @@ export const buildWorld = (
     queues,
     seats,
     stats: {
-      walkableArea: freeCells * cellSize * cellSize,
+      walkableArea: insideCells * cellSize * cellSize,
       blockedCells: cells - freeCells,
       freeCells,
     },
