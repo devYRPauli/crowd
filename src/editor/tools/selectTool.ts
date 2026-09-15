@@ -30,7 +30,13 @@ import { wallLength } from '../../core/model/planGeometry'
 type Mode =
   | { kind: 'idle' }
   | { kind: 'maybe-drag'; start: Vec2; ref: PlanObjectRef; additive: boolean; duplicate: boolean }
-  | { kind: 'move'; start: Vec2; origin: Map<string, Vec2>; duplicate: boolean; axis: 'free' | 'x' | 'y' }
+  | {
+      kind: 'move'
+      start: Vec2
+      origin: Map<string, Vec2>
+      duplicate: boolean
+      axis: 'free' | 'x' | 'y'
+    }
   | { kind: 'rotate'; center: Vec2; startAngle: number; origin: Map<string, number> }
   | { kind: 'wall-endpoint'; wallId: string; end: 'a' | 'b'; other: Vec2 }
   | { kind: 'vertex'; zoneId: string; index: number }
@@ -85,7 +91,12 @@ const rotationOf = (doc: CrowdDocument, ref: PlanObjectRef): number => {
 }
 
 /** Move one object by a delta, dispatching on its kind. */
-const moveObject = (doc: CrowdDocument, ref: PlanObjectRef, from: Vec2, delta: Vec2): CrowdDocument => {
+const moveObject = (
+  doc: CrowdDocument,
+  ref: PlanObjectRef,
+  from: Vec2,
+  delta: Vec2,
+): CrowdDocument => {
   const target = { x: from.x + delta.x, y: from.y + delta.y }
   switch (ref.kind) {
     case 'furniture':
@@ -186,7 +197,12 @@ const duplicateSelection = (
     } else if (ref.kind === 'zone') {
       const zone = next.plan.zones.find((z) => z.id === ref.id)
       if (!zone) continue
-      const copy = { ...zone, id: newId('zone'), polygon: zone.polygon.map((p) => ({ ...p })), locked: false }
+      const copy = {
+        ...zone,
+        id: newId('zone'),
+        polygon: zone.polygon.map((p) => ({ ...p })),
+        locked: false,
+      }
       next = { ...next, plan: { ...next.plan, zones: [...next.plan.zones, copy] } }
       created.push({ kind: 'zone', id: copy.id })
     } else if (ref.kind === 'service') {
@@ -295,7 +311,12 @@ export class SelectTool implements Tool {
         const wall = ctx.document.plan.walls.find((w) => w.id === ctx.selection[0].id)
         if (!wall) return
         const end = handle.id === 'wall-a' ? 'a' : 'b'
-        this.mode = { kind: 'wall-endpoint', wallId: wall.id, end, other: end === 'a' ? wall.b : wall.a }
+        this.mode = {
+          kind: 'wall-endpoint',
+          wallId: wall.id,
+          end,
+          other: end === 'a' ? wall.b : wall.a,
+        }
         return
       }
       if (handle.kind === 'vertex' && ctx.selection[0]?.kind === 'zone') {
@@ -507,10 +528,22 @@ export class SelectTool implements Tool {
       case 'marquee': {
         this.mode = { ...this.mode, current: info.ground }
         const rect = [
-          { x: Math.min(this.mode.start.x, info.ground.x), y: Math.min(this.mode.start.y, info.ground.y) },
-          { x: Math.max(this.mode.start.x, info.ground.x), y: Math.min(this.mode.start.y, info.ground.y) },
-          { x: Math.max(this.mode.start.x, info.ground.x), y: Math.max(this.mode.start.y, info.ground.y) },
-          { x: Math.min(this.mode.start.x, info.ground.x), y: Math.max(this.mode.start.y, info.ground.y) },
+          {
+            x: Math.min(this.mode.start.x, info.ground.x),
+            y: Math.min(this.mode.start.y, info.ground.y),
+          },
+          {
+            x: Math.max(this.mode.start.x, info.ground.x),
+            y: Math.min(this.mode.start.y, info.ground.y),
+          },
+          {
+            x: Math.max(this.mode.start.x, info.ground.x),
+            y: Math.max(this.mode.start.y, info.ground.y),
+          },
+          {
+            x: Math.min(this.mode.start.x, info.ground.x),
+            y: Math.max(this.mode.start.y, info.ground.y),
+          },
         ]
         ctx.setDraft([{ kind: 'rect', points: rect, filled: true, color: '#2f7df6' }])
         return
@@ -556,28 +589,25 @@ export class SelectTool implements Tool {
     if (!info.hit || info.hit.ref.kind !== 'zone' || !info.ground) return
     const zoneId = info.hit.ref.id
     const point = info.ground
-    ctx.apply(
-      (doc) => {
-        const zone = doc.plan.zones.find((z) => z.id === zoneId)
-        if (!zone) return doc
-        let bestIndex = 0
-        let bestDistance = Infinity
-        for (let i = 0; i < zone.polygon.length; i++) {
-          const a = zone.polygon[i]
-          const b = zone.polygon[(i + 1) % zone.polygon.length]
-          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-          const d = distance(mid, point)
-          if (d < bestDistance) {
-            bestDistance = d
-            bestIndex = i
-          }
+    ctx.apply((doc) => {
+      const zone = doc.plan.zones.find((z) => z.id === zoneId)
+      if (!zone) return doc
+      let bestIndex = 0
+      let bestDistance = Infinity
+      for (let i = 0; i < zone.polygon.length; i++) {
+        const a = zone.polygon[i]
+        const b = zone.polygon[(i + 1) % zone.polygon.length]
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+        const d = distance(mid, point)
+        if (d < bestDistance) {
+          bestDistance = d
+          bestIndex = i
         }
-        const polygon = [...zone.polygon]
-        polygon.splice(bestIndex + 1, 0, point)
-        return updateZone(doc, zoneId, { polygon })
-      },
-      'Add zone point',
-    )
+      }
+      const polygon = [...zone.polygon]
+      polygon.splice(bestIndex + 1, 0, point)
+      return updateZone(doc, zoneId, { polygon })
+    }, 'Add zone point')
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
@@ -622,7 +652,14 @@ export class SelectTool implements Tool {
           (doc) => {
             let next = doc
             for (const ref of refs) {
-              next = rotateObject(next, ref, center, delta, rotationOf(doc, ref), refs.length > 1 ? positionOf(doc, ref) : null)
+              next = rotateObject(
+                next,
+                ref,
+                center,
+                delta,
+                rotationOf(doc, ref),
+                refs.length > 1 ? positionOf(doc, ref) : null,
+              )
             }
             return next
           },
@@ -637,7 +674,10 @@ export class SelectTool implements Tool {
   }
 
   /** Handles and hover affordances drawn as draft geometry. */
-  private decorations(ctx: ToolContext, active: Handle | null): Array<{
+  private decorations(
+    ctx: ToolContext,
+    active: Handle | null,
+  ): Array<{
     kind: 'polygon'
     points: Vec2[]
     color: string

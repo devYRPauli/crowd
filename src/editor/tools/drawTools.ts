@@ -75,9 +75,10 @@ export class WallTool implements Tool {
       if (length !== null && length > 0) {
         const direction = fromAngle(angleOf(sub(info.ground, anchor)))
         const step = ctx.document.settings.angleSnapDeg
-        const angle = step > 0
-          ? Math.round(angleOf(direction) / ((step * Math.PI) / 180)) * ((step * Math.PI) / 180)
-          : angleOf(direction)
+        const angle =
+          step > 0
+            ? Math.round(angleOf(direction) / ((step * Math.PI) / 180)) * ((step * Math.PI) / 180)
+            : angleOf(direction)
         return add(anchor, fromAngle(angle, length))
       }
     }
@@ -104,7 +105,11 @@ export class WallTool implements Tool {
       shapes.push({ kind: 'polyline', points: [anchor, this.preview], color: DRAFT_COLOR })
     }
     if (info?.ground && !anchor) {
-      shapes.push({ kind: 'polyline', points: [this.preview ?? info.ground, this.preview ?? info.ground], color: DRAFT_COLOR })
+      shapes.push({
+        kind: 'polyline',
+        points: [this.preview ?? info.ground, this.preview ?? info.ground],
+        color: DRAFT_COLOR,
+      })
     }
     if (info && this.preview) {
       const snapped = ctx.snap(info.ground ?? this.preview, {
@@ -140,7 +145,11 @@ export class WallTool implements Tool {
   private commitSegment(ctx: ToolContext, a: Vec2, b: Vec2): void {
     const { wallThickness, wallHeight, wallKind } = ctx.options
     ctx.apply(
-      (doc) => addWall(doc, makeWall(a, b, { thickness: wallThickness, height: wallHeight, kind: wallKind })),
+      (doc) =>
+        addWall(
+          doc,
+          makeWall(a, b, { thickness: wallThickness, height: wallHeight, kind: wallKind }),
+        ),
       'Draw wall',
     )
     ctx.seal()
@@ -428,7 +437,12 @@ export class MeasureTool implements Tool {
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
     if (!info.ground) return
-    this.points.push(ctx.snap(info.ground, { anchor: this.points[this.points.length - 1] ?? null, angleSnapDeg: ctx.document.settings.angleSnapDeg }).point)
+    this.points.push(
+      ctx.snap(info.ground, {
+        anchor: this.points[this.points.length - 1] ?? null,
+        angleSnapDeg: ctx.document.settings.angleSnapDeg,
+      }).point,
+    )
     this.refresh(ctx)
   }
 

@@ -69,13 +69,7 @@ export interface FurnitureItem {
 }
 
 export type ZoneKind =
-  | 'entry'
-  | 'exit'
-  | 'waypoint'
-  | 'obstacle'
-  | 'keep-clear'
-  | 'seating'
-  | 'measure'
+  'entry' | 'exit' | 'waypoint' | 'obstacle' | 'keep-clear' | 'seating' | 'measure'
 
 /** A polygonal region of the floor carrying a role in the simulation. */
 export interface Zone {

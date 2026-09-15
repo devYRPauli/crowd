@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { losFor, weidmannFlow, weidmannSpeed, crowdSafetyLevel, QUEUE_LOS, WALKWAY_LOS } from './los'
+import {
+  losFor,
+  weidmannFlow,
+  weidmannSpeed,
+  crowdSafetyLevel,
+  QUEUE_LOS,
+  WALKWAY_LOS,
+} from './los'
 
 describe('Fruin level of service', () => {
   it('uses the published walkway breakpoints', () => {

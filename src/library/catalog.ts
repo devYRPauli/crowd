@@ -14,13 +14,7 @@
 import type { MaterialRole, Prim } from './primitives'
 import { box, cone, cyl, legs, pedestal, sphere, torus, translated } from './primitives'
 
-export type CatalogCategory =
-  | 'tables'
-  | 'seating'
-  | 'service'
-  | 'structure'
-  | 'equipment'
-  | 'decor'
+export type CatalogCategory = 'tables' | 'seating' | 'service' | 'structure' | 'equipment' | 'decor'
 
 export interface Size {
   width: number
@@ -63,7 +57,13 @@ const TAU = Math.PI * 2
 
 // --- shared sub-assemblies ---------------------------------------------------
 
-const chairShell = (w: number, d: number, h: number, seatH: number, frame: MaterialRole): Prim[] => [
+const chairShell = (
+  w: number,
+  d: number,
+  h: number,
+  seatH: number,
+  frame: MaterialRole,
+): Prim[] => [
   box(0, seatH, 0, w, 0.06, d, 'fabric'),
   box(0, seatH + (h - seatH) / 2, -d / 2 + 0.05, w * 0.92, h - seatH, 0.07, 'fabric'),
   ...legs(w, d, seatH - 0.03, frame, 0.045, 0.03),
@@ -300,7 +300,15 @@ const SEATING: CatalogItem[] = [
     tintRole: 'fabricAlt',
     build: ({ width, depth, height }) => [
       box(0, 0.44, 0, width, 0.05, depth, 'fabricAlt'),
-      box(0, 0.44 + (height - 0.44) / 2, -depth / 2 + 0.04, width * 0.9, height - 0.46, 0.05, 'fabricAlt'),
+      box(
+        0,
+        0.44 + (height - 0.44) / 2,
+        -depth / 2 + 0.04,
+        width * 0.9,
+        height - 0.46,
+        0.05,
+        'fabricAlt',
+      ),
       ...legs(width, depth, 0.42, 'chrome', 0.03, 0.02),
     ],
     seats: () => [{ x: 0, z: 0, facing: Math.PI / 2, kind: 'seat' }],
@@ -368,7 +376,15 @@ const SEATING: CatalogItem[] = [
     tintRole: 'wood',
     build: ({ width, depth, height }) => [
       box(0, height - 0.03, 0, width, 0.06, depth, 'wood'),
-      box(-width / 2 + 0.12, (height - 0.06) / 2, 0, 0.06, height - 0.06, depth * 0.85, 'metalDark'),
+      box(
+        -width / 2 + 0.12,
+        (height - 0.06) / 2,
+        0,
+        0.06,
+        height - 0.06,
+        depth * 0.85,
+        'metalDark',
+      ),
       box(width / 2 - 0.12, (height - 0.06) / 2, 0, 0.06, height - 0.06, depth * 0.85, 'metalDark'),
     ],
     seats: ({ width }) => {
@@ -738,7 +754,9 @@ const STRUCTURE: CatalogItem[] = [
       ]
       const bars = Math.max(2, Math.round(width / 0.22))
       for (let i = 1; i < bars; i++) {
-        out.push(box(-width / 2 + (i / bars) * width, height / 2, 0, 0.025, height - 0.1, 0.025, 'metal'))
+        out.push(
+          box(-width / 2 + (i / bars) * width, height / 2, 0, 0.025, height - 0.1, 0.025, 'metal'),
+        )
       }
       out.push(box(-width / 2 + 0.03, 0.02, 0, 0.36, 0.04, 0.36, 'metalDark'))
       out.push(box(width / 2 - 0.03, 0.02, 0, 0.36, 0.04, 0.36, 'metalDark'))
@@ -818,7 +836,17 @@ const STRUCTURE: CatalogItem[] = [
       const bushes = Math.max(2, Math.round(width / 0.45))
       for (let i = 0; i < bushes; i++) {
         const x = -width / 2 + ((i + 0.5) / bushes) * width
-        out.push(sphere(x, height * 0.78 + 0.1, 0, Math.min(depth, width / bushes) * 0.42, 'plant', 0.8, 10))
+        out.push(
+          sphere(
+            x,
+            height * 0.78 + 0.1,
+            0,
+            Math.min(depth, width / bushes) * 0.42,
+            'plant',
+            0.8,
+            10,
+          ),
+        )
       }
       return out
     },
@@ -922,8 +950,24 @@ const EQUIPMENT: CatalogItem[] = [
     build: ({ width, depth, height }) => [
       box(0, height / 2, 0, width, height - 0.08, depth, 'wood'),
       box(0, height - 0.02, 0, width + 0.04, 0.04, depth + 0.04, 'woodDark'),
-      box(-width / 4, height / 2, depth / 2 + 0.005, width / 2 - 0.04, height - 0.2, 0.02, 'woodDark'),
-      box(width / 4, height / 2, depth / 2 + 0.005, width / 2 - 0.04, height - 0.2, 0.02, 'woodDark'),
+      box(
+        -width / 4,
+        height / 2,
+        depth / 2 + 0.005,
+        width / 2 - 0.04,
+        height - 0.2,
+        0.02,
+        'woodDark',
+      ),
+      box(
+        width / 4,
+        height / 2,
+        depth / 2 + 0.005,
+        width / 2 - 0.04,
+        height - 0.2,
+        0.02,
+        'woodDark',
+      ),
       ...legs(width, depth, 0.08, 'metalDark', 0.04, 0.06),
     ],
   },
@@ -949,7 +993,9 @@ const EQUIPMENT: CatalogItem[] = [
       const coats = Math.max(3, Math.round(width / 0.12))
       for (let i = 0; i < coats; i++) {
         const x = -width / 2 + 0.12 + (i / coats) * (width - 0.24)
-        out.push(box(x, height - 0.42, 0, 0.06, 0.74, depth * 0.55, i % 3 === 0 ? 'fabricAlt' : 'fabric'))
+        out.push(
+          box(x, height - 0.42, 0, 0.06, 0.74, depth * 0.55, i % 3 === 0 ? 'fabricAlt' : 'fabric'),
+        )
       }
       return out
     },
@@ -1012,7 +1058,15 @@ const DECOR: CatalogItem[] = [
         const a = (i / leaves) * Math.PI * 2
         const r = width * 0.26
         out.push(
-          sphere(Math.cos(a) * r, potH + height * 0.3 + (i % 2) * 0.1, Math.sin(a) * r, width * 0.24, 'plant', 1.3, 8),
+          sphere(
+            Math.cos(a) * r,
+            potH + height * 0.3 + (i % 2) * 0.1,
+            Math.sin(a) * r,
+            width * 0.24,
+            'plant',
+            1.3,
+            8,
+          ),
         )
       }
       out.push(sphere(0, potH + height * 0.46, 0, width * 0.27, 'plant', 1.2, 10))

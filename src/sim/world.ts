@@ -178,7 +178,11 @@ export const nearestFreeCell = (grid: NavGrid, blocked: Uint8Array, p: Vec2): nu
  * cramped ones stay available as a fallback so a genuinely tight space still
  * works.
  */
-const preferOpenCells = (cells: number[], clearance: Float32Array, minClearance = 0.5): number[] => {
+const preferOpenCells = (
+  cells: number[],
+  clearance: Float32Array,
+  minClearance = 0.5,
+): number[] => {
   const open = cells.filter((cell) => clearance[cell] >= minClearance)
   return open.length >= Math.max(4, cells.length * 0.15) ? open : cells
 }
@@ -325,7 +329,10 @@ export const buildWorld = (
     const slots = samplePolyline(line, spacing, slotCount).map((slot) => {
       const { col, row } = worldToCell(grid, slot.x, slot.y)
       const inside =
-        col >= 0 && row >= 0 && col < grid.cols && row < grid.rows &&
+        col >= 0 &&
+        row >= 0 &&
+        col < grid.cols &&
+        row < grid.rows &&
         !navBlocked[gridIndex(grid, col, row)]
       if (inside) return slot
       const cell = nearestFreeCell(grid, navBlocked, slot)
@@ -392,7 +399,8 @@ export const buildWorld = (
   for (let i = 0; i < cells; i++) if (!solid[i]) freeCells++
 
   const targets = new Map<string, DestinationRecord | QueueRecord>()
-  for (const record of [...entries, ...exits, ...waypoints, ...measures]) targets.set(record.id, record)
+  for (const record of [...entries, ...exits, ...waypoints, ...measures])
+    targets.set(record.id, record)
   for (const queue of queues) targets.set(queue.id, queue)
 
   void scenario

@@ -35,7 +35,14 @@ const primGeometry = (prim: Prim): BufferGeometry => {
     case 'box':
       return new BoxGeometry(prim.w, prim.h, prim.d)
     case 'cyl':
-      return new CylinderGeometry(prim.r, prim.r2 ?? prim.r, prim.h, prim.seg ?? 16, 1, prim.open ?? false)
+      return new CylinderGeometry(
+        prim.r,
+        prim.r2 ?? prim.r,
+        prim.h,
+        prim.seg ?? 16,
+        1,
+        prim.open ?? false,
+      )
     case 'sphere': {
       const geometry = new SphereGeometry(prim.r, prim.seg ?? 12, Math.max(6, (prim.seg ?? 12) / 2))
       if (prim.squash && prim.squash !== 1) geometry.scale(1, prim.squash, 1)
@@ -50,7 +57,11 @@ const primGeometry = (prim: Prim): BufferGeometry => {
  * Merge a primitive list into one geometry, baking each primitive's role colour
  * into vertex colours. `tint` replaces the colour of the entry's tintable role.
  */
-export const buildPrimGeometry = (prims: Prim[], tint?: string, tintRole?: string): BufferGeometry => {
+export const buildPrimGeometry = (
+  prims: Prim[],
+  tint?: string,
+  tintRole?: string,
+): BufferGeometry => {
   const parts: BufferGeometry[] = []
   for (const prim of prims) {
     const geometry = primGeometry(prim)

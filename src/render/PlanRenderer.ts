@@ -8,9 +8,7 @@
  * stands for, so hit-testing needs no side tables.
  */
 
-import type {
-  Object3D,
-  Texture} from 'three';
+import type { Object3D, Texture } from 'three'
 import {
   BoxGeometry,
   BufferAttribute,
@@ -47,7 +45,11 @@ import {
   buildWallGeometry,
   polygonGeometry,
 } from './builders/planMeshes'
-import { getFurnitureGeometry, furnitureGeometryKey, pruneFurnitureGeometry } from './builders/furnitureGeometry'
+import {
+  getFurnitureGeometry,
+  furnitureGeometryKey,
+  pruneFurnitureGeometry,
+} from './builders/furnitureGeometry'
 import type { Vec2 } from '../core/math/vec2'
 
 const OUTLINE_LIFT = 0.012
@@ -153,7 +155,8 @@ export class PlanRenderer {
       options.showFurniture !== this.lastOptions.showFurniture ||
       options.wallCutHeight !== this.lastOptions.wallCutHeight
 
-    const wallsChanged = !previous || previous.walls !== plan.walls || previous.openings !== plan.openings
+    const wallsChanged =
+      !previous || previous.walls !== plan.walls || previous.openings !== plan.openings
     if (wallsChanged || optionsChanged) {
       this.rebuildWalls(plan, options)
       this.rebuildFloors(plan)
@@ -181,7 +184,14 @@ export class PlanRenderer {
 
   private refreshPickables(): void {
     this.pickables.length = 0
-    for (const group of [this.furnitureGroup, this.serviceGroup, this.wallGroup, this.openingGroup, this.zoneGroup, this.backdropGroup]) {
+    for (const group of [
+      this.furnitureGroup,
+      this.serviceGroup,
+      this.wallGroup,
+      this.openingGroup,
+      this.zoneGroup,
+      this.backdropGroup,
+    ]) {
       for (const child of group.children) {
         if ((child as Mesh).isMesh && child.userData.ref) this.pickables.push(child)
       }
@@ -229,7 +239,11 @@ export class PlanRenderer {
       const wall = plan.walls.find((w) => w.id === opening.wallId)
       if (!wall) continue
       const angle = wallAngle(wall)
-      const geometry = new BoxGeometry(opening.width, Math.max(0.4, opening.height), wall.thickness + 0.08)
+      const geometry = new BoxGeometry(
+        opening.width,
+        Math.max(0.4, opening.height),
+        wall.thickness + 0.08,
+      )
       const mesh = new Mesh(geometry, new MeshBasicMaterial({ visible: false }))
       mesh.position.set(
         wall.a.x + Math.cos(angle) * opening.offset,
@@ -245,7 +259,10 @@ export class PlanRenderer {
   private rebuildFloors(plan: Plan): void {
     disposeTree(this.floorGroup)
     this.rooms = detectRooms(plan.walls)
-    const geometry = buildFloorGeometry(this.rooms.map((room) => room.polygon), 0)
+    const geometry = buildFloorGeometry(
+      this.rooms.map((room) => room.polygon),
+      0,
+    )
     if (!geometry) return
     const mesh = new Mesh(geometry, this.materials.floor())
     mesh.receiveShadow = true
@@ -260,7 +277,10 @@ export class PlanRenderer {
       return
     }
 
-    const groups = new Map<string, { geometry: BufferGeometry; ids: string[]; matrices: Matrix4[] }>()
+    const groups = new Map<
+      string,
+      { geometry: BufferGeometry; ids: string[]; matrices: Matrix4[] }
+    >()
     const liveKeys = new Set<string>()
     const matrix = new Matrix4()
 
@@ -281,7 +301,11 @@ export class PlanRenderer {
     }
 
     for (const group of groups.values()) {
-      const mesh = new InstancedMesh(group.geometry, this.materials.furniture(), group.matrices.length)
+      const mesh = new InstancedMesh(
+        group.geometry,
+        this.materials.furniture(),
+        group.matrices.length,
+      )
       mesh.instanceMatrix.setUsage(DynamicDrawUsage)
       group.matrices.forEach((m, index) => mesh.setMatrixAt(index, m))
       mesh.instanceMatrix.needsUpdate = true
@@ -349,7 +373,10 @@ export class PlanRenderer {
 
       if (options.showQueues) {
         const queue = serviceQueue(point)
-        const line = new Line(polylineGeometry(queue, OUTLINE_LIFT + 0.004), this.materials.line(color, 0.75))
+        const line = new Line(
+          polylineGeometry(queue, OUTLINE_LIFT + 0.004),
+          this.materials.line(color, 0.75),
+        )
         line.renderOrder = 3
         this.serviceGroup.add(line)
 

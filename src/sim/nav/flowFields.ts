@@ -159,7 +159,8 @@ export class FlowFieldCache {
       return shortest ? { dx: shortest.dx, dy: shortest.dy, cost: shortest.value } : null
     }
     const congested = sampleGradient(this.grid, field.congestedPotential, point.x, point.y)
-    if (!congested) return shortest ? { dx: shortest.dx, dy: shortest.dy, cost: shortest.value } : null
+    if (!congested)
+      return shortest ? { dx: shortest.dx, dy: shortest.dy, cost: shortest.value } : null
     if (!shortest) return { dx: congested.dx, dy: congested.dy, cost: congested.value }
     const dx = shortest.dx * (1 - awareness) + congested.dx * awareness
     const dy = shortest.dy * (1 - awareness) + congested.dy * awareness

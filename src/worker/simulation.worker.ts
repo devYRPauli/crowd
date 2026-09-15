@@ -145,7 +145,9 @@ const tick = (run: RunState): void => {
     run.running = false
     return
   }
-  const delay = Number.isFinite(run.speed) ? Math.max(0, (advanced / run.speed) * 1000 - (Date.now() - started)) : 0
+  const delay = Number.isFinite(run.speed)
+    ? Math.max(0, (advanced / run.speed) * 1000 - (Date.now() - started))
+    : 0
   run.timer = setTimeout(() => tick(run), delay)
 }
 
@@ -166,7 +168,11 @@ const start = (request: StartRequest): void => {
     densityBytes: new Uint8Array(cells),
   }
   current = run
-  sendReady(run, sim.summary().warnings, request.scenario.populations.reduce((s, p) => s + p.count, 0))
+  sendReady(
+    run,
+    sim.summary().warnings,
+    request.scenario.populations.reduce((s, p) => s + p.count, 0),
+  )
   sendFrame(run)
   run.nextFrameAt = run.frameIntervalS
   tick(run)
@@ -190,7 +196,11 @@ const batch = (request: BatchRequest): void => {
     densityBytes: new Uint8Array(cells),
   }
   current = run
-  sendReady(run, sim.summary().warnings, request.scenario.populations.reduce((s, p) => s + p.count, 0))
+  sendReady(
+    run,
+    sim.summary().warnings,
+    request.scenario.populations.reduce((s, p) => s + p.count, 0),
+  )
 
   const chunk = () => {
     if (current !== run || !run.running) return
@@ -207,7 +217,11 @@ const batch = (request: BatchRequest): void => {
       run.running = false
       return
     }
-    post({ type: 'progress', runId: run.id, progress: Math.min(1, sim.currentTime / run.durationS) })
+    post({
+      type: 'progress',
+      runId: run.id,
+      progress: Math.min(1, sim.currentTime / run.durationS),
+    })
     setTimeout(chunk, 0)
   }
   chunk()

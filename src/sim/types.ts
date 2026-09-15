@@ -4,7 +4,8 @@
 
 import type { Distribution } from '../core/math/random'
 
-export type AgentState = 'walking' | 'queuing' | 'waiting' | 'served' | 'seated' | 'dwelling' | 'done'
+export type AgentState =
+  'walking' | 'queuing' | 'waiting' | 'served' | 'seated' | 'dwelling' | 'done'
 
 export const AGENT_STATE_ORDER: AgentState[] = [
   'walking',
@@ -51,7 +52,13 @@ export interface SimStats {
   stoppedShare: number
   meanWait: number
   maxWait: number
-  queueLengths: Array<{ id: string; name: string; waiting: number; served: number; meanWait: number }>
+  queueLengths: Array<{
+    id: string
+    name: string
+    waiting: number
+    served: number
+    meanWait: number
+  }>
   /** Fruin level of service of the busiest measured area. */
   worstLos: string
 }

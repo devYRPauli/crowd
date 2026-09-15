@@ -240,7 +240,8 @@ export const polygonEdges = (poly: readonly Vec2[]): Segment[] => {
 
 export const polylineLength = (points: readonly Vec2[]): number => {
   let total = 0
-  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+  for (let i = 1; i < points.length; i++)
+    total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
   return total
 }
 
@@ -264,7 +265,11 @@ export const pointAlongPolyline = (points: readonly Vec2[], s: number): Vec2 => 
 }
 
 /** Sample a polyline every `spacing` metres, starting at its head. */
-export const samplePolyline = (points: readonly Vec2[], spacing: number, count?: number): Vec2[] => {
+export const samplePolyline = (
+  points: readonly Vec2[],
+  spacing: number,
+  count?: number,
+): Vec2[] => {
   const total = polylineLength(points)
   const n = count ?? Math.floor(total / spacing) + 1
   const out: Vec2[] = []
@@ -278,7 +283,8 @@ export const closestPointOnPolyline = (
   p: Vec2,
 ): { point: Vec2; arc: number; distance: number } => {
   if (points.length === 0) return { point: { x: 0, y: 0 }, arc: 0, distance: Infinity }
-  if (points.length === 1) return { point: { ...points[0] }, arc: 0, distance: distance(p, points[0]) }
+  if (points.length === 1)
+    return { point: { ...points[0] }, arc: 0, distance: distance(p, points[0]) }
   let best = { point: { ...points[0] }, arc: 0, distance: Infinity }
   let travelled = 0
   for (let i = 1; i < points.length; i++) {
@@ -319,7 +325,10 @@ export const convexHull = (points: readonly Vec2[]): Polygon => {
     for (const p of src) {
       while (
         stack.length >= 2 &&
-        cross(sub(stack[stack.length - 1], stack[stack.length - 2]), sub(p, stack[stack.length - 2])) <= 0
+        cross(
+          sub(stack[stack.length - 1], stack[stack.length - 2]),
+          sub(p, stack[stack.length - 2]),
+        ) <= 0
       ) {
         stack.pop()
       }

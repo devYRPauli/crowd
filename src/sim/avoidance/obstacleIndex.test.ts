@@ -37,7 +37,8 @@ describe('ObstacleIndex', () => {
       const dx = b.x - a.x
       const dy = b.y - a.y
       const lengthSq = dx * dx + dy * dy
-      const t = lengthSq > 0 ? Math.max(0, Math.min(1, ((5 - a.x) * dx + (0 - a.y) * dy) / lengthSq)) : 0
+      const t =
+        lengthSq > 0 ? Math.max(0, Math.min(1, ((5 - a.x) * dx + (0 - a.y) * dy) / lengthSq)) : 0
       return Math.hypot(a.x + dx * t - 5, a.y + dy * t - 0)
     }
     const distances = out.map(distanceTo)

@@ -173,14 +173,18 @@ export class CrowdRenderer {
       shader.uniforms.uSkinTones = { value: toLinearArray(SKIN_TONES) }
       shader.uniforms.uLegColors = { value: toLinearArray(LEG_COLORS) }
       shader.uniforms.uHairColors = { value: toLinearArray(HAIR_COLORS) }
-      shader.vertexShader = VERTEX_HEAD + shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\n' + VERTEX_BODY,
-      )
-      shader.fragmentShader = FRAGMENT_HEAD + shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        '#include <color_fragment>\n' + FRAGMENT_BODY,
-      )
+      shader.vertexShader =
+        VERTEX_HEAD +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n' + VERTEX_BODY,
+        )
+      shader.fragmentShader =
+        FRAGMENT_HEAD +
+        shader.fragmentShader.replace(
+          '#include <color_fragment>',
+          '#include <color_fragment>\n' + FRAGMENT_BODY,
+        )
     }
     // Any change to the injected code needs a distinct cache key.
     this.material.customProgramCacheKey = () => 'crowd-character-v1'
@@ -219,7 +223,9 @@ export class CrowdRenderer {
     switch (input.colorMode) {
       case 'population': {
         const index = agents[base + AGENT_FIELD.population] | 0
-        return input.populationColors[index % Math.max(1, input.populationColors.length)] ?? '#4c7dd4'
+        return (
+          input.populationColors[index % Math.max(1, input.populationColors.length)] ?? '#4c7dd4'
+        )
       }
       case 'profile': {
         const index = agents[base + AGENT_FIELD.profile] | 0

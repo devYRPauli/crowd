@@ -41,7 +41,10 @@ export class FurnitureTool implements Tool {
     ctx.setLabels([])
   }
 
-  private resolve(info: PointerInfo, ctx: ToolContext): { position: Vec2; rotation: number } | null {
+  private resolve(
+    info: PointerInfo,
+    ctx: ToolContext,
+  ): { position: Vec2; rotation: number } | null {
     if (!info.ground) return null
     const entry = resolveCatalogItem(ctx.options.catalogId)
     const aligned = wallAlignedPlacement(ctx.document, info.ground, entry.size.depth, 1.0)
@@ -96,7 +99,10 @@ export class FurnitureTool implements Tool {
     const resolved = this.resolve(info, ctx)
     if (!resolved) return
     const item = makeFurniture(ctx.options.catalogId, resolved.position, resolved.rotation)
-    ctx.apply((doc) => addFurniture(doc, [item]), `Place ${resolveCatalogItem(ctx.options.catalogId).name}`)
+    ctx.apply(
+      (doc) => addFurniture(doc, [item]),
+      `Place ${resolveCatalogItem(ctx.options.catalogId).name}`,
+    )
     ctx.seal()
     // Stay armed so a row of chairs is one gesture per chair, not three.
     if (!info.shiftKey) ctx.setSelection([{ kind: 'furniture', id: item.id }])
@@ -125,7 +131,11 @@ abstract class OpeningTool implements Tool {
   protected preview: { wallId: string; offset: number; position: Vec2; angle: number } | null = null
 
   protected abstract width(ctx: ToolContext): number
-  protected abstract build(ctx: ToolContext, wallId: string, offset: number): Parameters<typeof addOpening>[1]
+  protected abstract build(
+    ctx: ToolContext,
+    wallId: string,
+    offset: number,
+  ): Parameters<typeof addOpening>[1]
 
   onDeactivate(ctx: ToolContext): void {
     this.preview = null
@@ -139,7 +149,10 @@ abstract class OpeningTool implements Tool {
     if (!near) return null
     const width = this.width(ctx)
     const length = wallLength(near.wall)
-    const offset = Math.min(Math.max(near.offset, width / 2), Math.max(width / 2, length - width / 2))
+    const offset = Math.min(
+      Math.max(near.offset, width / 2),
+      Math.max(width / 2, length - width / 2),
+    )
     const direction = normalize(sub(near.wall.b, near.wall.a))
     return {
       wallId: near.wall.id,
@@ -175,7 +188,12 @@ abstract class OpeningTool implements Tool {
     ctx.setDraft([
       {
         kind: 'rect',
-        points: rectPolygon(this.preview.position, width, wall.thickness + 0.14, this.preview.angle),
+        points: rectPolygon(
+          this.preview.position,
+          width,
+          wall.thickness + 0.14,
+          this.preview.angle,
+        ),
         color: '#3fb27f',
         filled: true,
       },
@@ -343,7 +361,8 @@ export class ServiceTool implements Tool {
 /** Edit the waiting line of a service point by dragging its points. */
 export class QueueTool implements Tool {
   readonly id = 'queue' as const
-  readonly hint = 'Drag a queue point to reshape the line · Click the line to add a point · Alt-click to remove'
+  readonly hint =
+    'Drag a queue point to reshape the line · Click the line to add a point · Alt-click to remove'
   readonly cursor = 'crosshair'
 
   private dragging: { serviceId: string; index: number } | null = null
@@ -397,12 +416,13 @@ export class QueueTool implements Tool {
     ])
     const service = this.activeService(ctx)
     if (service) {
-      const capacity = Math.floor(
-        queue.points.reduce(
-          (sum, p, i) => (i === 0 ? 0 : sum + distance(queue.points[i - 1], p)),
-          0,
-        ) / service.queueSpacing,
-      ) + 1
+      const capacity =
+        Math.floor(
+          queue.points.reduce(
+            (sum, p, i) => (i === 0 ? 0 : sum + distance(queue.points[i - 1], p)),
+            0,
+          ) / service.queueSpacing,
+        ) + 1
       ctx.setLabels([
         {
           id: 'queue-capacity',

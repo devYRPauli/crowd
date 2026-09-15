@@ -76,7 +76,16 @@ const PARTS: Part[] = [
   { x: 0.095, y: 0.27, z: 0, w: 0.115, h: 0.42, d: 0.125, limb: LIMB.shinLeft, zone: ZONE.legs },
   { x: -0.095, y: 0.27, z: 0, w: 0.115, h: 0.42, d: 0.125, limb: LIMB.shinRight, zone: ZONE.legs },
   { x: 0.095, y: 0.035, z: 0.015, w: 0.12, h: 0.07, d: 0.2, limb: LIMB.shinLeft, zone: ZONE.hair },
-  { x: -0.095, y: 0.035, z: 0.015, w: 0.12, h: 0.07, d: 0.2, limb: LIMB.shinRight, zone: ZONE.hair },
+  {
+    x: -0.095,
+    y: 0.035,
+    z: 0.015,
+    w: 0.12,
+    h: 0.07,
+    d: 0.2,
+    limb: LIMB.shinRight,
+    zone: ZONE.hair,
+  },
 ]
 
 /** Build the character geometry, with `aLimb` and `aZone` vertex attributes. */
@@ -106,14 +115,7 @@ const simplify = (parts: Part[]): Part[] =>
   parts.filter((part) => part.zone !== ZONE.hair).map((part) => ({ ...part }))
 
 /** Skin tones, sampled by a per-instance value. */
-export const SKIN_TONES = [
-  '#f2d2b6',
-  '#e5b895',
-  '#c98f68',
-  '#a06a44',
-  '#79482c',
-  '#5a341f',
-]
+export const SKIN_TONES = ['#f2d2b6', '#e5b895', '#c98f68', '#a06a44', '#79482c', '#5a341f']
 
 export const LEG_COLORS = ['#3a4355', '#4a4a52', '#2f3a46', '#5a4e44', '#36455a']
 export const HAIR_COLORS = ['#2b2118', '#3f2d20', '#6b4a2a', '#8c8c8c', '#1b1b1f']

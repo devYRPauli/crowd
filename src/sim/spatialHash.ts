@@ -75,10 +75,22 @@ export class SpatialHash {
   /** Visit every id within `radius` of the point. The callback may be called for items slightly outside. */
   query(x: number, y: number, radius: number, visit: (id: number) => void): void {
     if (this.count === 0) return
-    const minCol = Math.min(this.cols - 1, Math.max(0, ((x - radius - this.originX) * this.invCell) | 0))
-    const maxCol = Math.min(this.cols - 1, Math.max(0, ((x + radius - this.originX) * this.invCell) | 0))
-    const minRow = Math.min(this.rows - 1, Math.max(0, ((y - radius - this.originY) * this.invCell) | 0))
-    const maxRow = Math.min(this.rows - 1, Math.max(0, ((y + radius - this.originY) * this.invCell) | 0))
+    const minCol = Math.min(
+      this.cols - 1,
+      Math.max(0, ((x - radius - this.originX) * this.invCell) | 0),
+    )
+    const maxCol = Math.min(
+      this.cols - 1,
+      Math.max(0, ((x + radius - this.originX) * this.invCell) | 0),
+    )
+    const minRow = Math.min(
+      this.rows - 1,
+      Math.max(0, ((y - radius - this.originY) * this.invCell) | 0),
+    )
+    const maxRow = Math.min(
+      this.rows - 1,
+      Math.max(0, ((y + radius - this.originY) * this.invCell) | 0),
+    )
     for (let row = minRow; row <= maxRow; row++) {
       const base = row * this.cols
       for (let col = minCol; col <= maxCol; col++) {

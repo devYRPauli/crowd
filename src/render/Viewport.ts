@@ -39,7 +39,13 @@ import type { Bounds } from '../core/math/geometry'
 import { CameraRig, type ViewPreset } from './CameraRig'
 import { MaterialLibrary, type ThemeName } from './theme'
 import { GroundGrid } from './overlays/GroundGrid'
-import { PlanRenderer, DEFAULT_PLAN_OPTIONS, type PlanRenderOptions, polygonLine, polylineGeometry } from './PlanRenderer'
+import {
+  PlanRenderer,
+  DEFAULT_PLAN_OPTIONS,
+  type PlanRenderOptions,
+  polygonLine,
+  polylineGeometry,
+} from './PlanRenderer'
 import { LabelLayer, type Label } from './LabelLayer'
 import { furnitureVisualPolygon, servicePolygon, wallPolygon } from '../core/model/planGeometry'
 
@@ -227,11 +233,7 @@ export class Viewport {
     const camera = this.rig.camera
     this.grid.update(camera.position, this.rig.distance)
     this.sun.target.position.set(this.rig.targetPoint.x, 0, this.rig.targetPoint.z)
-    this.sun.position.set(
-      this.rig.targetPoint.x - 18,
-      30,
-      this.rig.targetPoint.z - 14,
-    )
+    this.sun.position.set(this.rig.targetPoint.x - 18, 30, this.rig.targetPoint.z - 14)
     this.sun.target.updateMatrixWorld()
     this.renderer.render(this.scene, camera)
     this.labels.update(camera, this.width, this.height)
@@ -377,9 +379,15 @@ export class Viewport {
     const vertices: number[] = []
     for (let i = 1; i < points.length - 1; i++) {
       vertices.push(
-        points[0].x, height, points[0].y,
-        points[i].x, height, points[i].y,
-        points[i + 1].x, height, points[i + 1].y,
+        points[0].x,
+        height,
+        points[0].y,
+        points[i].x,
+        height,
+        points[i].y,
+        points[i + 1].x,
+        height,
+        points[i + 1].y,
       )
     }
     const geometry = new BufferGeometry()
@@ -400,7 +408,10 @@ export class Viewport {
       const loop = new LineLoop(polygonLine(polygon, 0.035), this.materials.line(color, opacity))
       loop.renderOrder = 30
       this.selectionGroup.add(loop)
-      const fill = new Mesh(this.fillGeometry(polygon, 0.03), this.materials.overlay(color, opacity * 0.22))
+      const fill = new Mesh(
+        this.fillGeometry(polygon, 0.03),
+        this.materials.overlay(color, opacity * 0.22),
+      )
       fill.renderOrder = 29
       this.selectionGroup.add(fill)
     }
@@ -669,5 +680,3 @@ export class Viewport {
     return this.renderer
   }
 }
-
-

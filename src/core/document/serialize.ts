@@ -22,7 +22,12 @@ import type {
   Zone,
 } from '../model/types'
 import { SCHEMA_VERSION } from '../model/types'
-import { AGENT_PROFILES, DEFAULT_PROFILE_MIX, DEFAULT_SETTINGS, createScenario } from '../model/defaults'
+import {
+  AGENT_PROFILES,
+  DEFAULT_PROFILE_MIX,
+  DEFAULT_SETTINGS,
+  createScenario,
+} from '../model/defaults'
 import { newDocumentId, newId } from '../model/ids'
 import type { Vec2 } from '../math/vec2'
 import type { Distribution } from '../math/random'
@@ -52,8 +57,7 @@ const point = (value: unknown, fallback: Vec2 = { x: 0, y: 0 }): Vec2 => {
   return { ...fallback }
 }
 
-const points = (value: unknown): Vec2[] =>
-  Array.isArray(value) ? value.map((p) => point(p)) : []
+const points = (value: unknown): Vec2[] => (Array.isArray(value) ? value.map((p) => point(p)) : [])
 
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 
@@ -330,7 +334,9 @@ export const parseDocument = (input: unknown): ParseResult => {
     .map((o) => parseOpening(o, wallIds))
     .filter((o): o is Opening => o !== null)
   if (openings.length !== openingsRaw.length) {
-    warnings.push(`${openingsRaw.length - openings.length} opening(s) referenced a missing wall and were dropped.`)
+    warnings.push(
+      `${openingsRaw.length - openings.length} opening(s) referenced a missing wall and were dropped.`,
+    )
   }
 
   const plan: Plan = {
@@ -399,4 +405,10 @@ export const parseDocumentJson = (text: string): ParseResult => {
 export const serializeDocument = (doc: CrowdDocument): string => JSON.stringify(doc, null, 2)
 
 export const documentFileName = (doc: CrowdDocument): string =>
-  `${doc.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'venue'}.crowd.json`
+  `${
+    doc.name
+      .replace(/[^\w\- ]+/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .toLowerCase() || 'venue'
+  }.crowd.json`

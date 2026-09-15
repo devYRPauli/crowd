@@ -124,7 +124,14 @@ export const AGENT_STATE_COLORS = {
 export type AgentStateName = keyof typeof AGENT_STATE_COLORS
 
 /** Re-exported so the renderer and the UI classify density the same way. */
-export { LOS_TABLES, losFor, losIndex, LOS_COLORS, CROWD_SAFETY, crowdSafetyLevel } from '../sim/metrics/los'
+export {
+  LOS_TABLES,
+  losFor,
+  losIndex,
+  LOS_COLORS,
+  CROWD_SAFETY,
+  crowdSafetyLevel,
+} from '../sim/metrics/los'
 export type { FacilityType, LosBand } from '../sim/metrics/los'
 
 /** Shared material cache, rebuilt when the theme changes. */

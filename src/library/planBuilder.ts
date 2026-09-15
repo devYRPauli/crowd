@@ -89,7 +89,13 @@ export class PlanBuilder {
     return created
   }
 
-  place(catalogId: string, x: number, y: number, rotation = 0, options: Partial<FurnitureItem> = {}): FurnitureItem {
+  place(
+    catalogId: string,
+    x: number,
+    y: number,
+    rotation = 0,
+    options: Partial<FurnitureItem> = {},
+  ): FurnitureItem {
     const created: FurnitureItem = {
       id: newId('item'),
       catalogId,
@@ -141,7 +147,9 @@ export class PlanBuilder {
   /** Rows of theatre seating facing +Y. */
   seatingBlock(x: number, y: number, rowCount: number, width: number, rowSpacing = 0.95): void {
     for (let row = 0; row < rowCount; row++) {
-      this.place('seat-row', x, y + row * rowSpacing, Math.PI, { size: { width, depth: 0.7, height: 0.95 } })
+      this.place('seat-row', x, y + row * rowSpacing, Math.PI, {
+        size: { width, depth: 0.7, height: 0.95 },
+      })
     }
   }
 
@@ -207,7 +215,11 @@ export class PlanBuilder {
   }
 }
 
-export const step = (kind: ItineraryStep['kind'], targetId?: string, extra: Partial<ItineraryStep> = {}): ItineraryStep => ({
+export const step = (
+  kind: ItineraryStep['kind'],
+  targetId?: string,
+  extra: Partial<ItineraryStep> = {},
+): ItineraryStep => ({
   id: newId('step'),
   kind,
   ...(targetId ? { targetId } : {}),

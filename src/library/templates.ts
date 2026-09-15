@@ -11,7 +11,12 @@
 
 import type { CrowdDocument, Population, Scenario } from '../core/model/types'
 import { SCHEMA_VERSION } from '../core/model/types'
-import { AGENT_PROFILES, DEFAULT_PROFILE_MIX, DEFAULT_SETTINGS, POPULATION_COLORS } from '../core/model/defaults'
+import {
+  AGENT_PROFILES,
+  DEFAULT_PROFILE_MIX,
+  DEFAULT_SETTINGS,
+  POPULATION_COLORS,
+} from '../core/model/defaults'
 import { newDocumentId, newId } from '../core/model/ids'
 import { PlanBuilder, step } from './planBuilder'
 
@@ -42,7 +47,9 @@ const makeDocument = (
   }
 }
 
-const population = (overrides: Partial<Population> & Pick<Population, 'name' | 'count' | 'entryIds' | 'itinerary'>): Population => ({
+const population = (
+  overrides: Partial<Population> & Pick<Population, 'name' | 'count' | 'entryIds' | 'itinerary'>,
+): Population => ({
   id: newId('pop'),
   color: POPULATION_COLORS[0],
   arrival: { kind: 'uniform', startS: 0, windowS: 600 },
@@ -67,20 +74,28 @@ const coffeeBar = (): CrowdDocument => {
   b.window(room.west, 7, 2.4)
   b.window(room.north, 5, 3)
 
-  const counter = b.service('Coffee bar', 11.2, 7.6, Math.PI, 2, {
-    kind: 'lognormal',
-    mean: 42,
-    sd: 16,
-    min: 12,
-  }, {
-    width: 3.2,
-    depth: 0.8,
-    queue: [
-      { x: 11.2, y: 6.4 },
-      { x: 11.2, y: 3.2 },
-      { x: 7.6, y: 3.2 },
-    ],
-  })
+  const counter = b.service(
+    'Coffee bar',
+    11.2,
+    7.6,
+    Math.PI,
+    2,
+    {
+      kind: 'lognormal',
+      mean: 42,
+      sd: 16,
+      min: 12,
+    },
+    {
+      width: 3.2,
+      depth: 0.8,
+      queue: [
+        { x: 11.2, y: 6.4 },
+        { x: 11.2, y: 3.2 },
+        { x: 7.6, y: 3.2 },
+      ],
+    },
+  )
   b.place('coffee-station', 12.6, 9.2, Math.PI)
   b.place('shelving', 8.6, 9.5, Math.PI)
 
@@ -115,7 +130,10 @@ const coffeeBar = (): CrowdDocument => {
         arrival: { kind: 'peak', startS: 0, windowS: 1800, peakAt: 0.35, spread: 0.16 },
         itinerary: [
           step('service', counter.id),
-          step('seat', seating.id, { duration: { kind: 'lognormal', mean: 720, sd: 300, min: 180 }, probability: 0.55 }),
+          step('seat', seating.id, {
+            duration: { kind: 'lognormal', mean: 720, sd: 300, min: 180 },
+            probability: 0.55,
+          }),
           step('exit', exit.id),
         ],
       }),
@@ -131,19 +149,31 @@ const conference = (): CrowdDocument => {
   b.door(hall.south, 4, 2.4)
   b.door(hall.south, 12, 2.4)
   // Partition between the foyer and the session room.
-  const partition = b.wall({ x: 0, y: 12 }, { x: 30, y: 12 }, { kind: 'partition', thickness: 0.15 })
+  const partition = b.wall(
+    { x: 0, y: 12 },
+    { x: 30, y: 12 },
+    { kind: 'partition', thickness: 0.15 },
+  )
   b.door(partition, 8, 2.4)
   b.door(partition, 22, 2.4)
 
   const desks = [6, 11, 16, 21].map((x, index) =>
-    b.service(`Registration ${index + 1}`, x, 10.6, Math.PI, 1, { kind: 'lognormal', mean: 38, sd: 14, min: 10 }, {
-      width: 2.0,
-      depth: 0.8,
-      queue: [
-        { x, y: 9.4 },
-        { x, y: 4.2 },
-      ],
-    }),
+    b.service(
+      `Registration ${index + 1}`,
+      x,
+      10.6,
+      Math.PI,
+      1,
+      { kind: 'lognormal', mean: 38, sd: 14, min: 10 },
+      {
+        width: 2.0,
+        depth: 0.8,
+        queue: [
+          { x, y: 9.4 },
+          { x, y: 4.2 },
+        ],
+      },
+    ),
   )
   for (const x of [6, 11, 16, 21]) b.place('counter-reception', x, 10.6, Math.PI)
   b.place('banner', 2.0, 10.4, Math.PI)
@@ -158,8 +188,12 @@ const conference = (): CrowdDocument => {
   b.place('projector-screen', 15, 19.4, 0, { size: { width: 6, depth: 0.2, height: 3.4 } })
   b.place('lectern', 19.5, 18.6)
   for (let row = 0; row < 7; row++) {
-    b.place('seat-row', 9.5, 13.4 + row * 0.95, Math.PI, { size: { width: 8.4, depth: 0.7, height: 0.95 } })
-    b.place('seat-row', 20.5, 13.4 + row * 0.95, Math.PI, { size: { width: 8.4, depth: 0.7, height: 0.95 } })
+    b.place('seat-row', 9.5, 13.4 + row * 0.95, Math.PI, {
+      size: { width: 8.4, depth: 0.7, height: 0.95 },
+    })
+    b.place('seat-row', 20.5, 13.4 + row * 0.95, Math.PI, {
+      size: { width: 8.4, depth: 0.7, height: 0.95 },
+    })
   }
 
   const entryA = b.zone('entry', 3.0, 0.3, 5.2, 1.8, 'Main entrance')
@@ -202,38 +236,67 @@ const gallery = (): CrowdDocument => {
   b.door(room.south, 3, 2.2)
   b.door(room.east, 8, 1.6)
   // Interior partitions that make a route rather than one big box.
-  const p1 = b.wall({ x: 8, y: 0.2 }, { x: 8, y: 9 }, { kind: 'partition', thickness: 0.2, height: 3 })
-  const p2 = b.wall({ x: 16, y: 7 }, { x: 16, y: 15.8 }, { kind: 'partition', thickness: 0.2, height: 3 })
+  const p1 = b.wall(
+    { x: 8, y: 0.2 },
+    { x: 8, y: 9 },
+    { kind: 'partition', thickness: 0.2, height: 3 },
+  )
+  const p2 = b.wall(
+    { x: 16, y: 7 },
+    { x: 16, y: 15.8 },
+    { kind: 'partition', thickness: 0.2, height: 3 },
+  )
   b.door(p1, 5.5, 2.0, 'opening')
   b.door(p2, 4.0, 2.0, 'opening')
 
   for (const [x, y, rot] of [
-    [3, 15.7, 0], [6, 15.7, 0], [12, 15.7, 0], [20, 15.7, 0],
-    [7.7, 3, Math.PI / 2], [7.7, 6.5, Math.PI / 2], [16.3, 10, -Math.PI / 2], [16.3, 13.5, -Math.PI / 2],
-    [23.7, 4, -Math.PI / 2], [23.7, 11, -Math.PI / 2],
+    [3, 15.7, 0],
+    [6, 15.7, 0],
+    [12, 15.7, 0],
+    [20, 15.7, 0],
+    [7.7, 3, Math.PI / 2],
+    [7.7, 6.5, Math.PI / 2],
+    [16.3, 10, -Math.PI / 2],
+    [16.3, 13.5, -Math.PI / 2],
+    [23.7, 4, -Math.PI / 2],
+    [23.7, 11, -Math.PI / 2],
   ] as Array<[number, number, number]>) {
     b.place('artwork', x, y, rot)
   }
   b.place('column-round', 12, 8)
   b.place('column-round', 18, 4)
 
-  const bar = b.service('Drinks bar', 21.4, 14.8, Math.PI, 2, { kind: 'lognormal', mean: 28, sd: 10, min: 8 }, {
-    width: 3.0,
-    depth: 0.8,
-    queue: [
-      { x: 21.4, y: 13.6 },
-      { x: 21.4, y: 10.0 },
-    ],
-  })
+  const bar = b.service(
+    'Drinks bar',
+    21.4,
+    14.8,
+    Math.PI,
+    2,
+    { kind: 'lognormal', mean: 28, sd: 10, min: 8 },
+    {
+      width: 3.0,
+      depth: 0.8,
+      queue: [
+        { x: 21.4, y: 13.6 },
+        { x: 21.4, y: 10.0 },
+      ],
+    },
+  )
   b.place('counter-bar', 21.4, 14.8, Math.PI, { size: { width: 3.0, depth: 0.7, height: 1.1 } })
   for (const x of [18.0, 19.4, 20.8]) b.place('table-poseur', x, 8.6)
   b.place('plant-tree', 1.6, 8.0)
 
   const entry = b.zone('entry', 2.0, 0.35, 4.2, 1.8, 'Front door')
   const exit = b.zone('exit', 2.0, 0.35, 4.2, 1.8, 'Front door (out)')
-  const westWing = b.zone('waypoint', 0.6, 9.5, 7.4, 15.2, 'West wall', { dwell: { kind: 'lognormal', mean: 210, sd: 90, min: 45 } })
-  const eastWing = b.zone('waypoint', 9.0, 1.0, 15.2, 6.4, 'East wall', { dwell: { kind: 'lognormal', mean: 210, sd: 90, min: 45 } })
-  const backWing = b.zone('waypoint', 17.0, 8.0, 23.4, 14.0, 'Back room', { dwell: { kind: 'lognormal', mean: 180, sd: 80, min: 40 } })
+  const westWing = b.zone('waypoint', 0.6, 9.5, 7.4, 15.2, 'West wall', {
+    dwell: { kind: 'lognormal', mean: 210, sd: 90, min: 45 },
+  })
+  const eastWing = b.zone('waypoint', 9.0, 1.0, 15.2, 6.4, 'East wall', {
+    dwell: { kind: 'lognormal', mean: 210, sd: 90, min: 45 },
+  })
+  const backWing = b.zone('waypoint', 17.0, 8.0, 23.4, 14.0, 'Back room', {
+    dwell: { kind: 'lognormal', mean: 180, sd: 80, min: 40 },
+  })
 
   return makeDocument('Gallery opening', b.build(), {
     name: 'Private view',
@@ -271,14 +334,22 @@ const pollingStation = (): CrowdDocument => {
   b.door(room.north, 15, 1.6)
 
   const checkIn = [5, 9].map((x, index) =>
-    b.service(`Check-in ${index + 1}`, x, 9.6, Math.PI, 1, { kind: 'lognormal', mean: 55, sd: 20, min: 20 }, {
-      width: 1.8,
-      depth: 0.8,
-      queue: [
-        { x, y: 8.4 },
-        { x, y: 3.4 },
-      ],
-    }),
+    b.service(
+      `Check-in ${index + 1}`,
+      x,
+      9.6,
+      Math.PI,
+      1,
+      { kind: 'lognormal', mean: 55, sd: 20, min: 20 },
+      {
+        width: 1.8,
+        depth: 0.8,
+        queue: [
+          { x, y: 8.4 },
+          { x, y: 3.4 },
+        ],
+      },
+    ),
   )
   for (const x of [5, 9]) b.place('counter-reception', x, 9.6, Math.PI)
   for (const x of [12.5, 14.0, 15.5]) {
@@ -349,15 +420,23 @@ const concourse = (): CrowdDocument => {
   b.place('bin', 35, 2)
   b.place('plant-tree', 34, 16)
 
-  const gate = b.service('Ticket gate', 28, 9.6, Math.PI, 4, { kind: 'lognormal', mean: 4.5, sd: 1.6, min: 1.5 }, {
-    width: 5.2,
-    depth: 0.6,
-    queueSpacing: 0.55,
-    queue: [
-      { x: 28, y: 8.4 },
-      { x: 28, y: 4.0 },
-    ],
-  })
+  const gate = b.service(
+    'Ticket gate',
+    28,
+    9.6,
+    Math.PI,
+    4,
+    { kind: 'lognormal', mean: 4.5, sd: 1.6, min: 1.5 },
+    {
+      width: 5.2,
+      depth: 0.6,
+      queueSpacing: 0.55,
+      queue: [
+        { x: 28, y: 8.4 },
+        { x: 28, y: 4.0 },
+      ],
+    },
+  )
 
   const west = b.zone('entry', 0.3, 4.5, 1.8, 13.5, 'West entrance')
   const south = b.zone('entry', 18.0, 0.3, 22.0, 1.6, 'Street stair')
@@ -427,23 +506,39 @@ const banquet = (): CrowdDocument => {
     }
   }
 
-  const bar = b.service('Bar', 2.4, 17.6, Math.PI, 2, { kind: 'lognormal', mean: 34, sd: 12, min: 10 }, {
-    width: 3.4,
-    depth: 0.8,
-    queue: [
-      { x: 2.4, y: 16.4 },
-      { x: 2.4, y: 12.4 },
-    ],
-  })
+  const bar = b.service(
+    'Bar',
+    2.4,
+    17.6,
+    Math.PI,
+    2,
+    { kind: 'lognormal', mean: 34, sd: 12, min: 10 },
+    {
+      width: 3.4,
+      depth: 0.8,
+      queue: [
+        { x: 2.4, y: 16.4 },
+        { x: 2.4, y: 12.4 },
+      ],
+    },
+  )
   b.place('counter-bar', 2.4, 17.6, Math.PI, { size: { width: 3.4, depth: 0.7, height: 1.1 } })
-  const buffet = b.service('Buffet', 25.6, 17.6, Math.PI, 3, { kind: 'lognormal', mean: 46, sd: 15, min: 18 }, {
-    width: 4.0,
-    depth: 0.9,
-    queue: [
-      { x: 25.6, y: 16.2 },
-      { x: 25.6, y: 11.0 },
-    ],
-  })
+  const buffet = b.service(
+    'Buffet',
+    25.6,
+    17.6,
+    Math.PI,
+    3,
+    { kind: 'lognormal', mean: 46, sd: 15, min: 18 },
+    {
+      width: 4.0,
+      depth: 0.9,
+      queue: [
+        { x: 25.6, y: 16.2 },
+        { x: 25.6, y: 11.0 },
+      ],
+    },
+  )
   b.place('counter-buffet', 25.6, 17.6, Math.PI, { size: { width: 4.0, depth: 0.8, height: 0.9 } })
   b.place('plant-tree', 13.5, 10.0)
 
@@ -474,7 +569,9 @@ const banquet = (): CrowdDocument => {
         itinerary: [
           step('service', bar.id, { probability: 0.75 }),
           step('service', buffet.id),
-          step('seat', seatingZone.id, { duration: { kind: 'normal', mean: 2400, sd: 400, min: 900 } }),
+          step('seat', seatingZone.id, {
+            duration: { kind: 'normal', mean: 2400, sd: 400, min: 900 },
+          }),
           step('exit', exit.id),
         ],
       }),
@@ -486,9 +583,13 @@ const banquet = (): CrowdDocument => {
         arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
         profileMix: [{ profileId: 'staff', weight: 1 }],
         itinerary: [
-          step('dwell', staffStation.id, { duration: { kind: 'uniform', mean: 240, min: 90, max: 480 } }),
+          step('dwell', staffStation.id, {
+            duration: { kind: 'uniform', mean: 240, min: 90, max: 480 },
+          }),
           step('goto', seatingZone.id),
-          step('dwell', staffStation.id, { duration: { kind: 'uniform', mean: 240, min: 90, max: 480 } }),
+          step('dwell', staffStation.id, {
+            duration: { kind: 'uniform', mean: 240, min: 90, max: 480 },
+          }),
           step('exit', exitB.id),
         ],
       }),
@@ -508,7 +609,8 @@ export const TEMPLATES: Template[] = [
     id: 'conference',
     name: 'Conference registration',
     summary: 'A 30 × 20 m foyer with four registration desks feeding a 300-seat session room.',
-    teaches: 'Queue balancing across parallel desks, and the doorway surge when the session starts.',
+    teaches:
+      'Queue balancing across parallel desks, and the doorway surge when the session starts.',
     build: conference,
   },
   {

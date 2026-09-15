@@ -40,7 +40,8 @@ export type ToolId =
   | 'queue'
   | 'measure'
 
-export type ZoneToolKind = 'entry' | 'exit' | 'waypoint' | 'obstacle' | 'keep-clear' | 'seating' | 'measure'
+export type ZoneToolKind =
+  'entry' | 'exit' | 'waypoint' | 'obstacle' | 'keep-clear' | 'seating' | 'measure'
 
 export interface ToolOptions {
   /** Catalog id the furniture tool places. */

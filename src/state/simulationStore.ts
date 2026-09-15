@@ -84,10 +84,16 @@ let runCounter = 0
 
 const ensureWorker = (onMessage: (message: WorkerResponse) => void): Worker => {
   if (worker) return worker
-  worker = new Worker(new URL('../worker/simulation.worker.ts', import.meta.url), { type: 'module' })
+  worker = new Worker(new URL('../worker/simulation.worker.ts', import.meta.url), {
+    type: 'module',
+  })
   worker.onmessage = (event: MessageEvent<WorkerResponse>) => onMessage(event.data)
   worker.onerror = (event) => {
-    onMessage({ type: 'error', runId: '', message: event.message || 'The simulation worker failed.' })
+    onMessage({
+      type: 'error',
+      runId: '',
+      message: event.message || 'The simulation worker failed.',
+    })
   }
   return worker
 }
@@ -115,7 +121,8 @@ export const useSimulation = create<SimulationState>()((set, get) => {
       case 'frame': {
         if (message.runId !== get().runId) return
         const density = new Uint8Array(message.density)
-        if (densityBuffer.length !== density.length) densityBuffer = new Float32Array(density.length)
+        if (densityBuffer.length !== density.length)
+          densityBuffer = new Float32Array(density.length)
         decodeDensity(density, densityBuffer)
         set({
           frame: {

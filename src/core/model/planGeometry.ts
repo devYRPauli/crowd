@@ -20,14 +20,7 @@ import {
   rectPolygon,
   unionBounds,
 } from '../math/geometry'
-import type {
-  FurnitureItem,
-  Opening,
-  Plan,
-  ServicePoint,
-  Wall,
-  Zone,
-} from './types'
+import type { FurnitureItem, Opening, Plan, ServicePoint, Wall, Zone } from './types'
 import { resolveCatalogItem, type SeatSlot } from '../../library/catalog'
 
 /** Openings at floor level let people through; windows and high gates do not. */
@@ -270,7 +263,14 @@ export const planBounds = (plan: Plan, margin = 0): Bounds => {
     consume(serviceQueue(sp))
   }
   if (plan.backdrop?.visible) {
-    consume(rectPolygon(plan.backdrop.position, plan.backdrop.width, plan.backdrop.depth, plan.backdrop.rotation))
+    consume(
+      rectPolygon(
+        plan.backdrop.position,
+        plan.backdrop.width,
+        plan.backdrop.depth,
+        plan.backdrop.rotation,
+      ),
+    )
   }
   if (bounds.minX === Infinity) return { minX: -10, minY: -10, maxX: 10, maxY: 10 }
   return {

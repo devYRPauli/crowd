@@ -396,8 +396,12 @@ export class Simulation {
     }
 
     const speed =
-      rng.truncatedNormal(profile.speed.mean, profile.speed.sd, profile.speed.min, profile.speed.max) *
-      this.scenario.speedFactor
+      rng.truncatedNormal(
+        profile.speed.mean,
+        profile.speed.sd,
+        profile.speed.min,
+        profile.speed.max,
+      ) * this.scenario.speedFactor
 
     const agent: Agent = {
       id: this.agents.length,
@@ -582,8 +586,7 @@ export class Simulation {
       const seat = this.world.seats[i]
       if (zone && !pointInPolygon(seat.position, zone.polygon)) continue
       // Prefer near seats, but jitter so a table fills plausibly rather than in index order.
-      const score =
-        distance(seat.position, { x: agent.x, y: agent.y }) * rng.uniform(0.85, 1.25)
+      const score = distance(seat.position, { x: agent.x, y: agent.y }) * rng.uniform(0.85, 1.25)
       if (score < bestScore) {
         bestScore = score
         best = i
@@ -884,7 +887,8 @@ export class Simulation {
       if (!agent) continue
       const arrived =
         agent.exactTarget !== null &&
-        distance({ x: agent.x, y: agent.y }, agent.exactTarget) <= ARRIVE_RADIUS + agent.radius * 0.5
+        distance({ x: agent.x, y: agent.y }, agent.exactTarget) <=
+          ARRIVE_RADIUS + agent.radius * 0.5
 
       switch (agent.state) {
         case 'walking': {
@@ -1543,7 +1547,9 @@ export class Simulation {
     const finished = this.journeys.filter((j) => j.totalTime !== null)
     const times = finished.map((j) => j.totalTime as number).sort((a, b) => a - b)
     const mean = times.length ? times.reduce((s, t) => s + t, 0) / times.length : 0
-    const p95 = times.length ? times[Math.min(times.length - 1, Math.floor(times.length * 0.95))] : 0
+    const p95 = times.length
+      ? times[Math.min(times.length - 1, Math.floor(times.length * 0.95))]
+      : 0
     const queueTimes = this.journeys.map((j) => j.queueTime)
     const services = this.serviceSummaries()
     const totalLos = Array.from(this.losSeconds).reduce((s, v) => s + v, 0) || 1
@@ -1554,9 +1560,9 @@ export class Simulation {
 
     const clearanceIndex = Math.floor(finished.length * 0.95)
     const clearance = finished.length
-      ? [...finished].sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0))[
+      ? ([...finished].sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0))[
           Math.min(finished.length - 1, clearanceIndex)
-        ].finishedAt ?? 0
+        ].finishedAt ?? 0)
       : 0
 
     const warnings = [...this.warnings]
@@ -1585,10 +1591,15 @@ export class Simulation {
       p95Journey: p95,
       meanWait: services.length
         ? services.reduce((s, v) => s + v.meanWait * v.served, 0) /
-          Math.max(1, services.reduce((s, v) => s + v.served, 0))
+          Math.max(
+            1,
+            services.reduce((s, v) => s + v.served, 0),
+          )
         : 0,
       maxWait: services.reduce((s, v) => Math.max(s, v.maxWait), 0),
-      meanQueueTime: queueTimes.length ? queueTimes.reduce((s, t) => s + t, 0) / queueTimes.length : 0,
+      meanQueueTime: queueTimes.length
+        ? queueTimes.reduce((s, t) => s + t, 0) / queueTimes.length
+        : 0,
       clearanceTime: clearance,
       walkableArea: this.world.stats.walkableArea,
       peakOccupancy: this.peakOccupancy,

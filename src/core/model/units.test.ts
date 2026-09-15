@@ -9,7 +9,7 @@ describe('formatLength', () => {
     expect(formatLength(3.456, 'metric')).toBe('3.46 m')
   })
   it('shows feet and inches', () => {
-    expect(formatLength(1, 'imperial')).toBe("3' 3.4\"")
+    expect(formatLength(1, 'imperial')).toBe('3\' 3.4"')
   })
 })
 

@@ -58,9 +58,7 @@ export class LabelLayer {
 
       this.projected.set(label.x, label.y, label.z).project(camera)
       const behind = this.projected.z > 1
-      const distance = camera.position.distanceTo(
-        this.projected.set(label.x, label.y, label.z),
-      )
+      const distance = camera.position.distanceTo(this.projected.set(label.x, label.y, label.z))
       this.projected.set(label.x, label.y, label.z).project(camera)
       const tooFar = label.maxDistance !== undefined && distance > label.maxDistance
       if (behind || tooFar) {

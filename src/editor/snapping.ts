@@ -119,11 +119,18 @@ const gatherCandidates = (
 
   for (const wall of doc.plan.walls) {
     if (exclude.has(wall.id)) continue
-    if (near(wall.a)) out.push({ point: wall.a, kind: 'endpoint', priority: PRIORITY.endpoint, label: 'Wall end' })
-    if (near(wall.b)) out.push({ point: wall.b, kind: 'endpoint', priority: PRIORITY.endpoint, label: 'Wall end' })
+    if (near(wall.a))
+      out.push({ point: wall.a, kind: 'endpoint', priority: PRIORITY.endpoint, label: 'Wall end' })
+    if (near(wall.b))
+      out.push({ point: wall.b, kind: 'endpoint', priority: PRIORITY.endpoint, label: 'Wall end' })
     const mid = { x: (wall.a.x + wall.b.x) / 2, y: (wall.a.y + wall.b.y) / 2 }
     if (!options.wallsOnly && near(mid)) {
-      out.push({ point: mid, kind: 'midpoint', priority: PRIORITY.midpoint, label: 'Wall midpoint' })
+      out.push({
+        point: mid,
+        kind: 'midpoint',
+        priority: PRIORITY.midpoint,
+        label: 'Wall midpoint',
+      })
     }
     const onWall = closestPointOnSegment(raw, wall.a, wall.b)
     if (distance(onWall, raw) <= tolerance + wall.thickness) {
@@ -165,7 +172,8 @@ const gatherCandidates = (
     if (exclude.has(id)) return
     if (near(center)) out.push({ point: center, kind: 'center', priority: PRIORITY.center, label })
     for (const corner of polygon) {
-      if (near(corner)) out.push({ point: corner, kind: 'endpoint', priority: PRIORITY.endpoint - 5, label })
+      if (near(corner))
+        out.push({ point: corner, kind: 'endpoint', priority: PRIORITY.endpoint - 5, label })
     }
   }
 
@@ -178,7 +186,13 @@ const gatherCandidates = (
   for (const zone of doc.plan.zones) {
     if (exclude.has(zone.id)) continue
     for (const corner of zone.polygon) {
-      if (near(corner)) out.push({ point: corner, kind: 'endpoint', priority: PRIORITY.endpoint - 10, label: 'Zone corner' })
+      if (near(corner))
+        out.push({
+          point: corner,
+          kind: 'endpoint',
+          priority: PRIORITY.endpoint - 10,
+          label: 'Zone corner',
+        })
     }
   }
 
@@ -194,7 +208,8 @@ const gatherAlignment = (
 ): Candidate[] => {
   const anchors: Vec2[] = []
   for (const item of doc.plan.furniture) if (!exclude.has(item.id)) anchors.push(item.position)
-  for (const point of doc.plan.servicePoints) if (!exclude.has(point.id)) anchors.push(point.position)
+  for (const point of doc.plan.servicePoints)
+    if (!exclude.has(point.id)) anchors.push(point.position)
   for (const wall of doc.plan.walls) {
     if (exclude.has(wall.id)) continue
     anchors.push(wall.a, wall.b)
@@ -217,7 +232,11 @@ const gatherAlignment = (
       kind: 'align-x',
       priority: PRIORITY['align-x'],
       guides: [
-        { from: { x: bestX.x, y: Math.min(bestX.y, raw.y) - GUIDE_LENGTH }, to: { x: bestX.x, y: Math.max(bestX.y, raw.y) + GUIDE_LENGTH }, kind: 'align-x' },
+        {
+          from: { x: bestX.x, y: Math.min(bestX.y, raw.y) - GUIDE_LENGTH },
+          to: { x: bestX.x, y: Math.max(bestX.y, raw.y) + GUIDE_LENGTH },
+          kind: 'align-x',
+        },
       ],
       label: 'Aligned',
     })
@@ -228,7 +247,11 @@ const gatherAlignment = (
       kind: 'align-y',
       priority: PRIORITY['align-y'],
       guides: [
-        { from: { x: Math.min(bestX?.x ?? raw.x, raw.x) - GUIDE_LENGTH, y: bestY.y }, to: { x: Math.max(raw.x, raw.x) + GUIDE_LENGTH, y: bestY.y }, kind: 'align-y' },
+        {
+          from: { x: Math.min(bestX?.x ?? raw.x, raw.x) - GUIDE_LENGTH, y: bestY.y },
+          to: { x: Math.max(raw.x, raw.x) + GUIDE_LENGTH, y: bestY.y },
+          kind: 'align-y',
+        },
       ],
       label: 'Aligned',
     })
@@ -249,11 +272,7 @@ const gatherAlignment = (
   return out
 }
 
-export const snapPoint = (
-  doc: CrowdDocument,
-  raw: Vec2,
-  options: SnapOptions,
-): SnapResult => {
+export const snapPoint = (doc: CrowdDocument, raw: Vec2, options: SnapOptions): SnapResult => {
   const tolerancePx = options.tolerancePx ?? 12
   const tolerance = Math.max(0.02, tolerancePx * options.scale)
   const objectSnap = options.objectSnap ?? doc.settings.snapToObjects

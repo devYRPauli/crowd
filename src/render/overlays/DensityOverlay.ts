@@ -122,7 +122,11 @@ export class DensityOverlay {
     const warn = new Color(CROWD_SAFETY.warnColor).convertSRGBToLinear()
     const critical = new Color(CROWD_SAFETY.criticalColor).convertSRGBToLinear()
     ;(this.material.uniforms.uWarnColor.value as Vector3).set(warn.r, warn.g, warn.b)
-    ;(this.material.uniforms.uCriticalColor.value as Vector3).set(critical.r, critical.g, critical.b)
+    ;(this.material.uniforms.uCriticalColor.value as Vector3).set(
+      critical.r,
+      critical.g,
+      critical.b,
+    )
   }
 
   setOpacity(value: number): void {

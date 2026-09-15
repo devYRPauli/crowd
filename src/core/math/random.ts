@@ -26,7 +26,7 @@ export class Rng {
 
   constructor(seed: number | string = 1) {
     const numeric = typeof seed === 'string' ? hashString(seed) : Math.floor(seed)
-    this.state = (numeric >>> 0) || 0x9e3779b9
+    this.state = numeric >>> 0 || 0x9e3779b9
   }
 
   /** A generator whose stream is derived from this one's seed and a label. */

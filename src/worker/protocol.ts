@@ -98,11 +98,7 @@ export interface ProgressMessage {
 }
 
 export type WorkerResponse =
-  | ReadyMessage
-  | FrameMessage
-  | DoneMessage
-  | ErrorMessage
-  | ProgressMessage
+  ReadyMessage | FrameMessage | DoneMessage | ErrorMessage | ProgressMessage
 
 /** Density is streamed as bytes; this is the value one byte represents. */
 export const DENSITY_SCALE = 6 / 255

@@ -7,14 +7,7 @@
  * the eye something to measure against.
  */
 
-import {
-  Color,
-  DoubleSide,
-  Mesh,
-  PlaneGeometry,
-  ShaderMaterial,
-  type Vector3,
-} from 'three'
+import { Color, DoubleSide, Mesh, PlaneGeometry, ShaderMaterial, type Vector3 } from 'three'
 import type { Palette } from '../theme'
 
 const VERTEX = /* glsl */ `

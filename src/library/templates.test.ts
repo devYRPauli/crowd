@@ -6,45 +6,54 @@ import { detectRooms } from '../core/model/rooms'
 import { planSeats } from '../core/model/planGeometry'
 
 describe('starter templates', () => {
-  it.each(TEMPLATES.map((t) => [t.id, t] as const))('%s builds a coherent plan', (_id, template) => {
-    const doc = template.build()
-    expect(doc.plan.walls.length).toBeGreaterThan(3)
-    expect(doc.plan.zones.some((z) => z.kind === 'entry')).toBe(true)
-    expect(doc.plan.zones.some((z) => z.kind === 'exit')).toBe(true)
-    expect(doc.scenario.populations.length).toBeGreaterThan(0)
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))(
+    '%s builds a coherent plan',
+    (_id, template) => {
+      const doc = template.build()
+      expect(doc.plan.walls.length).toBeGreaterThan(3)
+      expect(doc.plan.zones.some((z) => z.kind === 'entry')).toBe(true)
+      expect(doc.plan.zones.some((z) => z.kind === 'exit')).toBe(true)
+      expect(doc.scenario.populations.length).toBeGreaterThan(0)
 
-    // Every opening must belong to a wall that exists.
-    const wallIds = new Set(doc.plan.walls.map((w) => w.id))
-    for (const opening of doc.plan.openings) expect(wallIds.has(opening.wallId)).toBe(true)
+      // Every opening must belong to a wall that exists.
+      const wallIds = new Set(doc.plan.walls.map((w) => w.id))
+      for (const opening of doc.plan.openings) expect(wallIds.has(opening.wallId)).toBe(true)
 
-    // Every itinerary step must point at something in the plan.
-    const targets = new Set([
-      ...doc.plan.zones.map((z) => z.id),
-      ...doc.plan.servicePoints.map((s) => s.id),
-    ])
-    for (const population of doc.scenario.populations) {
-      for (const entryId of population.entryIds) expect(targets.has(entryId)).toBe(true)
-      for (const step of population.itinerary) {
-        if (step.targetId) expect(targets.has(step.targetId)).toBe(true)
-        for (const id of step.targetIds ?? []) expect(targets.has(id)).toBe(true)
+      // Every itinerary step must point at something in the plan.
+      const targets = new Set([
+        ...doc.plan.zones.map((z) => z.id),
+        ...doc.plan.servicePoints.map((s) => s.id),
+      ])
+      for (const population of doc.scenario.populations) {
+        for (const entryId of population.entryIds) expect(targets.has(entryId)).toBe(true)
+        for (const step of population.itinerary) {
+          if (step.targetId) expect(targets.has(step.targetId)).toBe(true)
+          for (const id of step.targetIds ?? []) expect(targets.has(id)).toBe(true)
+        }
       }
-    }
-  })
+    },
+  )
 
-  it.each(TEMPLATES.map((t) => [t.id, t] as const))('%s survives a save and reload', (_id, template) => {
-    const doc = template.build()
-    const reloaded = parseDocument(JSON.parse(serializeDocument(doc)))
-    expect(reloaded.warnings).toEqual([])
-    expect(reloaded.document.plan.walls).toHaveLength(doc.plan.walls.length)
-    expect(reloaded.document.plan.furniture).toHaveLength(doc.plan.furniture.length)
-    expect(reloaded.document.plan.servicePoints).toHaveLength(doc.plan.servicePoints.length)
-    expect(reloaded.document.scenario.populations).toHaveLength(doc.scenario.populations.length)
-  })
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))(
+    '%s survives a save and reload',
+    (_id, template) => {
+      const doc = template.build()
+      const reloaded = parseDocument(JSON.parse(serializeDocument(doc)))
+      expect(reloaded.warnings).toEqual([])
+      expect(reloaded.document.plan.walls).toHaveLength(doc.plan.walls.length)
+      expect(reloaded.document.plan.furniture).toHaveLength(doc.plan.furniture.length)
+      expect(reloaded.document.plan.servicePoints).toHaveLength(doc.plan.servicePoints.length)
+      expect(reloaded.document.scenario.populations).toHaveLength(doc.scenario.populations.length)
+    },
+  )
 
-  it.each(TEMPLATES.map((t) => [t.id, t] as const))('%s encloses at least one room', (_id, template) => {
-    const rooms = detectRooms(template.build().plan.walls)
-    expect(rooms.length).toBeGreaterThan(0)
-  })
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))(
+    '%s encloses at least one room',
+    (_id, template) => {
+      const rooms = detectRooms(template.build().plan.walls)
+      expect(rooms.length).toBeGreaterThan(0)
+    },
+  )
 
   it.each(TEMPLATES.map((t) => [t.id, t] as const))(
     '%s runs to completion without deadlocking',
@@ -108,7 +117,9 @@ describe('starter templates', () => {
   it('offers seats where the template lays out seating', () => {
     for (const template of TEMPLATES) {
       const doc = template.build()
-      const needsSeats = doc.scenario.populations.some((p) => p.itinerary.some((s) => s.kind === 'seat'))
+      const needsSeats = doc.scenario.populations.some((p) =>
+        p.itinerary.some((s) => s.kind === 'seat'),
+      )
       if (!needsSeats) continue
       expect(planSeats(doc.plan).length).toBeGreaterThan(0)
     }

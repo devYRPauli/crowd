@@ -7,7 +7,7 @@
  * simulation already models the wall, so the two can never drift apart.
  */
 
-import type { BufferGeometry} from 'three';
+import type { BufferGeometry } from 'three'
 import { BoxGeometry, Matrix4, Shape, ShapeGeometry, Euler } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { Opening, Plan, Wall } from '../../core/model/types'
@@ -81,7 +81,14 @@ export const buildWallGeometry = (plan: Plan): WallMeshes => {
         if (sill) target.push(sill)
         const head = wallBox(wall, start, end, headBottom, wall.height)
         if (head) target.push(head)
-        const pane = wallBox(wall, start + 0.02, end - 0.02, sillTop, headBottom, wall.thickness * 0.3)
+        const pane = wallBox(
+          wall,
+          start + 0.02,
+          end - 0.02,
+          sillTop,
+          headBottom,
+          wall.thickness * 0.3,
+        )
         if (pane) glassParts.push(pane)
       }
     }
@@ -161,7 +168,10 @@ export const polygonGeometry = (polygon: readonly Vec2[], height = 0): BufferGeo
 }
 
 /** Merge a set of polygons into one flat floor geometry. */
-export const buildFloorGeometry = (polygons: readonly Polygon[], height = 0): BufferGeometry | null => {
+export const buildFloorGeometry = (
+  polygons: readonly Polygon[],
+  height = 0,
+): BufferGeometry | null => {
   const parts = polygons.filter((p) => p.length >= 3).map((p) => polygonGeometry(p, height))
   if (parts.length === 0) return null
   const merged = mergeGeometries(parts, false)

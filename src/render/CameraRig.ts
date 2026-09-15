@@ -247,7 +247,9 @@ export class CameraRig {
     this.orthographicCamera.top = halfHeight
     this.orthographicCamera.bottom = -halfHeight
     // Keep the ortho camera well above anything in the scene so nothing clips.
-    this.orthographicCamera.position.copy(target).add(offset.clone().setLength(Math.max(distance, 60)))
+    this.orthographicCamera.position
+      .copy(target)
+      .add(offset.clone().setLength(Math.max(distance, 60)))
     this.orthographicCamera.lookAt(target)
     this.orthographicCamera.updateProjectionMatrix()
 

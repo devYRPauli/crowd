@@ -58,9 +58,14 @@ export const updateWall = (doc: CrowdDocument, id: string, patch: Partial<Wall>)
   const openings = doc.plan.openings.map((opening) => {
     if (opening.wallId !== id) return opening
     const halfWidth = Math.min(opening.width, length) / 2
-    const offset = Math.min(Math.max(opening.offset, halfWidth), Math.max(halfWidth, length - halfWidth))
+    const offset = Math.min(
+      Math.max(opening.offset, halfWidth),
+      Math.max(halfWidth, length - halfWidth),
+    )
     const width = Math.min(opening.width, length)
-    return offset === opening.offset && width === opening.width ? opening : { ...opening, offset, width }
+    return offset === opening.offset && width === opening.width
+      ? opening
+      : { ...opening, offset, width }
   })
   return withPlan(doc, { walls, openings })
 }
@@ -143,7 +148,10 @@ export const updateObject = (
 }
 
 /** Remove a set of objects, cascading openings when their wall goes. */
-export const removeObjects = (doc: CrowdDocument, refs: readonly PlanObjectRef[]): CrowdDocument => {
+export const removeObjects = (
+  doc: CrowdDocument,
+  refs: readonly PlanObjectRef[],
+): CrowdDocument => {
   if (refs.length === 0) return doc
   const wallIds = new Set(refs.filter((r) => r.kind === 'wall').map((r) => r.id))
   const openingIds = new Set(refs.filter((r) => r.kind === 'opening').map((r) => r.id))

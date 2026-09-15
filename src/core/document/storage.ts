@@ -45,7 +45,10 @@ const openDb = (): Promise<IDBDatabase> => {
   return dbPromise
 }
 
-const tx = async <T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
+const tx = async <T>(
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> => {
   const db = await openDb()
   return new Promise<T>((resolve, reject) => {
     const transaction = db.transaction(STORE, mode)
@@ -69,7 +72,10 @@ export const saveProject = async (doc: CrowdDocument): Promise<void> => {
 }
 
 export const loadProject = async (id: string): Promise<CrowdDocument | null> => {
-  const row = await tx<Row | undefined>('readonly', (store) => store.get(id) as IDBRequest<Row | undefined>)
+  const row = await tx<Row | undefined>(
+    'readonly',
+    (store) => store.get(id) as IDBRequest<Row | undefined>,
+  )
   if (!row) return null
   try {
     return parseDocument(JSON.parse(row.payload)).document

@@ -119,14 +119,7 @@ export const DEFAULT_PROFILE_MIX: Population['profileMix'] = [
   { profileId: 'wheelchair', weight: 2 },
 ]
 
-export const POPULATION_COLORS = [
-  '#4c7dd4',
-  '#d4694c',
-  '#49a884',
-  '#c9a227',
-  '#8a7fb8',
-  '#3f9ab0',
-]
+export const POPULATION_COLORS = ['#4c7dd4', '#d4694c', '#49a884', '#c9a227', '#8a7fb8', '#3f9ab0']
 
 export const createItineraryStep = (
   kind: ItineraryStep['kind'],
