@@ -116,7 +116,14 @@ export const seriesToCsv = (input: ReportInput): string => {
   const series = input.series
   if (!series) return ''
   const lines = [
-    csvRow(['time_s', 'people_inside', 'people_completed', 'mean_speed_ms', 'peak_density_m2', 'people_queueing']),
+    csvRow([
+      'time_s',
+      'people_inside',
+      'people_completed',
+      'mean_speed_ms',
+      'peak_density_m2',
+      'people_queueing',
+    ]),
   ]
   for (let i = 0; i < series.time.length; i++) {
     lines.push(
@@ -214,7 +221,9 @@ export const toBrief = (input: ReportInput): string => {
 
   lines.push('Code check (model-code indicative)')
   lines.push('-'.repeat(33))
-  lines.push(`• Occupant load for ${compliance.occupancyLabel.toLowerCase()}: ${compliance.calculatedOccupantLoad}.`)
+  lines.push(
+    `• Occupant load for ${compliance.occupancyLabel.toLowerCase()}: ${compliance.calculatedOccupantLoad}.`,
+  )
   lines.push(
     `• Exits: ${compliance.exitsProvided} marked, ${compliance.exitsRequired} required for ${compliance.designOccupantLoad} occupants.`,
   )

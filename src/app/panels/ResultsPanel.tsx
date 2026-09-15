@@ -244,14 +244,15 @@ const ExportSection = ({ onExportImage }: { onExportImage: () => void }) => {
         </button>
         <button
           className="btn"
-          onClick={() =>
-            save('series.csv', seriesToCsv(input), 'text/csv', 'Time series')
-          }
+          onClick={() => save('series.csv', seriesToCsv(input), 'text/csv', 'Time series')}
         >
           Time series CSV
         </button>
       </div>
-      <button className="btn" onClick={() => save('json', toJsonBundle(input), 'application/json', 'Report')}>
+      <button
+        className="btn"
+        onClick={() => save('json', toJsonBundle(input), 'application/json', 'Report')}
+      >
         Full report bundle (.json)
       </button>
       <p className="hint">
