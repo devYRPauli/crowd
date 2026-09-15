@@ -178,12 +178,12 @@ The difference between the two runs is the feature.
 | ------ | ---------------- | --------- | ------------- | ---------- |
 | 40     | congestion-aware | 40        | 0             | 25.9 s     |
 | 40     | shortest path    | 40        | 0             | 19.7 s     |
-| 300    | congestion-aware | 173       | **127 (42%)** | **98.2 s** |
+| 300    | congestion-aware | 182       | **118 (39%)** | **99.1 s** |
 | 300    | shortest path    | 300       | 0             | 146.8 s    |
 
 With nobody in the way the nearer door is simply the right answer and both
 settings give it. With a crowd too big for one door, congestion-aware routing
-spreads 42% of it to the far door and the hall clears **33% sooner**.
+spreads 39% of it to the far door and the hall clears **32% sooner**.
 
 This is the behaviour the tool exists to show, and it did not work until this
 was measured. Exit choice compared travel time over the _static_ field, so
@@ -192,16 +192,30 @@ door was never used. A planner asking "is a door on the far wall worth it?"
 would have been told it bought nothing — wrong in the direction that gets exits
 left out of a design.
 
-People now weigh the walk against the wait, the same way they already chose
-between service counters: how many people are ahead of you, divided by how fast
-the thing in front of them is going. A door's rate is measured rather than
-configured, because nothing in a plan states it — an exit is a zone and the
-constriction that meters it is a doorway somewhere upstream — so until a door
-has let eight people through, doors are compared on walking time alone. The
-choice is also revisited every six seconds, because the queue that makes the far
-door worth the walk has not formed yet when a person sets off, and it only
-changes for a door a quarter better, or people oscillate between two doors of
-nearly equal cost instead of leaving by either.
+People now weigh the walk against the wait: how many are ahead of you at a door,
+divided by how fast that door has actually been letting people through. Two
+details of that turned out to matter more than the idea itself.
+
+**The two are combined with a maximum, not a sum.** The queue drains while you
+walk towards it, so you are through when the door has cleared everybody already
+ahead of you _or_ when you arrive, whichever is later. Adding them double-counts
+the walk, which is the entire advantage the far door has: summed, the same crowd
+sent only 26% to the far door and took 128 s instead of 99.
+
+**A door nobody has used yet borrows the slowest rate anything in the venue has
+managed, rather than counting as free.** Free is the obvious choice and it is
+wrong in a way that bites — an unmeasured door looks like a door with no queue
+however many people are already walking towards it, so a crowd piles onto it and
+only discovers the queue it built once the door starts metering.
+
+A door's rate is measured rather than configured because nothing in a plan
+states it: an exit is a zone, and the constriction that meters it is a doorway
+somewhere upstream. The choice is revisited every six seconds, staggered across
+the crowd, because the queue that makes the far door worth the walk has not
+formed yet when a person sets off — and it only changes for a door a quarter
+better, or two doors of nearly equal cost trade places every time the congested
+field is re-solved and people oscillate between them instead of leaving by
+either.
 
 How far the split goes depends on how congestion-aware the population is, which
 is a scenario setting rather than a property of the engine. Somebody who pays no
