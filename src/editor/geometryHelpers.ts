@@ -111,6 +111,13 @@ export const objectFootprint = (doc: CrowdDocument, kind: string, id: string): V
       const wall = doc.plan.walls.find((w) => w.id === id)
       if (!wall) return null
       const dir = normalize(sub(wall.b, wall.a))
+      // A wall drawn without length still has to be selectable. There is no
+      // direction to take a normal from, so the four corners below would all
+      // land on `a`: nearestWall would keep finding the wall while the marquee
+      // could never pick it up, leaving the user no way to rubber-band it away.
+      if (dir.x === 0 && dir.y === 0) {
+        return rectPolygon(wall.a, wall.thickness, wall.thickness)
+      }
       const n = rotate(dir, Math.PI / 2)
       const half = wall.thickness / 2
       return [
@@ -128,7 +135,10 @@ export const objectFootprint = (doc: CrowdDocument, kind: string, id: string): V
     }
     case 'zone': {
       const zone = doc.plan.zones.find((z) => z.id === id)
-      return zone ? zone.polygon : null
+      // A copy, like every other kind returns: a caller that takes the result
+      // for its own and edits it would otherwise rewrite the document in place,
+      // past `apply` and past undo.
+      return zone ? zone.polygon.map((p) => ({ ...p })) : null
     }
     case 'service': {
       const point = doc.plan.servicePoints.find((s) => s.id === id)
