@@ -69,8 +69,9 @@ const ARRIVE_RADIUS = 0.34
  * Without that check, anybody whose seat or queue slot sits on the far side of a
  * wall 1.8 m away walks into the wall and stays there: the field knew the way
  * round and the shortcut threw it away. In the conference venue that stranded a
- * quarter of the room, and because they never stopped pressing forward the jam
- * detector never fired either, so they were not even reported.
+ * quarter of the room for the whole run, and they were only ever reported as
+ * not having left in time, because somebody still pressing forward at 0.16 m/s
+ * is not what either the jam detector or the give-up check is looking for.
  */
 const DIRECT_RANGE = 3.5
 const NEIGHBOUR_RANGE = 5.0
@@ -1337,8 +1338,15 @@ export class Simulation {
     if (agent.jamTime > 2.5) {
       const side = agent.id % 2 === 0 ? 1 : -1
       const strength = Math.min(1, (agent.jamTime - 2.5) / 3)
-      dirX += -dirY * side * strength
-      dirY += dirX * side * strength
+      // Both components rotate from the heading they started at. Feeding the
+      // already-rotated x back into y is not a rotation at all: somebody walking
+      // north at full sidestep strength came out heading due west, having lost
+      // every bit of their forward component, which is the opposite of getting
+      // round the obstruction.
+      const aheadX = dirX
+      const aheadY = dirY
+      dirX = aheadX - aheadY * side * strength
+      dirY = aheadY + aheadX * side * strength
       const length = Math.hypot(dirX, dirY)
       if (length > 1e-6) {
         dirX /= length
@@ -1524,10 +1532,11 @@ export class Simulation {
     }
 
     // Push anyone the passes left inside geometry back out — once for the step,
-    // not once per pass. Doing it per pass triples the shove somebody gets while
-    // easing through a tight gap, and people who were squeezing through a
-    // doorway at 0.04 m of slack were being bounced back out of it every tick
-    // and never got through at all.
+    // not once per pass. The passes are iterations of one correction and the
+    // constraint belongs after them, not inside the loop; running it per pass
+    // would triple the shove somebody gets while easing through a gap with a
+    // few centimetres of slack, for no gain, since the last pass is the only
+    // one whose positions survive the step anyway.
     for (let i = 0; i < count; i++) {
       const agent = this.agents[this.live[i]]
       const clearance = sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10)
