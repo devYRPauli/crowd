@@ -8,3 +8,4 @@ coverage/
 !.env.example
 out/
 .vite/
+study-results.json
