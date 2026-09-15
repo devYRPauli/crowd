@@ -29,6 +29,7 @@ import type { Room } from '../core/model/rooms'
 import { detectRooms } from '../core/model/rooms'
 import {
   furnitureSize,
+  openingThreshold,
   planSeats,
   serverPositions,
   serviceQueue,
@@ -339,6 +340,34 @@ export class PlanRenderer {
       )
       outline.renderOrder = 3
       this.zoneGroup.add(outline)
+    }
+
+    // A door people arrive or leave through is a way in or out in its own
+    // right, so it is marked like one: the same colours as the zones, painted
+    // on the threshold the simulation actually uses. Without this the only
+    // thing on screen distinguishing the fire door from the store cupboard is
+    // the inspector, and a plan is meant to be read by looking at it.
+    const wallsById = new Map(plan.walls.map((wall) => [wall.id, wall]))
+    for (const opening of plan.openings) {
+      if (!opening.use) continue
+      const wall = wallsById.get(opening.wallId)
+      if (!wall) continue
+      const polygon = openingThreshold(wall, opening)
+      const color = ZONE_COLORS[opening.use === 'exit' ? 'exit' : 'entry'] ?? '#4c7dd4'
+      const fill = new Mesh(
+        polygonGeometry(polygon, OUTLINE_LIFT),
+        this.materials.overlay(color, 0.3),
+      )
+      fill.userData.ref = { kind: 'opening', id: opening.id } satisfies PlanObjectRef
+      fill.renderOrder = 2
+      this.zoneGroup.add(fill)
+
+      const edge = new LineLoop(
+        polygonLine(polygon, OUTLINE_LIFT + 0.002),
+        this.materials.line(color, 0.95),
+      )
+      edge.renderOrder = 3
+      this.zoneGroup.add(edge)
     }
   }
 

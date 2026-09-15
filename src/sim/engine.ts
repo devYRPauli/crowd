@@ -44,6 +44,7 @@ import { DensityField, FlowFieldCache, PACE_LOOKAHEAD, speedFromDensity } from '
 import { computeNewVelocity, type OrcaAgentState } from './avoidance/orca'
 import { ObstacleIndex } from './avoidance/obstacleIndex'
 import { SEPARATION, separationScale } from './avoidance/separation'
+import { personalSpace } from './behaviour/proxemics'
 import { SpatialHash } from './spatialHash'
 import { scheduleArrivals, splitIntoGroups } from './agents/arrivals'
 import {
@@ -141,6 +142,8 @@ interface Agent {
   walkTime: number
   /** Simulated time at which to reconsider the way out. */
   exitReviewAt: number
+  /** Ways out this person's itinerary allows, or null for any of them. */
+  allowedExits: readonly string[] | null
   /** Closest this person has come to their current destination. */
   bestDistance: number
   /** Seconds spent barely moving while trying to walk, for jam breaking. */
@@ -545,6 +548,7 @@ export class Simulation {
       lastStepBegun: -1,
       walkTime: 0,
       exitReviewAt: 0,
+      allowedExits: null,
       bestDistance: Infinity,
       jamTime: 0,
       finishedAt: null,
@@ -643,7 +647,12 @@ export class Simulation {
           return
         }
         case 'exit': {
-          this.headForExit(agent)
+          // An itinerary may name the way out, and when it does that is not a
+          // hint: a commuter heading for the platforms must not be sent out to
+          // the street because the street door happens to be emptier. Naming
+          // several leaves the choice between them open, which is where
+          // congestion gets a say.
+          this.headForExit(agent, Simulation.stepTargets(step))
           return
         }
       }
@@ -651,7 +660,14 @@ export class Simulation {
     this.headForExit(agent)
   }
 
-  private headForExit(agent: Agent): void {
+  /** Destinations an itinerary step names, in either of the two shapes it allows. */
+  private static stepTargets(step: ItineraryStep): string[] {
+    if (step.targetIds?.length) return step.targetIds
+    return step.targetId ? [step.targetId] : []
+  }
+
+  private headForExit(agent: Agent, allowed?: readonly string[]): void {
+    agent.allowedExits = allowed && allowed.length > 0 ? allowed : null
     const best = this.nearestExit(agent)
     agent.state = 'walking'
     agent.pendingQueueId = null
@@ -747,6 +763,19 @@ export class Simulation {
     return slowest
   }
 
+  /**
+   * The ways out this person is willing to use.
+   *
+   * Everything, unless their itinerary named some — in which case those, and
+   * only if at least one of them still exists in the plan. A named exit that
+   * has been deleted since leaves them with every exit rather than none.
+   */
+  private exitsFor(agent: Agent): readonly DestinationRecord[] {
+    if (!agent.allowedExits) return this.world.exits
+    const allowed = this.world.exits.filter((exit) => agent.allowedExits?.includes(exit.id))
+    return allowed.length > 0 ? allowed : this.world.exits
+  }
+
   /** Recount who is heading where. One pass, once a step. */
   private updateExitLoads(): void {
     for (const load of this.exitLoads.values()) load.heading = 0
@@ -761,7 +790,7 @@ export class Simulation {
   private nearestExit(agent: Agent): DestinationRecord | null {
     let best: DestinationRecord | null = null
     let bestCost = Infinity
-    for (const exit of this.world.exits) {
+    for (const exit of this.exitsFor(agent)) {
       const cost = this.exitCost(exit.id, { x: agent.x, y: agent.y }, agent.routeAwareness)
       if (cost < bestCost) {
         bestCost = cost
@@ -783,13 +812,13 @@ export class Simulation {
   private reviewExit(agent: Agent): void {
     agent.exitReviewAt = this.time + EXIT_REVIEW_INTERVAL
     const current = agent.fieldTarget
-    if (!current || agent.routeAwareness <= 0.01 || this.world.exits.length < 2) return
+    if (!current || agent.routeAwareness <= 0.01 || this.exitsFor(agent).length < 2) return
     const here = { x: agent.x, y: agent.y }
     const currentCost = this.exitCost(current, here, agent.routeAwareness)
     if (!Number.isFinite(currentCost)) return
     let best: DestinationRecord | null = null
     let bestCost = currentCost * EXIT_SWITCH_MARGIN
-    for (const exit of this.world.exits) {
+    for (const exit of this.exitsFor(agent)) {
       if (exit.id === current) continue
       const cost = this.exitCost(exit.id, here, agent.routeAwareness)
       if (cost < bestCost) {
@@ -1354,6 +1383,17 @@ export class Simulation {
         continue
       }
 
+      // Air this person keeps around themselves, at the crowding they are in.
+      // It is added to each *neighbour's* radius rather than their own, because
+      // their own is what ORCA measures walls with and people brush a doorjamb
+      // in a way they will not brush a stranger.
+      const localDensity = this.density.othersAt(
+        agent.x,
+        agent.y,
+        sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0),
+      )
+      const ownSpace = personalSpace(localDensity, agent.assertiveness)
+
       this.neighbourScratch.length = 0
       this.hash.query(agent.x, agent.y, NEIGHBOUR_RANGE, (otherId) => {
         if (otherId === id) return
@@ -1367,7 +1407,7 @@ export class Simulation {
         this.neighbourScratch.push({
           position: { x: other.x, y: other.y },
           velocity: { x: other.vx, y: other.vy },
-          radius: other.radius,
+          radius: other.radius + ownSpace + personalSpace(localDensity, other.assertiveness),
           maxSpeed: other.maxSpeed,
           prefVelocity: { x: other.vx, y: other.vy },
           timeHorizon: 2.5,

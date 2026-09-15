@@ -50,6 +50,15 @@ export interface Opening {
   kind: OpeningKind
   /** Hinge side and swing direction, for drawing door leaves. */
   swing?: 'left' | 'right' | 'both' | 'none'
+  /**
+   * Whether people arrive through this door, leave through it, or both.
+   *
+   * A venue's ways in and out are doors, and saying so here rather than by
+   * drawing a zone near one means the door's own clear width meters the flow —
+   * which is the number every egress calculation turns on. Omitted, the opening
+   * is just a hole people may walk through on their way somewhere else.
+   */
+  use?: 'entry' | 'exit' | 'both'
   locked?: boolean
 }
 

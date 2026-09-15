@@ -75,6 +75,7 @@ export class PlanBuilder {
     offset: number,
     width = DEFAULT_DOOR_WIDTH,
     kind: Opening['kind'] = 'door',
+    use?: Opening['use'],
   ): Opening {
     const created: Opening = {
       id: newId('open'),
@@ -85,6 +86,7 @@ export class PlanBuilder {
       sill: 0,
       kind: width >= DOUBLE_DOOR_FROM && kind === 'door' ? 'double-door' : kind,
       swing: 'left',
+      ...(use ? { use } : {}),
     }
     this.openings.push(created)
     return created

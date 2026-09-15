@@ -67,6 +67,29 @@ export interface WallSpan {
  * The stretches of a wall that remain solid at floor level once walkable
  * openings are removed. Overlapping openings are merged.
  */
+/**
+ * The patch of floor an opening covers, straddling its wall.
+ *
+ * A door that people arrive or leave through needs somewhere to *be* — a
+ * destination with area, not a line — and the honest one is the doorway itself:
+ * as wide as the leaf and deep enough to stand on either side of the threshold.
+ * Deriving it from the opening rather than asking an author to draw a zone near
+ * one is what makes the door's own clear width meter the flow, which is the
+ * number every egress calculation turns on.
+ */
+export const openingThreshold = (wall: Wall, opening: Opening, reach = 0.4): Polygon => {
+  const dir = wallDirection(wall)
+  const n = perp(dir)
+  const halfWidth = opening.width / 2
+  const halfDepth = wall.thickness / 2 + reach
+  const centre = add(wall.a, scale(dir, opening.offset))
+  const corner = (alongSign: number, acrossSign: number): Vec2 => ({
+    x: centre.x + dir.x * halfWidth * alongSign + n.x * halfDepth * acrossSign,
+    y: centre.y + dir.y * halfWidth * alongSign + n.y * halfDepth * acrossSign,
+  })
+  return [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]
+}
+
 export const solidSpans = (wall: Wall, openings: readonly Opening[]): WallSpan[] => {
   const length = wallLength(wall)
   const gaps = openings

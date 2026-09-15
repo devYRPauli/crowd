@@ -22,7 +22,8 @@ import { wallLength } from '../../core/model/planGeometry'
 import { formatArea, formatLength } from '../../core/model/units'
 import { ZONE_LABELS } from '../../core/model/defaults'
 import { add, angleOf, fromAngle } from '../../core/math/vec2'
-import type { Zone } from '../../core/model/types'
+import type { Opening, Zone } from '../../core/model/types'
+import { DOOR_WIDTHS, WINDOW_WIDTHS, isStandard, nearestStandard } from '../../core/model/standards'
 
 const DEGREES = 180 / Math.PI
 
@@ -190,7 +191,14 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
           formatLength(opening.width, units),
         )}
         <div className="panel-body">
-          <Field label="Width">
+          <Field
+            label="Width"
+            hint={
+              isStandard(opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS, opening.width)
+                ? undefined
+                : 'Not a stock size'
+            }
+          >
             <LengthInput
               value={opening.width}
               units={units}
@@ -199,6 +207,29 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               onCommit={(width) =>
                 apply((doc) => updateOpening(doc, opening.id, { width }), 'Set width')
               }
+            />
+          </Field>
+          <Field label="Stock size">
+            <Select
+              value={
+                nearestStandard(
+                  opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS,
+                  opening.width,
+                )?.imperial ?? ''
+              }
+              onChange={(imperial) => {
+                const sizes = opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS
+                const chosen = sizes.find((size) => size.imperial === imperial)
+                if (!chosen) return
+                apply(
+                  (doc) => updateOpening(doc, opening.id, { width: chosen.metres }),
+                  'Set width',
+                )
+              }}
+              options={(opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS).map((size) => ({
+                value: size.imperial,
+                label: size.note ? `${size.imperial} — ${size.note}` : size.imperial,
+              }))}
             />
           </Field>
           <Slider
@@ -249,6 +280,31 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               ]}
             />
           </Field>
+          {opening.kind !== 'window' && (
+            <Field
+              label="People use it as"
+              hint="A door marked here is where people arrive or leave, and its clear width meters them"
+            >
+              <Select
+                value={opening.use ?? 'none'}
+                onChange={(use) =>
+                  apply(
+                    (doc) =>
+                      updateOpening(doc, opening.id, {
+                        use: use === 'none' ? undefined : (use as Opening['use']),
+                      }),
+                    'Set door use',
+                  )
+                }
+                options={[
+                  { value: 'none', label: 'Just a doorway' },
+                  { value: 'entry', label: 'Way in' },
+                  { value: 'exit', label: 'Way out' },
+                  { value: 'both', label: 'Way in and out' },
+                ]}
+              />
+            </Field>
+          )}
           <button className="btn is-danger" onClick={deleteSelection}>
             Delete opening
           </button>

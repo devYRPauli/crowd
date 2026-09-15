@@ -11,8 +11,17 @@ describe('starter templates', () => {
     (_id, template) => {
       const doc = template.build()
       expect(doc.plan.walls.length).toBeGreaterThan(3)
-      expect(doc.plan.zones.some((z) => z.kind === 'entry')).toBe(true)
-      expect(doc.plan.zones.some((z) => z.kind === 'exit')).toBe(true)
+      // A way in and a way out, which may be a door marked for it or a zone.
+      const waysIn = [
+        ...doc.plan.zones.filter((z) => z.kind === 'entry'),
+        ...doc.plan.openings.filter((o) => o.use === 'entry' || o.use === 'both'),
+      ]
+      const waysOut = [
+        ...doc.plan.zones.filter((z) => z.kind === 'exit'),
+        ...doc.plan.openings.filter((o) => o.use === 'exit' || o.use === 'both'),
+      ]
+      expect(waysIn.length).toBeGreaterThan(0)
+      expect(waysOut.length).toBeGreaterThan(0)
       expect(doc.scenario.populations.length).toBeGreaterThan(0)
 
       // Every opening must belong to a wall that exists.
@@ -23,6 +32,9 @@ describe('starter templates', () => {
       const targets = new Set([
         ...doc.plan.zones.map((z) => z.id),
         ...doc.plan.servicePoints.map((s) => s.id),
+        // A door people arrive or leave through is a destination in its own
+        // right; see `openingThreshold`.
+        ...doc.plan.openings.filter((o) => o.use).map((o) => o.id),
       ])
       for (const population of doc.scenario.populations) {
         for (const entryId of population.entryIds) expect(targets.has(entryId)).toBe(true)

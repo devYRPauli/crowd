@@ -134,8 +134,8 @@ does not get one.
 | **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.00 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
 | **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2328 m against a 0.23 m body | pass                 |
 | **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 4.3% (adult, 1.398 vs 1.34 m/s); all seven profiles within 4.3%; overall sd 0.328 vs 0.327 implied     | pass                 |
-| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.382** · 2.0 m: **1.318**                                                                                | pass                 |
-|                                  |                                                       | 0.8 m: 1.074 · 1.0 m: 0.996 · 1.2 m: 1.126                                                                         | **fail, below band** |
+| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.267** · 2.0 m: **1.243**                                                                                | pass                 |
+|                                  |                                                       | 0.8 m: 0.958 · 1.0 m: 1.023 · 1.2 m: 1.164                                                                         | **fail, below band** |
 | TC2, TC3, TC8, TC13              | Stairs and multi-storey egress                        | —                                                                                                                  | not modelled         |
 | TC4                              | Fundamental diagram                                   | measured above, though not in RiMEA's own corridor geometry                                                        | partial              |
 | TC5, TC9, TC10, TC11, TC14, TC15 | Personal data, exit choice, evacuation demonstrations | —                                                                                                                  | not written yet      |
@@ -150,40 +150,85 @@ covered below under its own name rather than the standard's.
 
 ### The narrow openings, stated plainly
 
-Doors of 1.2 m and under pass 1.0–1.13 persons/m/s where the standard wants
-1.2–1.4: 6% low at 1.2 m, 11% at 0.8 m, 17% at 1.0 m. Wider openings are in
+Doors of 1.2 m and under pass 0.96–1.16 persons/m/s where the standard wants
+1.2–1.4: 3% low at 1.2 m, 15% at 1.0 m, 20% at 0.8 m. Wider openings are in
 band, so this is specifically a narrow-door result, and it is in the direction
 that understates rather than overstates what a door will carry.
 
-**Where it comes from.** The navigation grid keeps a body centre 0.26 m off any
-wall, so a 1.0 m door offers a 0.48 m channel — two centimetres more than two
-bodies need. The file staggers instead of doubling and the door meters at about
-one lane. Charged against _effective_ width instead (clear width less the SFPE
-150 mm boundary layer each side) the same runs read 1.42–1.72 persons/m/s, above
-the band: the engine moves a single file at about the right rate, and the error
-is in how much of an opening it treats as usable.
+**Most of it was arithmetic, not modelling.** The navigation grid used to be a
+fixed 0.3 m whatever the building was. A doorway is rasterised like everything
+else, so its usable channel quantises to whole cells, and after the grid dilates
+the wall by body clearance a narrow door had almost none left. It was unstable
+with it too, moving 15% on three millimetres of wall thickness. Sizing the grid
+by the narrowest opening instead took the 1.2 m door from 1.126 to 1.245, with
+no change to the locomotion model at all.
 
-**Why it is not simply widened.** Two experiments, both recorded in the test
-file so nobody repeats them. Removing the navigation clearance entirely lifts
-the 0.8 m door to 1.487 persons/m/s and strands 17 of 20 people at the corner in
-TC6. Reducing it to the 150 mm boundary layer — with proximity to a wall charged
-as a traversal cost instead, so routes still prefer open floor — makes the narrow
-openings _worse_: 0.81 and 0.78 persons/m/s. Routing a body to 0.15 m of a jamb
-when the body exclusion pushes it back out to a full 0.23 m radius puts churn at
-exactly the point that meters the flow.
+**Some of it is a choice, made deliberately.** Modelling personal space — people
+keeping a few centimetres clear of a stranger rather than closing until they
+touch — gave part of that back: 1.2 m went from 1.245 to 1.164. That is the
+right direction for the model to move even though it is the wrong direction for
+this number, because a crowd that will not press really does get through a door
+more slowly.
 
-So the navigation grid cannot claim width the body exclusion will not let a body
-occupy, and the real lever is the 0.23 m the engine keeps between a body and a
-wall, where SFPE observes people accepting 0.15 m. Relaxing that buys the flow at
-the price of shoulders visibly inside walls — 0.08 m of it, where TC6 allows
-0.05 m — which is a bad trade for a tool whose output people watch, and a worse
-one to make quietly.
+**And some is a limit that stands.** The engine keeps 0.23 m between a body and
+a wall where SFPE observes people accepting 0.15 m, which bites hardest at the
+narrowest widths. Two attempts to close it are recorded in the test file so that
+nobody repeats them. Removing the navigation clearance entirely lifts the 0.8 m
+door to 1.487 persons/m/s and strands 17 of 20 people at the corner in TC6.
+Reducing it to the 150 mm boundary layer, with wall proximity charged as a
+traversal cost so routes still prefer open floor, makes the narrow openings
+_worse_ — routing a body to 0.15 m of a jamb when the body exclusion pushes it
+back out to a full radius puts churn at exactly the point that meters the flow.
+Closing it properly means letting shoulders sit 0.08 m inside walls, where TC6
+allows 0.05 m: a bad trade for a tool whose output people watch, and a worse one
+to make quietly.
 
-It stands as a stated limit instead, and it is worth being blunt about what it
-means: **do not use this model to size a door narrower than about 1.5 m.** The
-hand calculation alongside it — SFPE hydraulic, with the 150 mm boundary layer
-taken off each side — is the better instrument at that width, and the tool
+So, plainly: **do not use this model to size a door narrower than about 1.5 m.**
+The hand calculation alongside it — SFPE hydraulic, with the 150 mm boundary
+layer taken off each side — is the better instrument at that width, and the tool
 reports both precisely so the disagreement is visible.
+
+---
+
+## Personal space
+
+Not a validation case with a published criterion, because there is not one to
+cite: what this records is a parameter that had to be calibrated, and what it
+was calibrated against.
+
+People keep clear of strangers, and modelled on body radius alone they do not —
+every separation rule in the engine worked on `radiusA + radiusB`, contact with
+zero margin, so a crowd closed until skin met skin and stopped there. The margin
+that fixes it is small on purpose. Hall's proxemics puts personal distance at
+0.46–1.22 m centre to centre, which would be a quarter of a metre of air per
+person or more, but **Weidmann's curve already contains that**: it is fitted to
+real crowds, real crowds keep their distance, and that is most of why speed
+falls with density at all. Model the same behaviour twice and it is counted
+twice.
+
+The fundamental diagram says so plainly, which is what makes it a calibration
+rather than a guess:
+
+| Margin per person    | RMSE vs Weidmann | Flow peak at    |
+| -------------------- | ---------------- | --------------- |
+| 0.05 m (**shipped**) | 0.044 m/s        | 1.72 persons/m² |
+| 0.10 m               | 0.056 m/s        | 1.23 persons/m² |
+| 0.25 m               | 0.067 m/s        | 1.41 persons/m² |
+
+The band for the flow peak is 1.5–2.1 persons/m², so only the smallest margin
+survives: anything larger caps density on its own before the speed law gets to,
+and the curve peaks in the wrong place. So the proxemic distance stays in the
+speed law where it is calibrated, and what is modelled geometrically is the last
+few centimetres of it — the margin that keeps a walking crowd from touching.
+
+It is spent by crowding, on Fruin's own scale — whole at level A where people
+still choose their spacing, gone by level E where movement is shuffling — and by
+`assertiveness`, which until this existed was declared on every agent profile,
+defaulted seven different ways, clamped on load, copied onto every agent at
+spawn, and read by nothing at all.
+
+It costs about 6% of the flow through a 1.2 m door, which is recorded above and
+is the right direction for a model to move.
 
 ---
 
@@ -200,14 +245,14 @@ The difference between the two runs is the feature.
 
 | People | Routing          | Near door | Far door      | Cleared in |
 | ------ | ---------------- | --------- | ------------- | ---------- |
-| 40     | congestion-aware | 40        | 0             | 25.9 s     |
-| 40     | shortest path    | 40        | 0             | 19.7 s     |
-| 300    | congestion-aware | 182       | **118 (39%)** | **99.1 s** |
-| 300    | shortest path    | 300       | 0             | 146.8 s    |
+| 40     | congestion-aware | 40        | 0             | 19.6 s     |
+| 40     | shortest path    | 40        | 0             | 18.6 s     |
+| 300    | congestion-aware | 195       | **105 (35%)** | **89.9 s** |
+| 300    | shortest path    | 300       | 0             | 115.9 s    |
 
 With nobody in the way the nearer door is simply the right answer and both
 settings give it. With a crowd too big for one door, congestion-aware routing
-spreads 39% of it to the far door and the hall clears **32% sooner**.
+spreads 35% of it to the far door and the hall clears **22% sooner**.
 
 This is the behaviour the tool exists to show, and it did not work until this
 was measured. Exit choice compared travel time over the _static_ field, so
@@ -258,17 +303,50 @@ behind it, and a crowd that packs through itself.
 
 150 people, one room, one 1.2 m door.
 
-|                    | Measured                                                                                           |          |
-| ------------------ | -------------------------------------------------------------------------------------------------- | -------- |
-| Everybody gets out | 150/150; 25% by 20.6 s, 50% by 37.9 s, 95% by 85.0 s, last at 88.5 s                               | pass     |
-| A queue forms      | peaked at 85 people in the 3 m upstream; peak density 7.31 persons/m²                              | pass     |
-| Bodies stay apart  | max overlap 0.271 m on a 0.46 m pair distance (p95 0.141 m, median tick 0.057 m), tolerance 0.10 m | **fail** |
+|                    | Measured                                                                                           |      |
+| ------------------ | -------------------------------------------------------------------------------------------------- | ---- |
+| Everybody gets out | 150/150; 25% by 22.5 s, 50% by 40.7 s, 95% by 81.9 s, last at 84.9 s                               | pass |
+| A queue forms      | peaked at 85 people in the 3 m upstream; peak density 6.73 persons/m²                              | pass |
+| Bodies stay apart  | max overlap 0.084 m on a 0.46 m pair distance (p95 0.071 m, median tick 0.025 m), tolerance 0.10 m | pass |
 
-The overlap is the honest weak point of a crush at 7 persons/m². It is a
-transient at the densest moment rather than the typical state — the median tick
-is 0.057 m — but the model does let bodies interpenetrate more than it should
-when a whole room presses into one door. Read peak densities in a crush as
-indicative, not as measurements.
+The overlap was the honest weak point of this model and is no longer: it
+measured 0.271 m, which is most of a body, and not as a transient — the p95 was
+0.141 m, so for much of the jam somebody was substantially inside somebody else.
+Every density reading downstream inherited it.
+
+What fixed it was resolving contact in _velocity_, before anybody moves, and
+predictively — a pair may close only as fast as the gap between them allows in
+one step. The positional pass afterwards could never keep up, because by the
+time it sees an overlap the step that caused it has already happened. Peak
+density fell from 7.31 to 6.73 persons/m² with it, and the room clears sooner,
+because people who are not occupying each other's floor are not fighting each
+other for it.
+
+---
+
+## Doors as the ways in and out
+
+Entries and exits used to be zones only: polygons somebody drew, by convention,
+next to a door. Nothing connected the two — no shared field, no id reference, no
+code path — so the door's clear width, which is the number every egress
+calculation turns on, metered nothing. A zone drawn generously around a 3'0"
+leaf let people through as if the wall were open.
+
+A door now carries what it is used for, and the simulation stands its
+destination on the doorway itself: as wide as the leaf, deep enough to straddle
+the threshold. A building can have as many ways in and as many ways out as it
+has doors marked for it, and the six starter venues are built that way — the
+coffee bar's street door is both, the conference hall's two south doors are
+both, the polling station comes in one side and leaves the other, the
+concourse's portals face the street on one side and the platforms on the other.
+
+An itinerary that names a way out is now honoured, too. It used to be accepted
+by the UI, stored in the document, and silently ignored by the engine — which
+was harmless while everything drained to the nearest exit and is not harmless
+now that congestion can send somebody elsewhere. A commuter heading for the
+platforms must not be routed out to the street because the street door happens
+to be emptier. Naming several leaves the choice between them open, which is
+where congestion gets its say.
 
 ---
 

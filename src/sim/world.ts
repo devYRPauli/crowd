@@ -25,6 +25,8 @@ import type { Plan, Scenario, Zone } from '../core/model/types'
 import {
   furniturePolygon,
   isFurnitureBlocking,
+  isWalkableOpening,
+  openingThreshold,
   planBounds,
   planSeats,
   servicePositions,
@@ -357,6 +359,36 @@ export const buildWorld = (
     else if (zone.kind === 'exit') exits.push(record)
     else if (zone.kind === 'measure') measures.push(record)
     else if (zone.kind === 'waypoint' || zone.kind === 'seating') waypoints.push(record)
+  }
+
+  // Doors people arrive or leave through are destinations in their own right,
+  // standing on the doorway itself rather than on a zone somebody drew nearby.
+  // The opening's clear width is then what meters them, which is the whole
+  // point of saying a door is the way in.
+  const wallsById = new Map(plan.walls.map((wall) => [wall.id, wall]))
+  for (const opening of plan.openings) {
+    if (!opening.use) continue
+    // Marked or not, you cannot walk through a window or over a sill, and the
+    // wall is still solid there. Standing a destination on one would send
+    // people at a wall, and `destinationFrom` would fall back to the nearest
+    // free cell — which can be on the far side of it.
+    if (!isWalkableOpening(opening)) continue
+    const wall = wallsById.get(opening.wallId)
+    if (!wall) continue
+    const record = destinationFrom(
+      {
+        id: opening.id,
+        kind: opening.use === 'exit' ? 'exit' : 'entry',
+        name: opening.kind === 'window' ? 'Window' : 'Door',
+        polygon: openingThreshold(wall, opening),
+        color: '#000000',
+      },
+      grid,
+      navBlocked,
+      clearance,
+    )
+    if (opening.use === 'entry' || opening.use === 'both') entries.push(record)
+    if (opening.use === 'exit' || opening.use === 'both') exits.push(record)
   }
 
   const queues: QueueRecord[] = plan.servicePoints.map((sp) => {

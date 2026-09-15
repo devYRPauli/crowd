@@ -135,6 +135,9 @@ const parseOpening = (raw: unknown, wallIds: Set<string>): Opening | null => {
     sill: Math.max(0, num(raw.sill, kind === 'window' ? DEFAULT_SETTINGS.defaultWindowSill : 0)),
     kind,
     ...(typeof raw.swing === 'string' ? { swing: raw.swing as Opening['swing'] } : {}),
+    ...(raw.use === 'entry' || raw.use === 'exit' || raw.use === 'both'
+      ? { use: raw.use as Opening['use'] }
+      : {}),
     ...(raw.locked === true ? { locked: true } : {}),
   }
 }

@@ -68,8 +68,23 @@ The left button always belongs to the active tool. Navigation lives on the
 right and middle buttons, the wheel, and Space-drag. Press `?` for the full
 keymap.
 
-Some details that make the difference between a plan editor that feels precise
-and one that feels approximate:
+**Everything is a size you could order.** Doors come in even inches — 2'8"
+interior, 3'0" entry and accessible, pairs at 5'0" and 6'0" — with a 6'8" head,
+and windows, wall thicknesses and ceiling heights likewise. A 1.0 m door is not
+a door anybody makes, and the three and a half inches between it and a 3'0" leaf
+are, at a doorway, the difference between two people abreast and one. The
+inspector offers the stock sizes and says so when a dimension is not one of
+them. The document stays metric; the imperial setting reads them back as what
+they are called.
+
+**A door can be the way in, the way out, or both.** Mark it in the inspector and
+people arrive through that doorway and leave through it — as many of each as the
+building has. It matters because the door's own clear width is then what meters
+them, which is the number every egress calculation turns on. Drawing a zone next
+to a door only approximates that, and approximates it generously.
+
+Some other details that make the difference between a plan editor that feels
+precise and one that feels approximate:
 
 - **Snapping is measured in screen pixels, not metres**, so it behaves the same
   whether you are looking at a whole floor or at one doorway. Wall endpoints beat
@@ -132,7 +147,7 @@ few seconds, because the queue that makes the far door worth the walk has not
 formed yet when they set off. Without it a crowd queues at the nearest exit
 however long the line grows while an identical door stands open, and a planner
 asking whether a second exit is worth it gets told it bought nothing. In a hall
-with a door at each end, 300 people clear 32% faster for using both.
+with a door at each end, 300 people clear 22% faster for using both.
 
 **2. Avoid — ORCA.**
 Optimal Reciprocal Collision Avoidance, ported faithfully from the RVO2
@@ -159,6 +174,15 @@ fundamental-diagram sweep no pair now overlaps by more than 0.1% of two radii.
 Walk the itinerary: go here, queue there, be served, sit down, leave. People join
 a queue when they reach the back of it, not when they decide to — assigning slots
 by intent tells late arrivals to stand at the front and gridlocks the line.
+
+People also keep out of each other's way before anybody is in it. A body radius
+says where somebody _is_; it says nothing about whether they will let a
+stranger's shoulder touch theirs, and they will not. That margin is deliberately
+small — five centimetres a person — because the proxemic distance proper is
+already inside the speed law below, and modelling it twice caps density before
+Weidmann gets to. It is spent by crowding, on Fruin's own scale, and by how
+willing somebody is to take a tight gap. In a crush there is none of it left,
+which is what a crush is.
 
 Speed follows **Weidmann's relation**, `v(ρ) = v₀·(1 − exp(−1.913·(1/ρ − 1/5.4)))`,
 so a crowd slows the way a real one does rather than only through collision

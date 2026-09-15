@@ -71,6 +71,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { buildObstacles, computeNewVelocity, type OrcaAgentState } from '../avoidance/orca'
 import { ObstacleIndex } from '../avoidance/obstacleIndex'
 import { SEPARATION, separationScale } from '../avoidance/separation'
+import { personalSpace } from '../behaviour/proxemics'
 import { hardCoreCorrection, PACE_LOOKAHEAD, speedFromDensity } from '../nav/flowFields'
 import { weidmannSpeed } from '../metrics/los'
 import { Rng } from '../../core/math/random'
@@ -90,6 +91,8 @@ const MAX_SPEED = FREE_SPEED * 1.35
 const TIME_HORIZON = 2.2
 const TIME_HORIZON_OBST = 0.8
 const RESPONSIBILITY = 0.5
+/** The adult profile's willingness to accept a tight gap; see `proxemics`. */
+const ASSERTIVENESS = 0.5
 const DT = 0.1
 
 /** `DensityField`'s kernel, evaluated directly so that it can wrap with the corridor. */
@@ -425,6 +428,15 @@ const runCorridor = (count: number, totalSeconds: number, transientSeconds: numb
       }
       if (step === steps) continue
 
+      // The kernel sum is corrected for the part of it lying inside the walls,
+      // exactly as `DensityField` does from the obstacle mask.
+      const perceived = density / wallCoverage(y[i])
+      // Personal space, exactly as `Simulation.steer` applies it: the air these
+      // two would keep between them at this crowding, added to the neighbour's
+      // radius rather than the walker's own. Everybody here is an adult, so
+      // both halves of the pair contribute the same amount.
+      const space = 2 * personalSpace(perceived, ASSERTIVENESS)
+
       neighbours.length = 0
       for (let n = 0; n < nearCount; n++) {
         const other = pool[n]
@@ -436,6 +448,7 @@ const runCorridor = (count: number, totalSeconds: number, transientSeconds: numb
         other.velocity.y = vy[j]
         other.prefVelocity.x = vx[j]
         other.prefVelocity.y = vy[j]
+        other.radius = RADIUS + space
         neighbours.push(other)
       }
 
@@ -444,9 +457,6 @@ const runCorridor = (count: number, totalSeconds: number, transientSeconds: numb
       self.velocity.x = vx[i]
       self.velocity.y = vy[i]
       // The preferred velocity is simply "+x, at the density-adjusted free speed".
-      // The kernel sum is corrected for the part of it lying inside the walls,
-      // exactly as `DensityField` does from the obstacle mask.
-      const perceived = density / wallCoverage(y[i])
       if (step >= measureFrom) {
         perceivedSum += perceived
         perceivedSamples++

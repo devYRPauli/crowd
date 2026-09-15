@@ -57,6 +57,16 @@ const population = (
   ...overrides,
 })
 
+/**
+ * Feet, in metres.
+ *
+ * US buildings are laid out in round feet and ordered in even inches, so the
+ * dimensions below are written the way a drawing would carry them and converted
+ * once. The document stays metric; the imperial display setting reads them back
+ * as what they are called.
+ */
+const ft = (feet: number, inches = 0): number => Math.round((feet * 12 + inches) * 25.4) / 1000
+
 const baseRouting: Scenario['routing'] = {
   adaptive: true,
   congestionWeight: 0.55,
@@ -68,11 +78,11 @@ const baseRouting: Scenario['routing'] = {
 
 const coffeeBar = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, 14, 10)
-  b.door(room.south, 2.0, 1.8)
-  b.window(room.west, 3, 2.4)
-  b.window(room.west, 7, 2.4)
-  b.window(room.north, 5, 3)
+  const room = b.room(0, 0, ft(46), ft(33))
+  const street = b.door(room.south, 2.0, ft(6), 'door', 'both')
+  b.window(room.west, 3, ft(8))
+  b.window(room.west, 7, ft(8))
+  b.window(room.north, 5, ft(8))
 
   const counter = b.service(
     'Coffee bar',
@@ -109,8 +119,6 @@ const coffeeBar = (): CrowdDocument => {
   b.place('plant-small', 0.9, 9.0)
   b.place('bin', 8.0, 0.8)
 
-  const entry = b.zone('entry', 1.4, 0.35, 3.4, 1.6, 'Street door')
-  const exit = b.zone('exit', 1.4, 0.35, 3.4, 1.6, 'Street door (out)')
   const seating = b.zone('seating', 1.2, 3.2, 8.0, 9.0, 'Seating area')
   b.zone('keep-clear', 8.6, 1.0, 10.4, 9.0, 'Service aisle', { cost: 3 })
 
@@ -126,7 +134,7 @@ const coffeeBar = (): CrowdDocument => {
         name: 'Customers',
         count: 90,
         color: POPULATION_COLORS[0],
-        entryIds: [entry.id],
+        entryIds: [street.id],
         arrival: { kind: 'peak', startS: 0, windowS: 1800, peakAt: 0.35, spread: 0.16 },
         itinerary: [
           step('service', counter.id),
@@ -134,7 +142,7 @@ const coffeeBar = (): CrowdDocument => {
             duration: { kind: 'lognormal', mean: 720, sd: 300, min: 180 },
             probability: 0.55,
           }),
-          step('exit', exit.id),
+          step('exit', street.id),
         ],
       }),
     ],
@@ -145,17 +153,17 @@ const coffeeBar = (): CrowdDocument => {
 
 const conference = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, 30, 20)
-  b.door(hall.south, 4, 2.4)
-  b.door(hall.south, 12, 2.4)
+  const hall = b.room(0, 0, ft(99), ft(66))
+  const mainDoor = b.door(hall.south, 4, ft(8), 'door', 'both')
+  const sideDoor = b.door(hall.south, 12, ft(8), 'door', 'both')
   // Partition between the foyer and the session room.
   const partition = b.wall(
     { x: 0, y: 12 },
     { x: 30, y: 12 },
     { kind: 'partition', thickness: 0.15 },
   )
-  b.door(partition, 8, 2.4)
-  b.door(partition, 22, 2.4)
+  b.door(partition, 8, ft(8))
+  b.door(partition, 22, ft(8))
 
   const desks = [6, 11, 16, 21].map((x, index) =>
     b.service(
@@ -196,10 +204,6 @@ const conference = (): CrowdDocument => {
     })
   }
 
-  const entryA = b.zone('entry', 3.0, 0.3, 5.2, 1.8, 'Main entrance')
-  const entryB = b.zone('entry', 11.0, 0.3, 13.2, 1.8, 'Side entrance')
-  const exit = b.zone('exit', 3.0, 0.3, 5.2, 1.8, 'Main entrance (out)')
-  b.zone('exit', 11.0, 0.3, 13.2, 1.8, 'Side entrance (out)')
   const session = b.zone('seating', 5.0, 12.8, 25.0, 19.6, 'Session room')
   b.zone('keep-clear', 14.0, 12.4, 16.2, 19.8, 'Centre aisle', { cost: 5 })
   b.zone('measure', 0.4, 12.2, 29.6, 13.0, 'Session doorway')
@@ -216,13 +220,13 @@ const conference = (): CrowdDocument => {
         name: 'Delegates',
         count: 320,
         color: POPULATION_COLORS[0],
-        entryIds: [entryA.id, entryB.id],
+        entryIds: [mainDoor.id, sideDoor.id],
         arrival: { kind: 'peak', startS: 0, windowS: 1800, peakAt: 0.55, spread: 0.2 },
         groupSize: { min: 1, max: 3 },
         itinerary: [
           step('service', undefined, { targetIds: desks.map((d) => d.id) }),
           step('seat', session.id, { duration: { kind: 'normal', mean: 1500, sd: 200, min: 600 } }),
-          step('exit', exit.id),
+          step('exit', undefined, { targetIds: [mainDoor.id, sideDoor.id] }),
         ],
       }),
     ],
@@ -233,9 +237,9 @@ const conference = (): CrowdDocument => {
 
 const gallery = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, 24, 16)
-  b.door(room.south, 3, 2.2)
-  b.door(room.east, 8, 1.6)
+  const room = b.room(0, 0, ft(79), ft(53))
+  const frontDoor = b.door(room.south, 3, ft(8), 'door', 'both')
+  b.door(room.east, 8, ft(5))
   // Interior partitions that make a route rather than one big box.
   const p1 = b.wall(
     { x: 8, y: 0.2 },
@@ -247,8 +251,8 @@ const gallery = (): CrowdDocument => {
     { x: 16, y: 15.8 },
     { kind: 'partition', thickness: 0.2, height: 3 },
   )
-  b.door(p1, 5.5, 2.0, 'opening')
-  b.door(p2, 4.0, 2.0, 'opening')
+  b.door(p1, 5.5, ft(7), 'opening')
+  b.door(p2, 4.0, ft(7), 'opening')
 
   for (const [x, y, rot] of [
     [3, 15.7, 0],
@@ -287,8 +291,6 @@ const gallery = (): CrowdDocument => {
   for (const x of [18.0, 19.4, 20.8]) b.place('table-poseur', x, 8.6)
   b.place('plant-tree', 1.6, 8.0)
 
-  const entry = b.zone('entry', 2.0, 0.35, 4.2, 1.8, 'Front door')
-  const exit = b.zone('exit', 2.0, 0.35, 4.2, 1.8, 'Front door (out)')
   const westWing = b.zone('waypoint', 0.6, 9.5, 7.4, 15.2, 'West wall', {
     dwell: { kind: 'lognormal', mean: 210, sd: 90, min: 45 },
   })
@@ -311,7 +313,7 @@ const gallery = (): CrowdDocument => {
         name: 'Guests',
         count: 180,
         color: POPULATION_COLORS[4],
-        entryIds: [entry.id],
+        entryIds: [frontDoor.id],
         arrival: { kind: 'peak', startS: 120, windowS: 2700, peakAt: 0.3, spread: 0.22 },
         groupSize: { min: 1, max: 4 },
         itinerary: [
@@ -319,7 +321,7 @@ const gallery = (): CrowdDocument => {
           step('dwell', westWing.id, { probability: 0.7 }),
           step('dwell', eastWing.id, { probability: 0.8 }),
           step('dwell', backWing.id, { probability: 0.6 }),
-          step('exit', exit.id),
+          step('exit', frontDoor.id),
         ],
       }),
     ],
@@ -330,11 +332,16 @@ const gallery = (): CrowdDocument => {
 
 const pollingStation = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, 18, 12)
-  b.door(room.south, 3, 1.6)
-  b.door(room.north, 15, 1.6)
+  const room = b.room(0, 0, ft(60), ft(40))
+  const wayIn = b.door(room.south, 3, ft(6), 'door', 'entry')
+  const wayOut = b.door(room.north, 15, ft(6), 'door', 'exit')
 
-  const checkIn = [5, 9].map((x, index) =>
+  // Four poll-book stations, because two cannot keep up with the door: voters
+  // arrive at about 2.9 a minute averaged over the session and a station clears
+  // one every 55 seconds, so at two the queue grows without bound and the venue
+  // demonstrates nothing but its own arithmetic. Four is also what a precinct
+  // this size actually staffs.
+  const checkIn = [3.0, 5.2, 7.4, 9.6].map((x, index) =>
     b.service(
       `Check-in ${index + 1}`,
       x,
@@ -352,7 +359,7 @@ const pollingStation = (): CrowdDocument => {
       },
     ),
   )
-  for (const x of [5, 9]) b.place('counter-reception', x, 9.6, Math.PI)
+  for (const x of [3.0, 5.2, 7.4, 9.6]) b.place('counter-reception', x, 9.6, Math.PI)
   for (const x of [12.5, 14.0, 15.5]) {
     b.place('ballot-booth', x, 9.4, Math.PI)
     b.place('ballot-booth', x, 6.4, Math.PI)
@@ -361,8 +368,6 @@ const pollingStation = (): CrowdDocument => {
   b.place('floor-sign', 3.4, 2.6, Math.PI / 4)
   b.place('barrier', 11.0, 4.6, Math.PI / 2, { size: { width: 3.2, depth: 0.12, height: 1.1 } })
 
-  const entry = b.zone('entry', 2.2, 0.35, 3.9, 1.6, 'Entrance')
-  const exit = b.zone('exit', 14.2, 10.4, 15.9, 11.7, 'Exit')
   const booths = b.zone('waypoint', 11.4, 5.4, 16.6, 10.4, 'Voting booths', {
     dwell: { kind: 'lognormal', mean: 110, sd: 45, min: 35 },
     capacity: 6,
@@ -380,7 +385,7 @@ const pollingStation = (): CrowdDocument => {
         name: 'Voters',
         count: 260,
         color: POPULATION_COLORS[2],
-        entryIds: [entry.id],
+        entryIds: [wayIn.id],
         arrival: { kind: 'peak', startS: 0, windowS: 5400, peakAt: 0.7, spread: 0.15 },
         profileMix: [
           { profileId: 'adult', weight: 50 },
@@ -392,7 +397,7 @@ const pollingStation = (): CrowdDocument => {
         itinerary: [
           step('service', undefined, { targetIds: checkIn.map((d) => d.id) }),
           step('dwell', booths.id),
-          step('exit', exit.id),
+          step('exit', wayOut.id),
         ],
       }),
     ],
@@ -403,12 +408,12 @@ const pollingStation = (): CrowdDocument => {
 
 const concourse = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, 40, 18, { height: 5 })
-  b.door(hall.west, 6, 3.0, 'opening')
-  b.door(hall.west, 12, 3.0, 'opening')
-  b.door(hall.east, 6, 3.0, 'opening')
-  b.door(hall.east, 12, 3.0, 'opening')
-  b.door(hall.south, 20, 4.0, 'opening')
+  const hall = b.room(0, 0, ft(132), ft(60), { height: ft(16) })
+  // A concourse's ways in and out are its portals, and people use them both
+  // directions all day, so each is marked for both.
+  const westPortals = [6, 12].map((y) => b.door(hall.west, y, ft(10), 'opening', 'both'))
+  const platformPortals = [6, 12].map((y) => b.door(hall.east, y, ft(10), 'opening', 'both'))
+  const streetStair = b.door(hall.south, 20, ft(12), 'opening', 'entry')
 
   for (const x of [9, 11, 13]) b.place('kiosk', x, 16.6, Math.PI)
   for (const x of [26, 27.4, 28.8, 30.2]) b.place('turnstile', x, 9, 0)
@@ -439,11 +444,6 @@ const concourse = (): CrowdDocument => {
     },
   )
 
-  const west = b.zone('entry', 0.3, 4.5, 1.8, 13.5, 'West entrance')
-  const south = b.zone('entry', 18.0, 0.3, 22.0, 1.6, 'Street stair')
-  const platforms = b.zone('exit', 36.0, 4.0, 39.7, 14.0, 'To platforms')
-  const fromPlatforms = b.zone('entry', 36.0, 4.0, 39.7, 14.0, 'From platforms')
-  const westOut = b.zone('exit', 0.3, 4.5, 1.8, 13.5, 'West exit')
   b.zone('measure', 24.0, 7.0, 32.0, 11.0, 'Gate line')
   b.zone('keep-clear', 14.0, 7.5, 16.0, 10.5, 'Around column', { cost: 3 })
 
@@ -459,7 +459,7 @@ const concourse = (): CrowdDocument => {
         name: 'Boarding',
         count: 420,
         color: POPULATION_COLORS[0],
-        entryIds: [west.id, south.id],
+        entryIds: [...westPortals.map((d) => d.id), streetStair.id],
         arrival: { kind: 'poisson', startS: 0, windowS: 1500 },
         profileMix: [
           { profileId: 'adult', weight: 46 },
@@ -469,15 +469,18 @@ const concourse = (): CrowdDocument => {
           { profileId: 'child', weight: 3 },
           { profileId: 'wheelchair', weight: 1 },
         ],
-        itinerary: [step('service', gate.id), step('exit', platforms.id)],
+        itinerary: [
+          step('service', gate.id),
+          step('exit', undefined, { targetIds: platformPortals.map((d) => d.id) }),
+        ],
       }),
       population({
         name: 'Arriving',
         count: 260,
         color: POPULATION_COLORS[1],
-        entryIds: [fromPlatforms.id],
+        entryIds: platformPortals.map((d) => d.id),
         arrival: { kind: 'waves', startS: 90, windowS: 1400, waves: 7 },
-        itinerary: [step('exit', westOut.id)],
+        itinerary: [step('exit', undefined, { targetIds: westPortals.map((d) => d.id) })],
       }),
     ],
   })
@@ -487,10 +490,10 @@ const concourse = (): CrowdDocument => {
 
 const banquet = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, 28, 20)
-  b.door(hall.south, 6, 2.4)
-  b.door(hall.south, 22, 2.4)
-  b.door(hall.east, 10, 1.6)
+  const hall = b.room(0, 0, ft(92), ft(66))
+  const mainDoors = b.door(hall.south, 6, ft(8), 'door', 'both')
+  const secondDoors = b.door(hall.south, 22, ft(8), 'door', 'both')
+  b.door(hall.east, 10, ft(5), 'door', 'exit')
 
   b.place('stage', 14, 18.2, 0, { size: { width: 9, depth: 3.0, height: 0.6 } })
   b.place('lectern', 17.5, 18.4)
@@ -546,10 +549,6 @@ const banquet = (): CrowdDocument => {
   const staffStation = b.zone('waypoint', 6.0, 17.0, 11.0, 19.4, 'Service station', {
     dwell: { kind: 'uniform', mean: 300, min: 120, max: 600 },
   })
-  const entry = b.zone('entry', 5.0, 0.35, 7.2, 1.8, 'Main door')
-  const entryB = b.zone('entry', 21.0, 0.35, 23.2, 1.8, 'Second door')
-  const exit = b.zone('exit', 5.0, 0.35, 7.2, 1.8, 'Main door (out)')
-  const exitB = b.zone('exit', 21.0, 0.35, 23.2, 1.8, 'Second door (out)')
   b.zone('keep-clear', 12.6, 2.0, 15.6, 16.0, 'Service aisle', { cost: 4 })
 
   return makeDocument('Banquet hall', b.build(), {
@@ -564,7 +563,7 @@ const banquet = (): CrowdDocument => {
         name: 'Guests',
         count: 220,
         color: POPULATION_COLORS[3],
-        entryIds: [entry.id, entryB.id],
+        entryIds: [mainDoors.id, secondDoors.id],
         arrival: { kind: 'peak', startS: 0, windowS: 1800, peakAt: 0.45, spread: 0.2 },
         groupSize: { min: 2, max: 5 },
         itinerary: [
@@ -573,14 +572,14 @@ const banquet = (): CrowdDocument => {
           step('seat', seatingZone.id, {
             duration: { kind: 'normal', mean: 2400, sd: 400, min: 900 },
           }),
-          step('exit', exit.id),
+          step('exit', undefined, { targetIds: [mainDoors.id, secondDoors.id] }),
         ],
       }),
       population({
         name: 'Staff',
         count: 14,
         color: POPULATION_COLORS[5],
-        entryIds: [entryB.id],
+        entryIds: [secondDoors.id],
         arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
         profileMix: [{ profileId: 'staff', weight: 1 }],
         itinerary: [
@@ -591,7 +590,7 @@ const banquet = (): CrowdDocument => {
           step('dwell', staffStation.id, {
             duration: { kind: 'uniform', mean: 240, min: 90, max: 480 },
           }),
-          step('exit', exitB.id),
+          step('exit', secondDoors.id),
         ],
       }),
     ],

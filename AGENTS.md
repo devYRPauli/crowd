@@ -14,6 +14,10 @@ somewhere else.
   is written. An edit that escapes it escapes undo.
 - Lengths are metres, angles are radians, time is seconds. The imperial setting
   only changes display and parsing.
+- Every default dimension is a size somebody could order, and it comes from
+  `core/model/standards.ts`. A door is 2'8" or 3'0" or a 6'0" pair, not 1.0 m.
+  Four places used to each carry their own numbers and disagree about them; if
+  you are about to write a dimension literal, it belongs there instead.
 
 ## The simulation
 
@@ -29,6 +33,15 @@ somewhere else.
   renderer and the engine, so the picture on screen and the world people walk
   through cannot disagree.
 - Density is measured over an area a person occupies, never per grid cell.
+- The navigation grid is sized by the narrowest opening people have to get
+  through, not by the extent of the venue. A doorway is rasterised like anything
+  else, and a grid too coarse to resolve one quietly closes it: at a fixed 0.3 m
+  cell a 0.8 m door passed a fifth of what it should, and moved 15% on three
+  millimetres of wall thickness.
+- People never overlap. Contact is resolved in velocity before anyone moves and
+  predictively — a pair may close only as fast as the gap allows in one step.
+  Fixing an overlap after the fact cannot keep up, because the step that caused
+  it has already happened.
 - A density used to decide how fast somebody walks is read _ahead_ of them and
   excludes their own body. A ring counts the crowd behind you and turns a bunch
   into a platoon; the walker's own kernel peak is most of a level-of-service
