@@ -645,7 +645,7 @@ describe('the rotate ring', () => {
 })
 
 describe('locked objects', () => {
-  it('SUSPECTED BUG: a locked object can still be selected and dragged', () => {
+  it('can be selected, so that it can be unlocked, but not dragged', () => {
     const h = harness({
       walls: [wall('w', { x: 0, y: 0 }, { x: 4, y: 0 }, { locked: true })],
     })
@@ -653,13 +653,26 @@ describe('locked objects', () => {
 
     drag(tool, h, pick('wall', 'w', 2, 0), { x: 2, y: 3 })
 
-    // Nothing in the tool consults `locked` on the way in: the lock only stops
-    // deletion (in the store) and the endpoint handles. A locked wall is meant
-    // to be a fixed survey line to trace against, and it walks off under the
-    // pointer instead.
+    // Selecting is how you reach the inspector to unlock it, so that stays.
+    // Moving does not: the reason to lock a traced survey line or a finished
+    // shell is to stop knocking it out of place while drawing over it, and a
+    // lock that only refused deletion read as protection without being any.
     expect(h.selection()).toEqual([ref('wall', 'w')])
-    expect(wallById(h, 'w').a).toEqual({ x: 0, y: 3 })
-    expect(wallById(h, 'w').b).toEqual({ x: 4, y: 3 })
+    expect(wallById(h, 'w').a).toEqual({ x: 0, y: 0 })
+    expect(wallById(h, 'w').b).toEqual({ x: 4, y: 0 })
+  })
+
+  it('moves the rest of a mixed selection and leaves the locked one behind', () => {
+    const h = harness({
+      furniture: [item('free', 1, 1), item('pinned', 5, 5, { locked: true })],
+    })
+    const tool = new SelectTool()
+    h.ctx.setSelection([ref('furniture', 'free'), ref('furniture', 'pinned')])
+
+    drag(tool, h, pick('furniture', 'free', 1, 1), { x: 3, y: 1 })
+
+    expect(furnitureById(h, 'free').position).toEqual({ x: 3, y: 1 })
+    expect(furnitureById(h, 'pinned').position).toEqual({ x: 5, y: 5 })
   })
 
   it('withholds the endpoint handles of a locked wall but keeps its rotate ring', () => {
@@ -741,7 +754,7 @@ describe('keyboard editing', () => {
     expect(h.edits).toEqual([])
   })
 
-  it('SUSPECTED BUG: arrow keys move a locked object', () => {
+  it('will not nudge a locked object either', () => {
     const h = harness({ furniture: [item('a', 2, 2, { locked: true })] })
     const tool = new SelectTool()
     tool.onPointerDown(pointer(2, 2, { hit: pick('furniture', 'a', 2, 2) }), h.ctx)
@@ -749,7 +762,10 @@ describe('keyboard editing', () => {
 
     tool.onKeyDown(press('ArrowRight'), h.ctx)
 
-    expect(furnitureById(h, 'a').position.x).toBe(2 + h.ctx.document.settings.gridSize)
+    // An arrow key is the easiest way to move something by accident, so this is
+    // the case the lock most needs to cover.
+    expect(furnitureById(h, 'a').position.x).toBe(2)
+    expect(h.edits).toEqual([])
   })
 })
 

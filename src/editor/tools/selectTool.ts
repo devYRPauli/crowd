@@ -17,6 +17,7 @@ import { add, angleOf, distance, rotate as rotateVec, sub } from '../../core/mat
 import { boundsOf, pointInPolygon, polygonCentroid } from '../../core/math/geometry'
 import { objectFootprint, wallMidpoint } from '../geometryHelpers'
 import {
+  isLocked,
   updateFurniture,
   updateServicePoint,
   updateWall,
@@ -282,10 +283,31 @@ export class SelectTool implements Tool {
     return null
   }
 
-  private lockedRefs(ctx: ToolContext): Set<string> {
+  /**
+   * Ids to keep out of the snap candidates: a dragged object must not snap to
+   * where it used to be. Nothing to do with the lock, despite the old name.
+   */
+  private selectedIds(ctx: ToolContext): Set<string> {
     const ids = new Set<string>()
     for (const ref of ctx.selection) ids.add(ref.id)
     return ids
+  }
+
+  /**
+   * The part of the selection an edit is allowed to move.
+   *
+   * A locked object could be selected, dragged, rotated and nudged like any
+   * other; only deleting it was refused. That makes the lock worse than no lock,
+   * because it reads as protection and is not: the usual reason to lock a
+   * traced backdrop or a finished shell is to stop knocking it out of place
+   * while drawing over it, which is exactly what it did not prevent.
+   *
+   * Selecting a locked object is still allowed — the inspector is where you go
+   * to unlock it — and so is dragging a mixed selection, which moves everything
+   * in it that is not locked.
+   */
+  private movable(ctx: ToolContext): PlanObjectRef[] {
+    return ctx.selection.filter((ref) => !isLocked(ctx.document, ref))
   }
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
@@ -401,7 +423,7 @@ export class SelectTool implements Tool {
         const leadOrigin = lead ? this.mode.origin.get(lead.id) : undefined
         if (leadOrigin) {
           const desired = add(leadOrigin, delta)
-          const snapped = ctx.snap(desired, { exclude: this.lockedRefs(ctx) })
+          const snapped = ctx.snap(desired, { exclude: this.selectedIds(ctx) })
           delta = sub(snapped.point, leadOrigin)
           ctx.setDraft([
             ...snapped.guides.map((guide) => ({
@@ -411,10 +433,11 @@ export class SelectTool implements Tool {
             })),
           ])
         }
+        const moving = this.movable(ctx)
         ctx.apply(
           (doc) => {
             let next = doc
-            for (const ref of refs) {
+            for (const ref of moving) {
               const origin = this.mode.kind === 'move' ? this.mode.origin.get(ref.id) : undefined
               if (!origin) continue
               next = moveObject(next, ref, origin, delta)
@@ -441,7 +464,7 @@ export class SelectTool implements Tool {
         let delta = current - this.mode.startAngle
         const step = info.shiftKey ? Math.PI / 36 : Math.PI / 12
         if (!info.altKey) delta = Math.round(delta / step) * step
-        const refs = ctx.selection
+        const refs = this.movable(ctx)
         const pivot = this.mode.center
         const origin = this.mode.origin
         ctx.apply(
@@ -613,7 +636,7 @@ export class SelectTool implements Tool {
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
     const step = event.shiftKey ? 1 : ctx.document.settings.gridSize
     const nudge = (dx: number, dy: number) => {
-      const refs = ctx.selection
+      const refs = this.movable(ctx)
       if (refs.length === 0) return
       ctx.apply(
         (doc) => {

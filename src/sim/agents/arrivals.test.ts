@@ -202,21 +202,39 @@ describe('poisson arrivals', () => {
     }
   })
 
-  it('lets people turn up after the window it was given has closed', () => {
-    // SUSPECTED BUG: the schedule is a running sum of exponential gaps, so
-    // nothing bounds it by the window — "600 people over 20 minutes" delivers
-    // its last arrivals after the 20 minutes are up about half the time, and
-    // this profile then disagrees with every bounded one about what windowS
-    // means. Anyone past the scenario duration never enters the venue at all,
-    // so a comparison against a uniform baseline is quietly short of people.
-    // Asserting current behaviour; correct would be to scale the draws onto
-    // the window (or to thin the process to it) and keep the burstiness.
-    let overran = 0
+  it('delivers everybody inside the window it was given', () => {
+    // This used to be a running sum of exponential gaps, whose total is a
+    // random variable with the window as its mean — so about half of all runs
+    // put their last arrivals after the window had closed. Anybody past the
+    // scenario duration never entered the venue at all, which left a Poisson
+    // run quietly short of people against the uniform baseline it was being
+    // compared with. Fifty seeds, none of them over.
     for (let seed = 1; seed <= 50; seed++) {
       const times = scheduleArrivals(profileFor('poisson'), 200, new Rng(seed))
-      if (times[times.length - 1] > WINDOW) overran++
+      expect(times[times.length - 1]).toBeLessThanOrEqual(WINDOW)
+      expect(times[0]).toBeGreaterThanOrEqual(0)
+      expect(times).toHaveLength(200)
     }
-    expect(overran).toBeGreaterThan(10)
+  })
+
+  it('keeps its clustering, which is the reason to choose it', () => {
+    // Bounding the process must not flatten it into the uniform profile. The
+    // gaps between consecutive arrivals in a Poisson process are exponential,
+    // so their spread is about as large as their mean; evenly spread arrivals
+    // have a spread of nothing at all.
+    const times = scheduleArrivals(profileFor('poisson'), 400, new Rng(7))
+    const gaps = times.slice(1).map((t, i) => t - times[i])
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length
+    const sd = Math.sqrt(gaps.reduce((a, g) => a + (g - mean) ** 2, 0) / gaps.length)
+    expect(sd / mean).toBeGreaterThan(0.7)
+
+    const even = scheduleArrivals(profileFor('uniform'), 400, new Rng(7))
+    const evenGaps = even.slice(1).map((t, i) => t - even[i])
+    const evenMean = evenGaps.reduce((a, b) => a + b, 0) / evenGaps.length
+    const evenSd = Math.sqrt(
+      evenGaps.reduce((a, g) => a + (g - evenMean) ** 2, 0) / evenGaps.length,
+    )
+    expect(evenSd / evenMean).toBeLessThan(0.01)
   })
 })
 
@@ -283,14 +301,13 @@ describe('wave arrivals', () => {
     expect(Math.max(...times)).toBeLessThanOrEqual(WINDOW + 45)
   })
 
-  it('still spreads arrivals over ten seconds when the window is zero', () => {
-    // SUSPECTED BUG: the unload spread has a flat 10 s floor that does not
-    // scale with the window, so a zero-length wave window is the one profile
-    // where "everybody at once" is not at once. Correct would be to cap the
-    // spread by the window as well as by 45 s.
+  it('puts everybody at the start when the window is zero', () => {
+    // The unload spread used to have a flat 10 s floor that ignored the window,
+    // which made waves the one profile where "everybody at once" was not at
+    // once. It is capped by the window now, like the 45 s ceiling above it.
     const times = scheduleArrivals(profileFor('waves', { startS: 120, windowS: 0 }), 20, new Rng(3))
-    expect(Math.min(...times)).toBeGreaterThan(120)
-    expect(Math.max(...times)).toBeLessThanOrEqual(130)
+    expect(times).toHaveLength(20)
+    for (const t of times) expect(t).toBe(120)
   })
 })
 

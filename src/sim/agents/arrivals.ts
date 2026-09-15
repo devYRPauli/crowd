@@ -29,12 +29,23 @@ export const scheduleArrivals = (profile: ArrivalProfile, count: number, rng: Rn
       break
 
     case 'poisson': {
-      // Homogeneous Poisson process at the rate implied by count and window.
-      const rate = window > 0 ? count / window : Infinity
-      let t = start
+      // A homogeneous Poisson process, conditioned on delivering exactly `count`
+      // arrivals inside the window — which is what the setting promises.
+      //
+      // Summing `count` exponential gaps is the unconditioned process, and its
+      // last arrival lands after the window about half the time, because the
+      // total is a random sum whose mean is the window itself. "600 people over
+      // 20 minutes" then quietly delivered some of them late, anybody past the
+      // scenario duration never entered the venue at all, and the profile
+      // disagreed with every bounded one about what `windowS` meant — so a
+      // comparison against a uniform baseline was short of people.
+      //
+      // Given that a homogeneous process produced exactly `count` events in the
+      // window, those events are distributed as the order statistics of `count`
+      // uniform draws on it. So this is the same process, with none of the
+      // clustering smoothed away, and it ends when the window does.
       for (let i = 0; i < count; i++) {
-        t += window > 0 ? rng.exponential(rate) : 0
-        times.push(t)
+        times.push(start + (window > 0 ? rng.next() * window : 0))
       }
       break
     }
@@ -42,10 +53,19 @@ export const scheduleArrivals = (profile: ArrivalProfile, count: number, rng: Rn
     case 'waves': {
       const waves = Math.max(1, Math.round(profile.waves ?? 4))
       const gap = waves > 1 ? window / (waves - 1) : 0
+      // A coach does not empty instantly. Capped by the window as well as by
+      // 45 s, so that a zero-length window is everybody at once here as it is
+      // in every other profile — it used to spread them over 10 s regardless,
+      // which made "waves" the one profile where at once was not at once.
+      //
+      // The last wave lands on the end of the window and then unloads, so a
+      // wave schedule can still run up to `unload` past it. That is deliberate:
+      // the coach arriving on time is what the window describes, and the people
+      // getting off it afterwards are real.
+      const unload = Math.min(45, window, gap * 0.25 + 10)
       for (let i = 0; i < count; i++) {
         const wave = Math.floor((i * waves) / count)
-        // A little spread inside each wave: a coach does not empty instantly.
-        times.push(start + wave * gap + rng.uniform(0, Math.min(45, gap * 0.25 + 10)))
+        times.push(start + wave * gap + rng.uniform(0, unload))
       }
       break
     }
