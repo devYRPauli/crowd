@@ -23,7 +23,13 @@ import { formatArea, formatLength } from '../../core/model/units'
 import { ZONE_LABELS } from '../../core/model/defaults'
 import { add, angleOf, fromAngle } from '../../core/math/vec2'
 import type { Opening, Zone } from '../../core/model/types'
-import { DOOR_WIDTHS, WINDOW_WIDTHS, isStandard, nearestStandard } from '../../core/model/standards'
+import {
+  DOOR_WIDTHS,
+  OPENING_JAMB,
+  WINDOW_WIDTHS,
+  isStandard,
+  nearestStandard,
+} from '../../core/model/standards'
 
 const DEGREES = 180 / Math.PI
 
@@ -183,7 +189,19 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
     const opening = document.plan.openings.find((item) => item.id === ref.id)
     if (!opening) return null
     const wall = document.plan.walls.find((item) => item.id === opening.wallId)
-    const maxOffset = wall ? wallLength(wall) : 10
+    const span = wall ? wallLength(wall) : 10
+    // An opening has to leave some wall either side of it. Without this the
+    // width box accepted the whole wall, which deletes the wall from the plan
+    // without deleting it from the document, and the position slider let an
+    // opening hang off the end of one.
+    const maxWidth = Math.max(0.3, span - 2 * OPENING_JAMB)
+    const halfWidth = Math.min(opening.width, maxWidth) / 2
+    const minOffset = Math.min(halfWidth + OPENING_JAMB, span / 2)
+    const maxOffset = Math.max(minOffset, span - halfWidth - OPENING_JAMB)
+    // A doorway cannot be taller than the wall it is cut into, and a window's
+    // head cannot be either.
+    const maxHeight = wall ? Math.max(0.2, wall.height - opening.sill) : 10
+    const maxSill = wall ? Math.max(0, wall.height - opening.height) : 10
     return (
       <>
         {header(
@@ -203,7 +221,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               value={opening.width}
               units={units}
               min={0.3}
-              max={maxOffset}
+              max={maxWidth}
               onCommit={(width) =>
                 apply((doc) => updateOpening(doc, opening.id, { width }), 'Set width')
               }
@@ -234,10 +252,10 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
           </Field>
           <Slider
             label="Position along the wall"
-            min={0}
-            max={Math.max(0.1, maxOffset)}
+            min={minOffset}
+            max={maxOffset}
             step={0.05}
-            value={Math.min(opening.offset, maxOffset)}
+            value={Math.min(Math.max(opening.offset, minOffset), maxOffset)}
             format={(v) => formatLength(v, units)}
             onChange={(offset) =>
               apply((doc) => updateOpening(doc, opening.id, { offset }), 'Move opening')
@@ -249,6 +267,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={opening.height}
                 units={units}
                 min={0.2}
+                max={maxHeight}
                 onCommit={(height) =>
                   apply((doc) => updateOpening(doc, opening.id, { height }), 'Set height')
                 }
@@ -259,6 +278,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={opening.sill}
                 units={units}
                 min={0}
+                max={maxSill}
                 onCommit={(sill) =>
                   apply((doc) => updateOpening(doc, opening.id, { sill }), 'Set sill')
                 }

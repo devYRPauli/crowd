@@ -119,6 +119,17 @@ export const WALL_HEIGHTS: readonly StandardSize[] = [
  */
 export const DOUBLE_DOOR_FROM = feet(5)
 
+/**
+ * Wall that has to survive either side of an opening, in metres.
+ *
+ * A door is cut into a wall, not instead of one: something has to carry the
+ * head, and a leaf needs a jamb to hang from. Two inches is the least that
+ * reads as construction rather than as a mistake, and it stops the width box
+ * accepting the whole wall — which deletes the wall from the plan without
+ * deleting it from the document.
+ */
+export const OPENING_JAMB = inches(2)
+
 /** What the editor reaches for when nothing says otherwise. */
 export const DEFAULT_DOOR_WIDTH = feet(3)
 export const DEFAULT_DOOR_HEIGHT = feet(6, 8)
