@@ -19,12 +19,22 @@ somewhere else.
 
 - Deterministic given the seed. Every stochastic decision draws from a seeded
   `Rng`; nothing calls `Math.random`, `Date.now` or an argless `new Date()`.
+- Random streams are named after a thing's _position_ in the plan, never after
+  its id. Ids are minted per document from `Math.random`, so a stream named
+  after one makes the same venue built twice simulate differently — and a
+  comparison against a baseline then measures the ids rather than the layout.
 - The engine is pure: no DOM, no Three.js, no React, no I/O. It takes a plan and
   a scenario and produces numbers.
 - Derived geometry lives in `core/model/planGeometry.ts` and is shared by the
   renderer and the engine, so the picture on screen and the world people walk
   through cannot disagree.
 - Density is measured over an area a person occupies, never per grid cell.
+- A density used to decide how fast somebody walks is read _ahead_ of them and
+  excludes their own body. A ring counts the crowd behind you and turns a bunch
+  into a platoon; the walker's own kernel peak is most of a level-of-service
+  band on its own. The field itself counts everybody, because a person standing
+  alone still occupies floor — it is the per-person questions that take their
+  own body off.
 - Results are never fabricated. If people could not finish, the run says so.
 - Thresholds shown to the user carry the number they fired on.
 
@@ -49,6 +59,9 @@ somewhere else.
 
 - The validation suite is a public claim. Never loosen a threshold to make a test
   green: mark it failing, state the measured value and the target, and say so.
+- Where the validation harness reimplements a rule the engine also has, the
+  numbers that define the rule are shared between them. A harness that has
+  drifted from the engine is measuring something nobody ships.
 - Code-compliance figures are model-code indicative and the UI says so every
   time.
 - Comments explain why, not what. If a line exists because of something that bit

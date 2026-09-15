@@ -219,8 +219,19 @@ export class FlowFieldCache {
  * a bunch pulls away, which is what dissolves it — and what real pedestrians
  * visibly do.
  *
- * Three quarters of a metre is about one stride, and close enough to the 0.7 m
- * kernel width that the two describe the same patch of floor.
+ * Offsetting a Gaussian is the same thing as weighting neighbours by how far
+ * round they are from straight ahead, so this number is really the strength of
+ * that bias: at 0.45 m with a 0.7 m kernel, somebody half a metre in front
+ * counts about twice somebody half a metre behind, which is the order the
+ * social-force literature calibrates its own anisotropy at.
+ *
+ * It is one body across, and that is the right way to read it — the space you
+ * are about to step into. It was chosen against the bottleneck cases rather
+ * than the fundamental diagram, because the diagram barely moves across
+ * 0.25–0.55 m (0.041–0.044 m/s RMSE the whole way) while a doorway is very
+ * sensitive: too long a reach and the people in the opening see the clear floor
+ * beyond it, walk through at nearly free speed, and the door passes 30% more
+ * people than a real one. Too short and the corridor starts clotting again.
  */
 export const PACE_LOOKAHEAD = 0.45
 
