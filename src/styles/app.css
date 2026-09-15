@@ -37,7 +37,7 @@
   --border-strong: #c2cad6;
   --text: #16202e;
   --text-dim: #5c6879;
-  --text-faint: #8b95a3;
+  --text-faint: #79838f;
   --accent: #2f6df6;
   --accent-soft: #e4ecfe;
   --accent-text: #ffffff;
@@ -56,7 +56,7 @@
   --border-strong: #3a434f;
   --text: #e8edf4;
   --text-dim: #9aa5b4;
-  --text-faint: #6b7686;
+  --text-faint: #8590a0;
   --accent: #5a9bff;
   --accent-soft: #1b2c48;
   --accent-text: #08121f;
@@ -1228,6 +1228,28 @@ textarea {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Respect a stated preference for less movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* A visible focus ring everywhere, since this is a keyboard-heavy tool. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+.viewport-canvas:focus-visible {
+  outline-offset: -2px;
 }
 
 @media (max-width: 1180px) {

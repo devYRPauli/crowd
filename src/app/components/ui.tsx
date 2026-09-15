@@ -285,12 +285,36 @@ export const Modal = ({
 }) => {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      // Keep Tab inside the dialog. Without this, tabbing walks out into the
+      // editor behind it, which a keyboard or screen-reader user cannot see.
+      if (event.key !== 'Tab' || !ref.current) return
+      const focusable = ref.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === ref.current)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     ref.current?.focus()
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      previous?.focus?.()
+    }
   }, [onClose])
 
   return (

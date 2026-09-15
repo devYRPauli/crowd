@@ -186,7 +186,11 @@ export class CameraRig {
   }
 
   private startTween(next: RigState, animate: boolean): void {
-    if (!animate) {
+    // A camera that swings across the room is exactly the kind of motion people
+    // who ask for less of it are asking about.
+    const reduced =
+      typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!animate || reduced) {
       this.state = next
       this.tweenT = 1
       this.from = null

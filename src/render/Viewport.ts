@@ -155,6 +155,11 @@ export class Viewport {
     this.renderer.shadowMap.type = PCFSoftShadowMap
     this.renderer.domElement.className = 'viewport-canvas'
     this.renderer.domElement.tabIndex = 0
+    this.renderer.domElement.setAttribute('role', 'application')
+    this.renderer.domElement.setAttribute(
+      'aria-label',
+      'Venue plan. Use the tool buttons to draw, and the right mouse button or Space and drag to move the view.',
+    )
     container.appendChild(this.renderer.domElement)
 
     this.scene.background = new Color(this.materials.palette.background).convertSRGBToLinear()
