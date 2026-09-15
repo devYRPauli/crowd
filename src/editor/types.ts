@@ -43,6 +43,15 @@ export interface Tool {
   readonly cursor?: string
   onActivate?(ctx: ToolContext): void
   onDeactivate?(ctx: ToolContext): void
+  /**
+   * The document changed underneath the tool and its draft needs redrawing.
+   *
+   * Distinct from `onActivate` because a tool that is mid-gesture is not being
+   * started: a tool with no in-progress state can leave this out and let the
+   * controller fall back to `onActivate`, but anything holding a chain, a drag
+   * origin or a pending click has to redraw without throwing that away.
+   */
+  onRefresh?(ctx: ToolContext): void
   onPointerDown?(info: PointerInfo, ctx: ToolContext): void
   onPointerMove?(info: PointerInfo, ctx: ToolContext): void
   onPointerUp?(info: PointerInfo, ctx: ToolContext): void

@@ -51,6 +51,11 @@ export class WallTool implements Tool {
     this.reset(ctx)
   }
 
+  /** Redraw the chain so far; committing a segment must not end the chain. */
+  onRefresh(ctx: ToolContext): void {
+    this.refresh(ctx, null)
+  }
+
   onDeactivate(ctx: ToolContext): void {
     this.reset(ctx)
   }

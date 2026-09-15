@@ -69,9 +69,21 @@ export class ToolController {
     this.viewport.canvas.style.cursor = this.active.cursor ?? 'default'
   }
 
-  /** Let tools redraw when the document or selection changed underneath them. */
+  /**
+   * Let tools redraw when the document or selection changed underneath them.
+   *
+   * This used to call `onActivate`, which for a drawing tool means "start
+   * over". Committing a wall segment is itself a document change, so a wall
+   * chain wiped its own points the instant it drew its first segment: the tool
+   * offered to "click again to continue" and every other click silently began a
+   * new wall instead. Tools that hold state across clicks say how to redraw
+   * without being restarted; the rest still fall back to `onActivate`, which is
+   * only a redraw for them.
+   */
   refresh(): void {
-    this.active.onActivate?.(this.context())
+    const ctx = this.context()
+    if (this.active.onRefresh) this.active.onRefresh(ctx)
+    else this.active.onActivate?.(ctx)
   }
 
   handleKeyDown(event: KeyboardEvent): boolean {

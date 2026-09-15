@@ -199,6 +199,107 @@ const run = async () => {
     await page.keyboard.press('Escape')
   })
 
+  await step('doors are sizes a supplier sells', async () => {
+    await page.getByRole('button', { name: 'View and layers', exact: true }).click()
+    await page.waitForSelector('.side-panel .list-row')
+
+    const openings = page
+      .locator('.side-panel .section')
+      .filter({ hasText: /openings \(\d+\)/i })
+      .locator('.list-row')
+    const total = await openings.count()
+    if (total < 1) throw new Error('The venue has no openings to inspect.')
+
+    // Windows share the list with doorways and carry no use control, so walk
+    // the list until a doorway is selected. Every match here is case-insensitive
+    // because the inspector is upper-cased in CSS and innerText respects that.
+    let inspector = ''
+    for (let i = 0; i < total; i++) {
+      await openings.nth(i).click()
+      await page.waitForTimeout(160)
+      inspector = await page.locator('.inspector').innerText()
+      if (/doorway/i.test(inspector)) break
+    }
+    if (!/doorway/i.test(inspector)) throw new Error('No doorway was selectable from the list.')
+
+    // Every template door is drawn from the standards table. One that has
+    // drifted off a stock size is a door nobody can actually order.
+    if (/not a stock size/i.test(inspector))
+      throw new Error(`A template doorway is not an orderable size:\n${inspector}`)
+    if (!/people use it as/i.test(inspector))
+      throw new Error('A doorway did not offer the way-in/way-out control.')
+  })
+
+  await step('a doorway can be made a way out', async () => {
+    const use = page.locator('.field').filter({ hasText: 'People use it as' }).locator('select')
+    const before = await use.inputValue()
+    const target = before === 'exit' ? 'entry' : 'exit'
+
+    await use.selectOption(target)
+    await page.waitForTimeout(220)
+    if ((await use.inputValue()) !== target)
+      throw new Error(`Setting the door use to ${target} did not stick.`)
+
+    // Marking a door is an edit like any other, so it has to undo like one.
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(250)
+    if ((await use.inputValue()) !== before)
+      throw new Error('Undo did not restore how the door was used.')
+
+    // Put it back the way it was found. A venue whose only door is marked as a
+    // way out has nowhere for anybody to arrive, and the steps after this one
+    // still need a plan that runs.
+    await use.selectOption(before)
+    await page.waitForTimeout(220)
+    await page.keyboard.press('Escape')
+  })
+
+  await step('a saved project comes back', async () => {
+    const furnitureCount = async () => {
+      await page.getByRole('button', { name: 'View and layers', exact: true }).click()
+      await page.waitForSelector('.side-panel .list-row')
+      const text = await page.locator('.side-panel').innerText()
+      return Number(text.match(/furniture \((\d+)\)/i)?.[1] ?? '0')
+    }
+
+    await page.getByRole('button', { name: 'Projects', exact: true }).click()
+    await page.waitForSelector('.modal')
+    await page.getByRole('button', { name: 'Save this project' }).click()
+    await page.waitForTimeout(600)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('.modal', { state: 'detached' })
+
+    const saved = await furnitureCount()
+    if (saved < 1) throw new Error('The venue has no furniture to lose.')
+
+    await page
+      .locator('.side-panel .section')
+      .filter({ hasText: /furniture \(\d+\)/i })
+      .locator('.list-row')
+      .first()
+      .click()
+    await page.waitForTimeout(200)
+    await page.keyboard.press('Delete')
+    await page.waitForTimeout(250)
+    if ((await furnitureCount()) !== saved - 1)
+      throw new Error('The item to be recovered was never deleted.')
+
+    // Reopening is the only proof that the save wrote a whole document and not
+    // a reference to the one still in memory.
+    await page.getByRole('button', { name: 'Projects', exact: true }).click()
+    await page.waitForSelector('.modal .list-row')
+    await page.locator('.modal .list-row').first().click()
+    await page.waitForTimeout(700)
+    if (await page.locator('.modal').count()) {
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('.modal', { state: 'detached' })
+    }
+
+    if ((await furnitureCount()) !== saved)
+      throw new Error('Reopening the saved project did not restore the venue.')
+    await page.keyboard.press('Escape')
+  })
+
   await step('run the simulation', async () => {
     // Fastest playback, so the run reaches its busy period inside the test.
     await page.getByRole('button', { name: '60×' }).click()
@@ -280,6 +381,208 @@ const run = async () => {
     // frames are still being produced at all — a shader that fails to compile or
     // a render loop that stalls shows up as zero.
     if (fps < 2) throw new Error(`Frame rate collapsed to ${fps.toFixed(1)} fps.`)
+  })
+
+  // -------------------------------------------------------------------------
+  // A venue built from nothing, which is the path a new user actually takes.
+  // Everything before this started from a template; none of it proves you can
+  // draw a room, put a door in it, furnish it, fill it with people and get an
+  // answer. This does, through the real UI, with no fixtures.
+  // -------------------------------------------------------------------------
+
+  const countInList = async (kind) => {
+    await page.getByRole('button', { name: 'View and layers', exact: true }).click()
+    await page.waitForTimeout(160)
+    const text = await page.locator('.side-panel').innerText()
+    return Number(text.match(new RegExp(`${kind} \\((\\d+)\\)`, 'i'))?.[1] ?? '0')
+  }
+
+  await step('start an empty venue', async () => {
+    await page.getByRole('button', { name: 'Projects', exact: true }).click()
+    await page.waitForSelector('.modal')
+    await page.getByRole('button', { name: 'New empty project' }).click()
+    await page.waitForSelector('.modal', { state: 'detached' })
+    await page.waitForTimeout(400)
+
+    if ((await countInList('walls')) !== 0)
+      throw new Error('A new project did not start with an empty plan.')
+  })
+
+  await step('draw a room out of four walls', async () => {
+    // Straight down, so that every click lands on the ground plane. In the 3D
+    // view a point near the top of the canvas can sit above the horizon, where
+    // the pick ray never meets the floor and the click is silently dropped —
+    // which is a fair thing for the app to do and a trap for a test.
+    await page.getByRole('button', { name: 'Plan', exact: true }).click()
+    await page.waitForTimeout(1200)
+
+    await page.keyboard.press('w')
+    const box = await page.locator('canvas.viewport-canvas').boundingBox()
+    // A closed rectangle, drawn as a chain and closed back onto its start.
+    const corners = [
+      [-180, -120],
+      [180, -120],
+      [180, 120],
+      [-180, 120],
+      [-180, -120],
+    ]
+    for (const [dx, dy] of corners) {
+      await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 8 })
+      await page.waitForTimeout(120)
+      await page.mouse.down()
+      await page.mouse.up()
+      await page.waitForTimeout(450)
+    }
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(350)
+
+    const walls = await countInList('walls')
+    if (walls < 4) throw new Error(`Drew four walls but the plan has ${walls}.`)
+  })
+
+  await page.screenshot({ path: `${OUT}/06-drawn-room.png` })
+
+  await step('cut a door into a wall', async () => {
+    await page.keyboard.press('d')
+    const box = await page.locator('canvas.viewport-canvas').boundingBox()
+    // The middle of the first wall the chain above drew.
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 120, { steps: 8 })
+    await page.waitForTimeout(150)
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.waitForTimeout(400)
+    await page.keyboard.press('Escape')
+
+    const openings = await countInList('openings')
+    if (openings < 1) throw new Error('Clicking a wall with the door tool cut no opening.')
+  })
+
+  await step('mark that door as the way in and out', async () => {
+    await page
+      .locator('.side-panel .section')
+      .filter({ hasText: /openings \(\d+\)/i })
+      .locator('.list-row')
+      .first()
+      .click()
+    await page.waitForTimeout(220)
+
+    const use = page.locator('.field').filter({ hasText: 'People use it as' }).locator('select')
+    if ((await use.count()) === 0)
+      throw new Error('The door the tool cut does not offer the way-in/way-out control.')
+    await use.selectOption('both')
+    await page.waitForTimeout(220)
+    await page.keyboard.press('Escape')
+  })
+
+  await step('furnish it from the library', async () => {
+    const before = await countInList('furniture')
+    await page.getByRole('button', { name: 'Library', exact: true }).click()
+    await page.waitForSelector('.catalog-grid')
+    await page.locator('.catalog-grid button').first().click()
+    await page.waitForTimeout(200)
+
+    const box = await page.locator('canvas.viewport-canvas').boundingBox()
+    for (const [dx, dy] of [
+      [-90, -30],
+      [0, -30],
+      [90, -30],
+    ]) {
+      await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 6 })
+      await page.waitForTimeout(150)
+      await page.mouse.down()
+      await page.mouse.up()
+      await page.waitForTimeout(350)
+    }
+    await page.keyboard.press('Escape')
+
+    const after = await countInList('furniture')
+    if (after <= before) throw new Error('Placing from the library added no furniture.')
+
+    await page.getByRole('button', { name: '3D', exact: true }).click()
+    await page.waitForTimeout(900)
+  })
+
+  await page.screenshot({ path: `${OUT}/07-furnished.png` })
+
+  await step('put a crowd in it', async () => {
+    await page.getByRole('button', { name: 'Scenario', exact: true }).click()
+    await page.waitForTimeout(250)
+
+    const panel = await page.locator('.side-panel').innerText()
+    if (!/people/i.test(panel)) {
+      await page.getByRole('button', { name: /Add another group/ }).click()
+      await page.waitForTimeout(300)
+    }
+
+    const people = page
+      .locator('.field')
+      .filter({ hasText: /^People/ })
+      .locator('input')
+      .first()
+    await people.fill('60')
+    await people.blur()
+    await page.waitForTimeout(300)
+
+    const playbar = await page.locator('.playbar').innerText()
+    if (!/\d/.test(playbar)) throw new Error('The playback bar never reported a population.')
+  })
+
+  await step('run the venue that was just drawn', async () => {
+    await page.getByRole('button', { name: '60×' }).click()
+    await page.getByRole('button', { name: /^Run$/ }).click()
+    await page.waitForFunction(
+      () => {
+        const text = document.querySelector('.live-stats')?.textContent ?? ''
+        const inside = Number(text.match(/(\d+)\s*inside/)?.[1] ?? '0')
+        return inside > 0
+      },
+      undefined,
+      { timeout: 45_000 },
+    )
+    await page.waitForTimeout(2500)
+  })
+
+  await page.screenshot({ path: `${OUT}/08-scratch-running.png` })
+
+  await step('read a number back out of it', async () => {
+    await page.getByRole('button', { name: 'Results', exact: true }).click()
+    await page.waitForTimeout(600)
+
+    // Wait for the run to actually finish. Reading the panel while it still
+    // says "Running" proves only that a panel exists, which is the weaker
+    // claim; the point of this chapter is that a venue drawn from nothing
+    // produces an answer.
+    await page
+      .waitForFunction(
+        () => {
+          const text = document.querySelector('.side-panel')?.textContent ?? ''
+          return !/results appear when it finishes/i.test(text)
+        },
+        undefined,
+        { timeout: 120_000 },
+      )
+      .catch(() => {})
+
+    // The venue drawn above has a single door that is both the way in and the
+    // way out, and a crowd with no itinerary, so people arrive and leave by the
+    // same opening and the mean journey is legitimately near zero. What is
+    // under test is that the loop closes at all: drawn plan in, numbers out.
+    const results = await page.locator('.side-panel').innerText()
+    if (/results appear when it finishes/i.test(results))
+      throw new Error('The run never finished, so the results panel never filled in.')
+    // A finished run reports how long it took people to get through.
+    if (!/\d/.test(results)) throw new Error(`The results panel reported nothing:\n${results}`)
+    console.log(
+      `\n    results after a from-scratch run:\n      ${results.split('\n').slice(0, 6).join('\n      ')}`,
+    )
+
+    // Back to a stopped editor if the run has not already ended by itself —
+    // once it finishes there is nothing left to stop and the button is gone.
+    const stop = page.getByRole('button', { name: 'Stop', exact: true })
+    if (await stop.count()) {
+      await stop.click()
+      await page.waitForTimeout(900)
+    }
   })
 
   await step('dark theme', async () => {
