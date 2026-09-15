@@ -132,7 +132,7 @@ few seconds, because the queue that makes the far door worth the walk has not
 formed yet when they set off. Without it a crowd queues at the nearest exit
 however long the line grows while an identical door stands open, and a planner
 asking whether a second exit is worth it gets told it bought nothing. In a hall
-with a door at each end, 300 people clear 33% faster for using both.
+with a door at each end, 300 people clear 32% faster for using both.
 
 **2. Avoid — ORCA.**
 Optimal Reciprocal Collision Avoidance, ported faithfully from the RVO2
