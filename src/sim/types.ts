@@ -43,7 +43,11 @@ export interface SimStats {
   meanDensity: number
   peakDensity: number
   meanSpeed: number
-  /** Share of active people moving below 0.3 m/s. */
+  /** Mean speed of people currently trying to get somewhere. */
+  meanWalkingSpeed: number
+  /** How many people are currently trying to get somewhere. */
+  walking: number
+  /** Share of those people moving below 0.3 m/s — the congestion indicator. */
   stoppedShare: number
   meanWait: number
   maxWait: number

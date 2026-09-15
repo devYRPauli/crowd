@@ -16,12 +16,27 @@
  * produces the same numbers, which is what makes two layouts comparable.
  */
 
-import type { Plan, Scenario } from '../core/model/types'
+import type { ItineraryStep, Plan, Scenario } from '../core/model/types'
 import type { Vec2 } from '../core/math/vec2'
-import { Rng, sampleDistribution } from '../core/math/random'
+import { Rng, distributionMean, sampleDistribution } from '../core/math/random'
 import { distance, normalize } from '../core/math/vec2'
-import { closestPointOnPolyline, pointAlongPolyline, pointInPolygon } from '../core/math/geometry'
-import { buildWorld, queueSlotFacing, queueSlotPosition, samplePointInDestination, servicePositionFor, type DestinationRecord, type QueueRecord, type SimWorld } from './world'
+import {
+  closestPointOnPolyline,
+  distanceToPolygonEdge,
+  pointAlongPolyline,
+  pointInPolygon,
+} from '../core/math/geometry'
+import {
+  buildWorld,
+  nearestFreeCell,
+  queueSlotFacing,
+  queueSlotPosition,
+  samplePointInDestination,
+  servicePositionFor,
+  type DestinationRecord,
+  type QueueRecord,
+  type SimWorld,
+} from './world'
 import { cellCenter, gridIndex, sampleField, worldToCell } from './nav/eikonal'
 import { DensityField, FlowFieldCache, speedFromDensity } from './nav/flowFields'
 import { computeNewVelocity, type OrcaAgentState } from './avoidance/orca'
@@ -91,8 +106,18 @@ interface Agent {
   distance: number
   stoppedTime: number
   queueTime: number
-  stuckTime: number
-  progressFrom: Vec2
+  /** How many times this person has been re-planned after getting stuck. */
+  replanCount: number
+  /** True once they have given up on their itinerary, so it is reported once. */
+  gaveUp: boolean
+  /** The step index `beginStep` last started, so patience resets per destination. */
+  lastStepBegun: number
+  /** Seconds since the last progress check. */
+  walkTime: number
+  /** Closest this person has come to their current destination. */
+  bestDistance: number
+  /** Seconds spent barely moving while trying to walk, for jam breaking. */
+  jamTime: number
   finishedAt: number | null
   straightLineFrom: Vec2
 }
@@ -118,6 +143,8 @@ interface QueueState {
   totalService: number
   busyTime: number
   maxQueue: number
+  /** Resolved positions for slots past the end of the drawn line. */
+  overflowPositions: Map<number, Vec2>
 }
 
 export interface SimSnapshot {
@@ -153,8 +180,10 @@ export class Simulation {
   private peakOccupancy = 0
   private peakDensity = 0
   private warnings: string[] = []
+  private abandoned = 0
   private evacuated = false
 
+  private overlapScratch = new Float32Array(0)
   private positionScratch: Float32Array
   private packed: Float32Array
   private neighbourScratch: OrcaAgentState[] = []
@@ -198,6 +227,7 @@ export class Simulation {
         totalService: 0,
         busyTime: 0,
         maxQueue: 0,
+        overflowPositions: new Map(),
       })
     }
 
@@ -308,7 +338,10 @@ export class Simulation {
     return pool[entryIndex % pool.length]
   }
 
+  private spawnedThisTick: Array<{ x: number; y: number; radius: number }> = []
+
   private spawnDue(): void {
+    this.spawnedThisTick.length = 0
     while (
       this.pendingCursor < this.pending.length &&
       this.pending[this.pendingCursor].time <= this.time
@@ -321,8 +354,19 @@ export class Simulation {
     }
   }
 
-  /** True when the point is far enough from everyone already in the venue. */
+  /**
+   * True when the point is far enough from everyone already in the venue.
+   *
+   * The spatial hash is rebuilt at the start of the tick, so it does not know
+   * about anyone spawned during this one. Without also checking those, a batch
+   * of arrivals all lands on the same spot and ORCA is handed an overlap it
+   * cannot undo.
+   */
   private isClear(x: number, y: number, radius: number): boolean {
+    for (const placed of this.spawnedThisTick) {
+      const minimum = (radius + placed.radius) * 1.05
+      if ((placed.x - x) ** 2 + (placed.y - y) ** 2 < minimum * minimum) return false
+    }
     let clear = true
     this.hash.query(x, y, radius + 0.6, (id) => {
       if (!clear) return
@@ -390,14 +434,19 @@ export class Simulation {
       distance: 0,
       stoppedTime: 0,
       queueTime: 0,
-      stuckTime: 0,
-      progressFrom: { x: position.x, y: position.y },
+      replanCount: 0,
+      gaveUp: false,
+      lastStepBegun: -1,
+      walkTime: 0,
+      bestDistance: Infinity,
+      jamTime: 0,
       finishedAt: null,
       straightLineFrom: { x: position.x, y: position.y },
     }
     this.agents.push(agent)
     this.live.push(agent.id)
     this.beginStep(agent)
+    this.spawnedThisTick.push({ x: agent.x, y: agent.y, radius: agent.radius })
     this.peakOccupancy = Math.max(this.peakOccupancy, this.live.length)
     return true
   }
@@ -412,6 +461,16 @@ export class Simulation {
   private beginStep(agent: Agent): void {
     const itinerary = this.itineraryOf(agent)
     const rng = this.rng.branch(`step:${agent.id}:${agent.stepIndex}`)
+    // Whatever they were walking towards before, this step replaces it.
+    agent.pendingQueueId = null
+    // Patience is per destination. Somebody who struggled to reach the bar has
+    // not used up their allowance for finding the door afterwards.
+    if (agent.lastStepBegun !== agent.stepIndex) {
+      agent.lastStepBegun = agent.stepIndex
+      agent.replanCount = 0
+    }
+    agent.walkTime = 0
+    agent.bestDistance = Infinity
 
     while (agent.stepIndex < itinerary.length) {
       const step = itinerary[agent.stepIndex]
@@ -438,7 +497,7 @@ export class Simulation {
           return
         }
         case 'service': {
-          const queue = this.queues.get(step.targetId ?? '')
+          const queue = this.chooseQueue(agent, step)
           if (!queue) {
             agent.stepIndex++
             continue
@@ -449,9 +508,8 @@ export class Simulation {
           // the whole queue gridlocks trying to swap places.
           agent.state = 'walking'
           agent.pendingQueueId = queue.record.id
-          agent.fieldTarget = queue.record.id
-          agent.exactTarget = this.joinPoint(queue)
           agent.facingTarget = null
+          this.aimAtQueue(queue, agent, this.nextFreeSlot(queue))
           return
         }
         case 'seat': {
@@ -489,6 +547,7 @@ export class Simulation {
   private headForExit(agent: Agent): void {
     const best = this.nearestExit(agent)
     agent.state = 'walking'
+    agent.pendingQueueId = null
     agent.stepIndex = this.itineraryOf(agent).length
     if (!best) {
       // Nowhere to go: stand still rather than walking into a wall.
@@ -534,10 +593,42 @@ export class Simulation {
     return best
   }
 
-  /** Where the next person to arrive should stand. */
-  private joinPoint(queue: QueueState): Vec2 {
-    const occupied = queue.waiting.length + queue.servers.filter((id) => id >= 0).length
-    return queueSlotPosition(queue.record, Math.max(0, occupied))
+  /**
+   * Pick which counter to head for.
+   *
+   * People do not join the nearest queue, they join the one they expect to get
+   * through soonest — so the estimate is walking time plus the line ahead
+   * multiplied by the mean service time and divided by the number of staff.
+   * With one candidate this is just that counter.
+   */
+  private chooseQueue(agent: Agent, step: ItineraryStep): QueueState | undefined {
+    const ids = step.targetIds?.length ? step.targetIds : step.targetId ? [step.targetId] : []
+    const candidates = ids
+      .map((id) => this.queues.get(id))
+      .filter((queue): queue is QueueState => Boolean(queue))
+    if (candidates.length <= 1) return candidates[0]
+
+    const here = { x: agent.x, y: agent.y }
+    let best: QueueState | undefined
+    let bestCost = Infinity
+    for (const queue of candidates) {
+      if (this.time < queue.record.opensAt || this.time >= queue.record.closesAt) continue
+      const walk = this.fields.cost(queue.record.id, here)
+      const ahead = queue.waiting.length + queue.servers.filter((id) => id >= 0).length
+      const serviceMean = distributionMean(queue.record.serviceTime)
+      const wait = (ahead * serviceMean) / Math.max(1, queue.record.serverCount)
+      const cost = (Number.isFinite(walk) ? walk : 120) + wait
+      if (cost < bestCost) {
+        bestCost = cost
+        best = queue
+      }
+    }
+    return best ?? candidates[0]
+  }
+
+  /** The slot index the next person to arrive should aim for. */
+  private nextFreeSlot(queue: QueueState): number {
+    return Math.max(0, queue.waiting.length)
   }
 
   private joinQueue(agent: Agent, queue: QueueState): void {
@@ -561,33 +652,78 @@ export class Simulation {
   }
 
   /**
-   * Point a queueing person at where they should be standing.
+   * Point someone at the place in a queue they are heading for.
    *
-   * Someone approaching from across the room follows the flow field to the back
-   * of the line. Once they are on the line they walk *along* it to their slot
-   * rather than cutting straight to it, which is what keeps a serpentine queue
-   * looking like a queue instead of a scrum.
+   * Approaching from across the room, they follow the flow field to the back of
+   * the line. Once they are on or near the line they walk *along* it rather
+   * than cutting straight across, which is what keeps a queue that bends round
+   * a room looking like a queue instead of a scrum — and, more importantly,
+   * stops them stalling at the field's goal while their slot is still metres
+   * further up the line.
    */
-  private aimAtQueueSlot(queue: QueueState, agent: Agent): void {
+  /**
+   * Where slot `index` actually is.
+   *
+   * Past the end of the drawn queue line the slots continue in a straight
+   * extension, which can run through a wall or off the floor. Anything that
+   * lands outside walkable space is snapped to the nearest cell that is not,
+   * so an overflowing queue backs up into the room instead of pressing a crowd
+   * into the geometry.
+   */
+  private slotPosition(queue: QueueState, index: number): Vec2 {
     const record = queue.record
-    const slotPosition = queueSlotPosition(record, agent.queueSlot)
+    if (index < record.slots.length) return record.slots[index]
+    const cached = queue.overflowPositions.get(index)
+    if (cached) return cached
+    const ideal = queueSlotPosition(record, index)
+    let resolved = ideal
+    const { col, row } = worldToCell(this.world.grid, ideal.x, ideal.y)
+    const inside =
+      col >= 0 &&
+      row >= 0 &&
+      col < this.world.grid.cols &&
+      row < this.world.grid.rows &&
+      !this.world.navBlocked[gridIndex(this.world.grid, col, row)]
+    if (!inside) {
+      const cell = nearestFreeCell(this.world.grid, this.world.navBlocked, ideal)
+      if (cell >= 0) {
+        const c = cell % this.world.grid.cols
+        const r = (cell / this.world.grid.cols) | 0
+        resolved = cellCenter(this.world.grid, c, r)
+      } else {
+        resolved = record.overflowAnchor
+      }
+    }
+    queue.overflowPositions.set(index, resolved)
+    return resolved
+  }
+
+  private aimAtQueue(queue: QueueState, agent: Agent, slotIndex: number): void {
+    const record = queue.record
+    const slotPosition = this.slotPosition(queue, slotIndex)
     const here = { x: agent.x, y: agent.y }
-    const toSlot = distance(here, slotPosition)
-    if (toSlot <= DIRECT_RANGE) {
+    if (distance(here, slotPosition) <= DIRECT_RANGE) {
       agent.exactTarget = slotPosition
       agent.fieldTarget = null
       return
     }
     const onLine = closestPointOnPolyline(record.line, here)
-    if (onLine.distance > 2.0) {
-      agent.exactTarget = queueSlotPosition(record, record.slots.length - 1)
+    const tailPosition = record.slots[record.slots.length - 1]
+    const nearLine = onLine.distance <= 2.0 || distance(here, tailPosition) <= 2.5
+    if (!nearLine) {
+      agent.exactTarget = tailPosition
       agent.fieldTarget = record.id
       return
     }
-    const slotArc = Math.min(agent.queueSlot * record.spacing, record.lineLength)
-    const nextArc = Math.max(slotArc, onLine.arc - 1.5)
+    const slotArc = Math.min(slotIndex * record.spacing, record.lineLength)
+    const startArc = onLine.distance <= 2.0 ? onLine.arc : record.lineLength
+    const nextArc = Math.max(slotArc, startArc - 1.5)
     agent.exactTarget = pointAlongPolyline(record.line, nextArc)
     agent.fieldTarget = null
+  }
+
+  private aimAtQueueSlot(queue: QueueState, agent: Agent): void {
+    this.aimAtQueue(queue, agent, agent.queueSlot)
   }
 
   private updateQueues(dt: number): void {
@@ -623,7 +759,7 @@ export class Simulation {
           continue
         }
         // Only start service once the person has actually reached the front.
-        const slot = queueSlotPosition(record, 0)
+        const slot = record.slots[0]
         if (distance({ x: head.x, y: head.y }, slot) > record.spacing * 1.6) continue
 
         queue.waiting.shift()
@@ -665,6 +801,7 @@ export class Simulation {
     this.fields.update(this.time, this.density.values)
     this.steer(dt)
     this.integrate(dt)
+    this.relaxOverlaps()
     this.accumulateLos(dt)
   }
 
@@ -694,8 +831,24 @@ export class Simulation {
    */
   private replan(agent: Agent): void {
     const rng = this.rng.branch(`replan:${agent.id}:${Math.round(this.time)}`)
+    agent.walkTime = 0
+    agent.bestDistance = Infinity
     const itinerary = this.itineraryOf(agent)
-    if (agent.stepIndex >= itinerary.length) {
+    agent.replanCount++
+    // After a few attempts, accept that this person cannot do what they came
+    // for and send them to an exit. Leaving them wandering would quietly skew
+    // every average for the rest of the run, and a plan that strands people is
+    // worth reporting rather than hiding.
+    if (agent.replanCount > 3 || agent.stepIndex >= itinerary.length) {
+      if (agent.replanCount > 3 && !agent.gaveUp) {
+        agent.gaveUp = true
+        this.abandoned++
+        if (agent.seatIndex >= 0) {
+          this.seatTaken[agent.seatIndex] = 0
+          agent.seatIndex = -1
+        }
+        this.leaveQueue(agent)
+      }
       this.headForExit(agent)
     } else {
       this.beginStep(agent)
@@ -741,21 +894,20 @@ export class Simulation {
               agent.pendingQueueId = null
               break
             }
-            const target = this.joinPoint(queue)
-            agent.exactTarget = target
+            const slot = this.nextFreeSlot(queue)
+            const target = this.slotPosition(queue, slot)
             const reach = Math.max(1.5, queue.record.spacing * 2.5)
-            const toJoin = distance({ x: agent.x, y: agent.y }, target)
-            if (toJoin <= reach) {
+            if (distance({ x: agent.x, y: agent.y }, target) <= reach) {
               this.joinQueue(agent, queue)
-            } else if (toJoin <= DIRECT_RANGE) {
-              agent.fieldTarget = null
+            } else {
+              this.aimAtQueue(queue, agent, slot)
             }
             break
           }
           const step = this.itineraryOf(agent)[agent.stepIndex]
           if (agent.stepIndex >= this.itineraryOf(agent).length) {
             // Heading for the exit.
-            if (arrived || this.insideAnyExit(agent)) this.finish(agent, i)
+            if (arrived || this.atAnyExit(agent)) this.finish(agent, i)
             break
           }
           if (!arrived) break
@@ -802,10 +954,20 @@ export class Simulation {
     }
   }
 
-  private insideAnyExit(agent: Agent): boolean {
+  /**
+   * Has this person left?
+   *
+   * Reaching the doorway counts, not just standing on its centre. Someone
+   * pressed along the wall beside a door has plainly got out, and requiring
+   * them to reach an exact point leaves a handful of people stranded at every
+   * exit — which then shows up as an evacuation that never finishes.
+   */
+  private atAnyExit(agent: Agent): boolean {
     const point = { x: agent.x, y: agent.y }
+    const reach = agent.radius + 0.35
     for (const exit of this.world.exits) {
       if (pointInPolygon(point, exit.polygon)) return true
+      if (distanceToPolygonEdge(point, exit.polygon) <= reach) return true
     }
     return false
   }
@@ -911,9 +1073,15 @@ export class Simulation {
       state.maxSpeed = agent.maxSpeed
       state.prefVelocity.x = pref.x
       state.prefVelocity.y = pref.y
-      state.timeHorizon = 2.2 * agent.caution
-      state.timeHorizonObst = 0.8
-      state.responsibility = 0.5
+
+      // In a tight crowd ORCA's linear program becomes infeasible and its
+      // relaxed fallback can hand every agent a velocity of zero at once — a
+      // deadlock that no amount of simulated time resolves. Looking a shorter
+      // way ahead as pressure builds is the standard remedy: people in a crush
+      // stop planning two seconds out and deal with the person in front.
+      const pressure = Math.min(1, agent.jamTime / 5)
+      state.timeHorizon = Math.max(0.5, 2.2 * agent.caution * (1 - 0.65 * pressure))
+      state.timeHorizonObst = Math.max(0.35, 0.8 * (1 - 0.55 * pressure))
 
       // A neighbour who will not move takes none of the responsibility.
       const anyStationary = this.neighbourScratch.some((n) => n.responsibility === 0)
@@ -927,6 +1095,19 @@ export class Simulation {
       )
       agent.vx = velocity.x
       agent.vy = velocity.y
+
+      // If avoidance still leaves them motionless after several seconds, let
+      // them creep towards where they are going. The overlap relaxation keeps
+      // the crowd at a physical packing, so this presses forward without
+      // anybody passing through anybody.
+      if (agent.jamTime > 4 && Math.hypot(agent.vx, agent.vy) < 0.05) {
+        const push = Math.hypot(pref.x, pref.y)
+        if (push > 1e-6) {
+          const creep = 0.14
+          agent.vx = (pref.x / push) * creep
+          agent.vy = (pref.y / push) * creep
+        }
+      }
     }
     void dt
   }
@@ -953,7 +1134,10 @@ export class Simulation {
         { x: agent.x, y: agent.y },
         agent.routeAwareness,
       )
-      if (route) {
+      // A degenerate route means the field has nothing left to say — usually
+      // because the person is already standing inside a large destination.
+      // Fall back to heading for the exact spot they were given.
+      if (route && (route.dx !== 0 || route.dy !== 0)) {
         dirX = route.dx
         dirY = route.dy
       } else if (target) {
@@ -1005,6 +1189,23 @@ export class Simulation {
     const localDensity = sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0)
     speed *= speedFromDensity(localDensity)
 
+    // Somebody who has been going nowhere for a few seconds tries stepping
+    // around the obstruction instead of pushing into it. Real crowds unjam by
+    // shuffling sideways, and without it a dense group can lock solid: every
+    // person pressing straight ahead leaves nobody with room to give way.
+    if (agent.jamTime > 2.5) {
+      const side = agent.id % 2 === 0 ? 1 : -1
+      const strength = Math.min(1, (agent.jamTime - 2.5) / 3)
+      dirX += -dirY * side * strength
+      dirY += dirX * side * strength
+      const length = Math.hypot(dirX, dirY)
+      if (length > 1e-6) {
+        dirX /= length
+        dirY /= length
+      }
+      speed = Math.max(speed, agent.preferredSpeed * 0.35)
+    }
+
     return { x: dirX * speed, y: dirY * speed }
   }
 
@@ -1035,6 +1236,14 @@ export class Simulation {
       if (speed < SLOW_SPEED && agent.state !== 'seated' && agent.state !== 'served') {
         agent.stoppedTime += dt
       }
+      // Track how long someone has been going nowhere, so the steering layer
+      // can try stepping around rather than pressing harder.
+      if (agent.state === 'walking' || agent.state === 'queuing') {
+        if (speed < 0.06) agent.jamTime += dt
+        else if (speed > 0.25) agent.jamTime = 0
+      } else {
+        agent.jamTime = 0
+      }
       if (speed > 0.05) {
         agent.heading = Math.atan2(agent.vy, agent.vx)
       } else if (agent.facingTarget !== null) {
@@ -1062,17 +1271,108 @@ export class Simulation {
       // Someone who has barely moved for half a minute is stuck on geometry we
       // did not anticipate. Re-planning beats leaving them there for the rest
       // of the run, quietly skewing every average.
+      // Are they closing on where they are going?
+      //
+      // Progress towards the target is the right test, not speed and not
+      // elapsed time. Someone inching through a busy doorway is fine and will
+      // get there; someone circling a hall at full speed, or pressed against
+      // geometry they cannot pass, will not — and both look identical to a
+      // stopwatch.
       if (agent.state === 'walking') {
-        agent.stuckTime += dt
-        if (agent.stuckTime >= 30) {
-          const progress = distance({ x: agent.x, y: agent.y }, agent.progressFrom)
-          if (progress < 0.75) this.replan(agent)
-          agent.stuckTime = 0
-          agent.progressFrom = { x: agent.x, y: agent.y }
+        agent.walkTime += dt
+        if (agent.walkTime >= 30) {
+          agent.walkTime = 0
+          const target = agent.exactTarget
+          const remaining = target ? distance({ x: agent.x, y: agent.y }, target) : 0
+          if (remaining < agent.bestDistance - 0.5) {
+            agent.bestDistance = remaining
+          } else {
+            // Not closing — but waiting your turn at a busy door is not being
+            // stuck, and re-planning someone in a queue of thirty people only
+            // sends them somewhere worse. Only count it against them when
+            // there is nobody in the way.
+            const crowded =
+              sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0) > 0.8
+            if (!crowded) this.replan(agent)
+          }
         }
       } else {
-        agent.stuckTime = 0
-        agent.progressFrom = { x: agent.x, y: agent.y }
+        agent.walkTime = 0
+        agent.bestDistance = Infinity
+      }
+    }
+  }
+
+  /**
+   * Push apart anyone who ended the step overlapping.
+   *
+   * ORCA prevents collisions it can see coming, but when a crowd is pressed
+   * against a wall or a closed counter its linear program becomes infeasible
+   * and the relaxed fallback lets people drift into each other. Without this
+   * pass a jam keeps compressing and reports densities no real crowd reaches —
+   * twenty-plus persons per square metre — which then poisons every measure
+   * derived from density. One positional relaxation per step is enough to hold
+   * the crowd at a physical packing.
+   */
+  private relaxOverlaps(): void {
+    const count = this.live.length
+    if (count < 2) return
+    this.rebuildHash()
+    const corrections = this.overlapScratch
+    if (corrections.length < count * 2) this.overlapScratch = new Float32Array(count * 2)
+    this.overlapScratch.fill(0, 0, count * 2)
+
+    const index = new Map<number, number>()
+    for (let i = 0; i < count; i++) index.set(this.live[i], i)
+
+    for (let i = 0; i < count; i++) {
+      const agent = this.agents[this.live[i]]
+      this.hash.query(agent.x, agent.y, agent.radius * 2 + 0.4, (otherId) => {
+        if (otherId <= agent.id) return
+        const slot = index.get(otherId)
+        if (slot === undefined) return
+        const other = this.agents[otherId]
+        const dx = other.x - agent.x
+        const dy = other.y - agent.y
+        const minimum = agent.radius + other.radius
+        const distanceSq = dx * dx + dy * dy
+        if (distanceSq >= minimum * minimum || distanceSq < 1e-12) return
+        const length = Math.sqrt(distanceSq)
+        const penetration = (minimum - length) * 0.5
+        const nx = dx / length
+        const ny = dy / length
+        // Someone seated or being served holds their place; the mover gives way.
+        const agentFixed = agent.state === 'seated' || agent.state === 'served'
+        const otherFixed = other.state === 'seated' || other.state === 'served'
+        const agentShare = agentFixed ? 0 : otherFixed ? 1 : 0.5
+        const otherShare = otherFixed ? 0 : agentFixed ? 1 : 0.5
+        this.overlapScratch[i * 2] -= nx * penetration * 2 * agentShare
+        this.overlapScratch[i * 2 + 1] -= ny * penetration * 2 * agentShare
+        this.overlapScratch[slot * 2] += nx * penetration * 2 * otherShare
+        this.overlapScratch[slot * 2 + 1] += ny * penetration * 2 * otherShare
+      })
+    }
+
+    const bounds = this.world.bounds
+    for (let i = 0; i < count; i++) {
+      const agent = this.agents[this.live[i]]
+      const dx = this.overlapScratch[i * 2]
+      const dy = this.overlapScratch[i * 2 + 1]
+      if (dx === 0 && dy === 0) continue
+      // Cap the correction so a deep pile-up eases apart over several steps
+      // rather than exploding outwards in one.
+      const length = Math.hypot(dx, dy)
+      const capped = Math.min(length, 0.08)
+      agent.x += (dx / length) * capped
+      agent.y += (dy / length) * capped
+      agent.x = Math.min(Math.max(agent.x, bounds.minX + 0.3), bounds.maxX - 0.3)
+      agent.y = Math.min(Math.max(agent.y, bounds.minY + 0.3), bounds.maxY - 0.3)
+      const clearance = sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10)
+      if (clearance < agent.radius) {
+        const push = this.clearanceGradient(agent.x, agent.y)
+        const correction = Math.min(agent.radius - clearance, 0.2)
+        agent.x += push.x * correction
+        agent.y += push.y * correction
       }
     }
   }
@@ -1104,7 +1404,17 @@ export class Simulation {
       queueSlot: agent.queueSlot,
       speed: Math.hypot(agent.vx, agent.vy),
       queueTime: agent.queueTime,
-      stuckTime: agent.stuckTime,
+      jamTime: agent.jamTime,
+      replanCount: agent.replanCount,
+      gaveUp: agent.gaveUp,
+      distanceToTarget: agent.exactTarget
+        ? distance({ x: agent.x, y: agent.y }, agent.exactTarget)
+        : null,
+      route: agent.fieldTarget
+        ? this.fields.direction(agent.fieldTarget, { x: agent.x, y: agent.y }, agent.routeAwareness)
+        : null,
+      clearance: sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10),
+      density: sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0),
     }
   }
 
@@ -1158,6 +1468,8 @@ export class Simulation {
 
   stats(): SimStats {
     let speedSum = 0
+    let walkingSpeedSum = 0
+    let walking = 0
     let stopped = 0
     let densitySum = 0
     let peak = 0
@@ -1167,7 +1479,14 @@ export class Simulation {
       const agent = this.agents[id]
       const speed = Math.hypot(agent.vx, agent.vy)
       speedSum += speed
-      if (speed < SLOW_SPEED) stopped++
+      // Somebody sitting at a table, or standing in a queue where they are
+      // meant to be, is not congestion. Only people actually trying to get
+      // somewhere count towards how well the crowd is flowing.
+      if (agent.state === 'walking') {
+        walking++
+        walkingSpeedSum += speed
+        if (speed < SLOW_SPEED) stopped++
+      }
       const density = sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0)
       densitySum += density
       peak = Math.max(peak, density)
@@ -1188,7 +1507,9 @@ export class Simulation {
       meanDensity: densitySum / count,
       peakDensity: peak,
       meanSpeed: speedSum / count,
-      stoppedShare: stopped / count,
+      meanWalkingSpeed: walking > 0 ? walkingSpeedSum / walking : 0,
+      walking,
+      stoppedShare: walking > 0 ? stopped / walking : 0,
       meanWait: queueing > 0 ? waitSum / queueing : 0,
       maxWait,
       queueLengths: [...this.queues.values()].map((queue) => ({
@@ -1239,6 +1560,11 @@ export class Simulation {
       : 0
 
     const warnings = [...this.warnings]
+    if (this.abandoned > 0) {
+      warnings.push(
+        `${this.abandoned} ${this.abandoned === 1 ? 'person' : 'people'} could not reach somewhere on their route and left instead. Check for a destination that is blocked or hard to get to.`,
+      )
+    }
     if (this.live.length > 0 && this.time >= this.scenario.durationS) {
       warnings.push(
         `${this.live.length} people had not left when the run ended; extend the duration for a complete picture.`,

@@ -165,9 +165,16 @@ export const removeObjects = (doc: CrowdDocument, refs: readonly PlanObjectRef[]
   const removedTargets = new Set([...zoneIds, ...serviceIds])
   const populations = doc.scenario.populations.map((pop) => {
     const entryIds = pop.entryIds.filter((id) => !removedTargets.has(id))
-    const itinerary = pop.itinerary.filter(
-      (step) => !step.targetId || !removedTargets.has(step.targetId),
-    )
+    const itinerary = pop.itinerary
+      .map((step) =>
+        step.targetIds
+          ? { ...step, targetIds: step.targetIds.filter((id) => !removedTargets.has(id)) }
+          : step,
+      )
+      .filter((step) => {
+        if (step.targetIds && step.targetIds.length > 0) return true
+        return !step.targetId || !removedTargets.has(step.targetId)
+      })
     return entryIds.length === pop.entryIds.length && itinerary.length === pop.itinerary.length
       ? pop
       : { ...pop, entryIds, itinerary }

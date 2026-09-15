@@ -196,6 +196,12 @@ export interface ItineraryStep {
   kind: ItineraryStepKind
   /** Zone id for `goto`/`dwell`/`seat`, service point id for `service`. */
   targetId?: string
+  /**
+   * Alternatives for a `service` step. When several counters can serve the
+   * same purpose, people pick the one they expect to get through soonest —
+   * which is what balances parallel desks instead of queueing them all at one.
+   */
+  targetIds?: string[]
   /** Probability the step is performed at all, 0–1. Defaults to 1. */
   probability?: number
   /** For `dwell`/`seat`: how long the person stays. */

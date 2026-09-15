@@ -85,9 +85,14 @@ const mix = (hash: number, value: number): number =>
 /**
  * Deterministic direction to nudge two coincident agents apart along. They have
  * no relative position to avoid along and RVO2 would divide by zero; hashing the
- * pair keeps the nudge reproducible, which `Math.random` would not. Velocities
- * join the hash only so the two agents of a pair pick opposing nudges whenever
- * anything about them differs.
+ * pair keeps the nudge reproducible, which `Math.random` would not.
+ *
+ * The nudge only breaks the division, it does not guarantee the two agents of a
+ * pair pick opposing directions: the hash is not antisymmetric in them, and this
+ * close their positions quantise alike, so a pair that also shares a velocity
+ * hashes to the same angle and drifts together. No function of two identical
+ * states can separate them. What does separate a coincident pair is a difference
+ * in velocity, which dominates `w` in the collision branch below.
  */
 const perturbationAngle = (a: OrcaAgentState, b: OrcaAgentState): number => {
   let hash = FNV_OFFSET

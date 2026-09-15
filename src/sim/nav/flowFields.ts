@@ -151,6 +151,10 @@ export class FlowFieldCache {
     const field = this.fields.get(id)
     if (!field) return null
     const shortest = sampleGradient(this.grid, field.staticPotential, point.x, point.y)
+    // Standing inside the destination leaves nothing to descend: the potential
+    // is flat and the gradient is zero. That is not a direction, so say so and
+    // let the caller steer at whatever exact spot it was aiming for.
+    if (shortest && shortest.dx === 0 && shortest.dy === 0) return null
     if (awareness <= 0.01 || field.refreshedAt === -Infinity) {
       return shortest ? { dx: shortest.dx, dy: shortest.dy, cost: shortest.value } : null
     }

@@ -168,12 +168,28 @@ export const nearestFreeCell = (grid: NavGrid, blocked: Uint8Array, p: Vec2): nu
   return -1
 }
 
+/**
+ * Prefer cells with room to stand in.
+ *
+ * A destination polygon drawn over a dining floor includes the slivers between
+ * a table and its chairs. Nobody chooses to stand wedged in there, and sending
+ * someone to one produces a person who spends the whole run shuffling against
+ * furniture. Cells with real clearance are used when enough of them exist; the
+ * cramped ones stay available as a fallback so a genuinely tight space still
+ * works.
+ */
+const preferOpenCells = (cells: number[], clearance: Float32Array, minClearance = 0.5): number[] => {
+  const open = cells.filter((cell) => clearance[cell] >= minClearance)
+  return open.length >= Math.max(4, cells.length * 0.15) ? open : cells
+}
+
 const destinationFrom = (
   zone: Zone,
   grid: NavGrid,
   blocked: Uint8Array,
+  clearance: Float32Array,
 ): DestinationRecord => {
-  const cells = cellsInPolygon(grid, zone.polygon, blocked)
+  const cells = preferOpenCells(cellsInPolygon(grid, zone.polygon, blocked), clearance)
   const center = polygonCentroid(zone.polygon)
   if (cells.length === 0) {
     const fallback = nearestFreeCell(grid, blocked, center)
@@ -291,7 +307,7 @@ export const buildWorld = (
   const waypoints: DestinationRecord[] = []
   const measures: DestinationRecord[] = []
   for (const zone of plan.zones) {
-    const record = destinationFrom(zone, grid, navBlocked)
+    const record = destinationFrom(zone, grid, navBlocked, clearance)
     if (zone.kind === 'entry') entries.push(record)
     else if (zone.kind === 'exit') exits.push(record)
     else if (zone.kind === 'measure') measures.push(record)
@@ -303,7 +319,19 @@ export const buildWorld = (
     const spacing = Math.max(0.35, sp.queueSpacing)
     const length = polylineLength(line)
     const slotCount = Math.max(1, Math.floor(length / spacing) + 1)
-    const slots = samplePolyline(line, spacing, slotCount)
+    // A queue can be drawn across a table or through a column. Snapping each
+    // waiting position onto walkable floor keeps the line usable instead of
+    // sending people to stand somewhere they can never reach.
+    const slots = samplePolyline(line, spacing, slotCount).map((slot) => {
+      const { col, row } = worldToCell(grid, slot.x, slot.y)
+      const inside =
+        col >= 0 && row >= 0 && col < grid.cols && row < grid.rows &&
+        !navBlocked[gridIndex(grid, col, row)]
+      if (inside) return slot
+      const cell = nearestFreeCell(grid, navBlocked, slot)
+      if (cell < 0) return slot
+      return cellCenter(grid, cell % grid.cols, (cell / grid.cols) | 0)
+    })
     const slotFacing = slots.map((_, i) => {
       const ahead = slots[Math.max(0, i - 1)]
       const here = slots[i]
@@ -349,7 +377,16 @@ export const buildWorld = (
     queue.goalCells = cellsAt
   }
 
-  const seats: SeatRecord[] = planSeats(plan).map((seat, index) => ({ ...seat, index }))
+  // Only offer seats somebody can actually get to. A chair pushed against a
+  // wall, or one that ended up inside the stage, is a seat on the drawing and
+  // a trap in the simulation.
+  const seats: SeatRecord[] = planSeats(plan)
+    .filter((seat) => {
+      const { col, row } = worldToCell(grid, seat.position.x, seat.position.y)
+      if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false
+      return !navBlocked[gridIndex(grid, col, row)]
+    })
+    .map((seat, index) => ({ ...seat, index }))
 
   let freeCells = 0
   for (let i = 0; i < cells; i++) if (!solid[i]) freeCells++

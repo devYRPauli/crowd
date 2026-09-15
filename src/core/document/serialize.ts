@@ -215,6 +215,9 @@ const parseItineraryStep = (raw: unknown): ItineraryStep | null => {
     id: str(raw.id, newId('step')),
     kind,
     ...(typeof raw.targetId === 'string' ? { targetId: raw.targetId } : {}),
+    ...(Array.isArray(raw.targetIds)
+      ? { targetIds: raw.targetIds.filter((v): v is string => typeof v === 'string') }
+      : {}),
     ...(typeof raw.probability === 'number' ? { probability: raw.probability } : {}),
     ...(parseDistribution(raw.duration, 60)
       ? { duration: parseDistribution(raw.duration, 60) }

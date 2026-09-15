@@ -274,7 +274,11 @@ const SEATING: CatalogItem[] = [
     name: 'Chair',
     category: 'seating',
     size: { width: 0.46, depth: 0.5, height: 0.86 },
-    blocking: true,
+    // A loose chair is furniture you pull out, not a wall. Eight chairs around
+    // a banquet round would otherwise seal the table off entirely once the
+    // navigation grid adds body clearance, and nobody could take their seat.
+    // The table itself stays solid, which is what actually shapes circulation.
+    blocking: false,
     footprint: 'rect',
     inset: 0.1,
     resize: 'none',
@@ -288,7 +292,7 @@ const SEATING: CatalogItem[] = [
     name: 'Stacking chair',
     category: 'seating',
     size: { width: 0.45, depth: 0.48, height: 0.8 },
-    blocking: true,
+    blocking: false,
     footprint: 'rect',
     inset: 0.1,
     resize: 'none',
@@ -382,7 +386,7 @@ const SEATING: CatalogItem[] = [
     name: 'Bar stool',
     category: 'seating',
     size: { width: 0.4, depth: 0.4, height: 0.76 },
-    blocking: true,
+    blocking: false,
     footprint: 'circle',
     inset: 0.08,
     resize: 'none',
@@ -401,7 +405,11 @@ const SEATING: CatalogItem[] = [
     name: 'Seat row (theatre)',
     category: 'seating',
     size: { width: 3.0, depth: 0.7, height: 0.95 },
-    blocking: true,
+    // Rows are not obstacles to the people filling them: an audience reaches
+    // its seats by moving along the row. Treating a row as solid closes the
+    // gap between rows once the navigation grid adds body clearance, and then
+    // nobody can sit down at all.
+    blocking: false,
     footprint: 'rect',
     inset: 0.04,
     resize: 'free',
@@ -436,7 +444,8 @@ const SEATING: CatalogItem[] = [
     name: 'Booth',
     category: 'seating',
     size: { width: 1.6, depth: 1.9, height: 1.2 },
-    blocking: true,
+    // People slide into a booth rather than walking round it.
+    blocking: false,
     footprint: 'rect',
     inset: 0.02,
     resize: 'free',
