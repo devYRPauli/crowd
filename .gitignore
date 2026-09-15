@@ -1,16 +1,10 @@
-.venv/
-.env
-__pycache__/
-.pytest_cache/
-usage.jsonl
-data/
+node_modules/
+dist/
+coverage/
 .DS_Store
-
-# Downloaded source asset packs
-/static/assets/incoming/
-/static/assets/kenney-furniture/
-/static/assets/kaykit-furniture/
-/static/assets/kenney-characters/
-
-# Local demo recordings
+*.local
+.env
+.env.*
+!.env.example
 out/
+.vite/
