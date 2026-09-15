@@ -1431,10 +1431,18 @@ export class Simulation {
             // Not closing — but waiting your turn at a busy door is not being
             // stuck, and re-planning someone in a queue of thirty people only
             // sends them somewhere worse. Only count it against them when
-            // there is nobody in the way.
-            const crowded =
-              sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0) > 0.8
-            if (!crowded) this.replan(agent)
+            // there is nobody in the way — and "nobody" has to mean nobody
+            // else. The field counts this person too, and their own kernel
+            // peak is most of this threshold on its own, so reading it raw let
+            // one neighbour standing nearby excuse any amount of not getting
+            // anywhere. People pressed against geometry sat there for the rest
+            // of the run without ever being counted as stuck.
+            const others = this.density.othersAt(
+              agent.x,
+              agent.y,
+              sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0),
+            )
+            if (others <= 0.8) this.replan(agent)
           }
         }
       } else {
