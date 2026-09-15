@@ -267,6 +267,67 @@ everybody arrive at once".
 
 ---
 
+## E5 — Counters and queues
+
+120 people arriving evenly over half an hour at a desk that takes 40 s ±10 to
+serve one person. Only the number of desks changes. "Offered load" is arrivals
+divided by what the desks can serve: below 1 the system keeps up, above 1 it
+does not.
+
+| desks | offered load | mean queue | worst wait | mean journey | served of 120 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2.67 | 690 s ±209 | 1472 s ±755 | 1683 s ±962 | **94** |
+| 2 | 1.33 | 319 s ±47 | 634 s ±54 | 379 s ±51 | 120 |
+| **3** | **0.89** | **14 s ±1** | 51 s ±2 | 69 s ±2 | 120 |
+| 4 | 0.67 | 4 s ±1 | 49 s ±6 | 61 s ±1 | 120 |
+
+**The third desk is worth twenty times the fourth.** Going from two desks to
+three cuts the mean queue from 319 s to 14 s — a 96% reduction for a 50% increase
+in staffing. Going from three to four saves a further 10 s. There is nothing
+gradual about it: the third desk is the one that takes the offered load below 1,
+and a queue below capacity settles while a queue above capacity just grows until
+the doors close. **Half-provisioning a counter is not half as good, it is
+qualitatively different**, and this is the single most useful shape in queueing
+for anybody deciding how many people to roster.
+
+**Variance explodes with the queue, which is its own warning.** At one desk the
+seed spread on the worst wait is ±755 s on a mean of 1472 s — the three runs
+differ by more than the whole mean wait at two desks. An oversaturated queue is
+not just long, it is unpredictable, so a plan that lands there cannot be planned
+around. At three and four desks the spread is ±2 s and ±6 s.
+
+**At one desk, 26 people never got served at all** before the run ended. They
+were still in the line. That is the honest output for a desk offered 2.7 times
+what it can handle, and it is worth reading alongside the limitation that nobody
+in this model ever gives up and walks away.
+
+### Against textbook queueing
+
+M/M/c is the standard closed form for this, and it is a useful outside check as
+long as the difference is understood rather than hidden. For λ = 0.0667/s and
+μ = 0.025/s:
+
+| desks | M/M/c predicts | low-variability approximation | CROWD measured |
+| --- | --- | --- | --- |
+| 3 | 96 s | 3 s | 14 s |
+| 4 | 11 s | 0.4 s | 4 s |
+
+**CROWD's queues are shorter than M/M/c, and they should be.** M/M/c assumes
+Poisson arrivals, which are bursty; these arrivals are spread evenly across the
+window, which is much smoother, and smooth arrivals make short queues. The
+service time is normal with a standard deviation of 10 s on a mean of 40, so its
+coefficient of variation is 0.25 against the 1.0 an exponential assumes. Feeding
+both into the Allen–Cunneen adjustment gives the third column, and the measured
+figures sit between the two bounds — above the idealised approximation, because
+people in a real room also have to walk to the desk and cannot occupy the same
+floor on the way, and well below the Poisson figure.
+
+That bracketing is the check. A model that came out *above* M/M/c on smooth
+arrivals, or below the low-variability bound, would be wrong in a way worth
+chasing. These do not.
+
+---
+
 ## What the study found about the tool itself
 
 Running a tool across configurations it has not been run across before is the
@@ -307,6 +368,39 @@ adds body clearance — but its consequence for a theatre is worth stating plain
 **CROWD does not model the seating in a theatre evacuation at all.** People walk
 through the rows. For a venue whose egress is dominated by row and aisle
 geometry, that is a large simplification and the result should not be trusted.
+
+---
+
+## Performance
+
+`npm run bench`, on an idle machine — four cores, no GPU. Rendering is not
+measured here because it depends entirely on the GPU and this machine has none;
+this is the cost of the physics alone.
+
+| venue | asked | simulated | ms/step | µs/person/step | × real time |
+| --- | --- | --- | --- | --- | --- |
+| coffee bar | 50 | 50 | 2.15 | 42.9 | 47 |
+| conference | 200 | 200 | 4.16 | 20.8 | 24 |
+| conference | 500 | 222 | 3.98 | 18.0 | 25 |
+| concourse | 500 | 359 | 7.18 | 20.0 | 14 |
+| concourse | 1000 | 359 | 6.81 | 19.0 | 15 |
+| banquet | 1000 | 258 | 5.85 | 22.7 | 17 |
+
+**Cost per person is flat to falling as the crowd grows** — 42.9 µs at fifty
+people, 18–23 µs from two hundred up. The fixed work in a step, the flow fields
+and the grid and the density pass, is amortised over more people. This is the
+property that matters: an all-pairs avoidance would show the opposite, and by
+five hundred people it would be unusable.
+
+**The venues cap themselves.** Asking the concourse for a thousand people
+simulates 359, because that is what its arrival doors and itineraries deliver
+inside the run. The µs/person figure is against the number actually simulated.
+
+**Real-time factor is the honest weak spot.** Playback offers speeds up to × 60,
+and these venues run at × 14 to × 47 on this machine, so the fastest setting does
+not keep up for the larger ones — it runs as fast as it can and the clock stretches.
+On a normal laptop core rather than a shared cloud one, the numbers are better,
+but × 60 with a thousand people is not something this engine does today.
 
 ---
 
