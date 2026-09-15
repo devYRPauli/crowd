@@ -6,7 +6,7 @@ Draw a venue in 3D. Say who turns up and what they came to do. Watch them move
 through it, and read what went wrong.
 
 CROWD runs entirely in the browser. There is no install, no backend, no licence
-and no import step: the plan *is* the model. Every wall you draw is a wall people
+and no import step: the plan _is_ the model. Every wall you draw is a wall people
 collide with, every counter you place is a server with a queue, and every area
 you mark is somewhere the simulation measures.
 
@@ -52,17 +52,17 @@ shaped several decisions below.
 
 ## Drawing a venue
 
-| | |
-|---|---|
-| `V` | Select and move |
-| `W` | Walls — click to chain, **type a length and press Enter** to place it exactly |
-| `R` | Room — drag a rectangle and get four walls |
-| `D` / `N` | Doorway / window — move onto a wall and click; it cuts the wall |
-| `F` | Furniture — 49 items, oriented against the nearest wall automatically |
-| `Z` | Areas — entry, exit, destination, seating, keep-clear, blocked, measurement |
-| `S` | Service point — a counter with staff, a service time and a queue |
-| `Q` | Reshape a queue by dragging its points |
-| `M` | Tape measure |
+|           |                                                                               |
+| --------- | ----------------------------------------------------------------------------- |
+| `V`       | Select and move                                                               |
+| `W`       | Walls — click to chain, **type a length and press Enter** to place it exactly |
+| `R`       | Room — drag a rectangle and get four walls                                    |
+| `D` / `N` | Doorway / window — move onto a wall and click; it cuts the wall               |
+| `F`       | Furniture — 49 items, oriented against the nearest wall automatically         |
+| `Z`       | Areas — entry, exit, destination, seating, keep-clear, blocked, measurement   |
+| `S`       | Service point — a counter with staff, a service time and a queue              |
+| `Q`       | Reshape a queue by dragging its points                                        |
+| `M`       | Tape measure                                                                  |
 
 The left button always belongs to the active tool. Navigation lives on the
 right and middle buttons, the wheel, and Space-drag. Press `?` for the full
@@ -119,7 +119,7 @@ Each destination gets a potential field solved with the Godunov upwind scheme on
 a uniform grid, so its gradient is smooth and free of the 22.5° artefacts a
 Dijkstra grid produces. One solve serves every person heading there.
 
-Each destination carries *two* fields. The static one is the shortest path. The
+Each destination carries _two_ fields. The static one is the shortest path. The
 congested one is re-solved periodically with local crowd density lowering the
 traversal speed, so its gradient bends around a crowd. Every person follows one
 or the other according to how congestion-aware they are — which is what produces
@@ -181,8 +181,8 @@ regardless of which table is in play.
 
 **Findings, not just heat maps.** A heat map tells you where the red is. After
 every run CROWD produces a ranked list of what went wrong in the terms you are
-working in — *"Registration 2 ran at 94% utilisation"*, *"the busiest area sat at
-level of service F for 4 minutes"* — each carrying the number it fired on, so you
+working in — _"Registration 2 ran at 94% utilisation"_, _"the busiest area sat at
+level of service F for 4 minutes"_ — each carrying the number it fired on, so you
 can disagree with the threshold and still use the number.
 
 **Comparison.** Save a run as a baseline and the next one shows deltas against
