@@ -169,12 +169,25 @@ export class FlowFieldCache {
     return { dx: dx / length, dy: dy / length, cost: shortest.value }
   }
 
-  /** Remaining travel time to a destination, in seconds. */
-  cost(id: string, point: Vec2): number {
+  /**
+   * Remaining travel time to a destination, in seconds.
+   *
+   * `awareness` blends the two potentials the same way `direction` does, and
+   * for the same reason: 0 is how long the walk would take with the venue
+   * empty, 1 is how long it will take through the crowd that is actually in it.
+   * Choosing between two doors on the empty-venue number sends everybody to the
+   * nearer one however long the queue behind it grows, which is a choice worth
+   * making deliberately rather than by default.
+   */
+  cost(id: string, point: Vec2, awareness = 0): number {
     const field = this.fields.get(id)
     if (!field) return Infinity
-    const sample = sampleGradient(this.grid, field.staticPotential, point.x, point.y)
-    return sample ? sample.value : Infinity
+    const shortest = sampleGradient(this.grid, field.staticPotential, point.x, point.y)
+    if (!shortest) return Infinity
+    if (awareness <= 0.01 || field.refreshedAt === -Infinity) return shortest.value
+    const congested = sampleGradient(this.grid, field.congestedPotential, point.x, point.y)
+    if (!congested) return shortest.value
+    return shortest.value * (1 - awareness) + congested.value * awareness
   }
 
   /** Drop fields for destinations that no longer exist. */

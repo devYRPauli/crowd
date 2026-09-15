@@ -41,9 +41,11 @@
  *    produce numbers that look like RiMEA results and mean nothing, so those
  *    cases are simply absent. They become implementable when the plan model
  *    gains levels and vertical links.
- *  - TC4, TC5, TC9, TC10, TC11, TC14 and TC15 are not written yet. TC11 is the
- *    gap that matters most: the engine routes people to a chosen exit and
- *    nothing in this file tests that choice.
+ *  - TC4, TC5, TC9, TC10, TC11, TC14 and TC15 are not written yet. The
+ *    behaviour behind TC11 — a crowd leaving by two doors at unequal distances
+ *    — is covered by `exitChoice.test.ts` in this directory, which claims no
+ *    RiMEA number because the clause's own geometry and acceptance criterion
+ *    could not be read from a primary source.
  *
  * Determinism: the engine seeds a sub-stream per population from its position
  * in the scenario rather than from its id, so a case that builds its plan and

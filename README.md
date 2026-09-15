@@ -125,6 +125,15 @@ traversal speed, so its gradient bends around a crowd. Every person follows one
 or the other according to how congestion-aware they are — which is what produces
 a genuine route split at a bottleneck instead of one thick column.
 
+The same reasoning picks the **way out**, not just the way there. People weigh
+the walk against the wait — how many are ahead of them at a door, divided by how
+fast that door has actually been letting people through — and think again every
+few seconds, because the queue that makes the far door worth the walk has not
+formed yet when they set off. Without it a crowd queues at the nearest exit
+however long the line grows while an identical door stands open, and a planner
+asking whether a second exit is worth it gets told it bought nothing. In a hall
+with a door at each end, 300 people clear 33% faster for using both.
+
 **2. Avoid — ORCA.**
 Optimal Reciprocal Collision Avoidance, ported faithfully from the RVO2
 reference, turns "where I want to go" into "where I can go" given the neighbours
@@ -248,6 +257,9 @@ other test.
   escape-route choice (TC11) called out as the gap that matters most.
 - **ORCA** is verified by differential fuzzing against an independent
   transliteration of the RVO2 reference, and its test suite is mutation-tested.
+- **Choice of exit**, run with congestion-aware routing on and off so the
+  difference between the two is visible: 40 people take the near door either
+  way; 300 spread across both and clear a third faster for it.
 - **Determinism**, because a comparison that is partly noise is worse than no
   comparison: every starter venue is built twice and has to produce identical
   numbers.

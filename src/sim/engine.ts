@@ -75,6 +75,16 @@ const ARRIVE_RADIUS = 0.34
  */
 const DIRECT_RANGE = 3.5
 const NEIGHBOUR_RANGE = 5.0
+/** Seconds between a person reconsidering which way out they are heading. */
+const EXIT_REVIEW_INTERVAL = 6
+/**
+ * How much better another door has to look before somebody changes their mind.
+ *
+ * Without a margin, two doors of nearly equal cost swap places every time the
+ * congested field is re-solved and people oscillate between them instead of
+ * leaving by either. A quarter better is a decision worth walking back for.
+ */
+const EXIT_SWITCH_MARGIN = 0.75
 const MAX_NEIGHBOURS = 12
 const SLOW_SPEED = 0.3
 
@@ -127,6 +137,8 @@ interface Agent {
   lastStepBegun: number
   /** Seconds since the last progress check. */
   walkTime: number
+  /** Simulated time at which to reconsider the way out. */
+  exitReviewAt: number
   /** Closest this person has come to their current destination. */
   bestDistance: number
   /** Seconds spent barely moving while trying to walk, for jam breaking. */
@@ -158,6 +170,17 @@ interface AreaState {
   secondsAtCrushRisk: number
   worstLosIndex: number
   elapsed: number
+}
+
+/** Live state of one way out; see `Simulation.exitLoads`. */
+interface ExitLoad {
+  /** People currently walking towards it. */
+  heading: number
+  /** People who have left through it. */
+  through: number
+  /** Simulated time of the first and most recent of those, for the rate. */
+  firstAt: number
+  lastAt: number
 }
 
 interface QueueState {
@@ -212,6 +235,18 @@ export class Simulation {
   private pendingCursor = 0
   private queues = new Map<string, QueueState>()
   private areas: AreaState[] = []
+  /**
+   * What each way out is doing: how many people are heading for it, and how
+   * fast it has actually been letting them through.
+   *
+   * A door's discharge rate is a property of the door and of the crowd using
+   * it, and nothing in the plan states it — an exit is a zone, and the
+   * constriction that meters it is a doorway somewhere upstream. So it is
+   * measured rather than assumed. Until a door has let enough people through to
+   * have a rate worth trusting, choosing between doors falls back to walking
+   * time alone, which is where this model started.
+   */
+  private exitLoads = new Map<string, ExitLoad>()
   private seatTaken: Uint8Array
 
   private time = 0
@@ -255,6 +290,9 @@ export class Simulation {
     this.obstacleIndex = new ObstacleIndex(this.world.obstacles, this.world.bounds, 2)
     this.hash = new SpatialHash(NEIGHBOUR_RANGE)
     this.seatTaken = new Uint8Array(this.world.seats.length)
+    for (const exit of this.world.exits) {
+      this.exitLoads.set(exit.id, { heading: 0, through: 0, firstAt: 0, lastAt: 0 })
+    }
 
     this.world.queues.forEach((queue, queueIndex) => {
       this.queues.set(queue.id, {
@@ -504,6 +542,7 @@ export class Simulation {
       gaveUp: false,
       lastStepBegun: -1,
       walkTime: 0,
+      exitReviewAt: 0,
       bestDistance: Infinity,
       jamTime: 0,
       finishedAt: null,
@@ -615,6 +654,10 @@ export class Simulation {
     agent.state = 'walking'
     agent.pendingQueueId = null
     agent.stepIndex = this.itineraryOf(agent).length
+    // Stagger the first review across the crowd. Everybody reconsidering on the
+    // same tick makes a queue shed people in lumps, which is both wrong and
+    // very visible.
+    agent.exitReviewAt = this.time + EXIT_REVIEW_INTERVAL * (0.5 + ((agent.id * 37) % 100) / 100)
     if (!best) {
       // Nowhere to go: stand still rather than walking into a wall.
       agent.fieldTarget = null
@@ -626,17 +669,100 @@ export class Simulation {
     agent.facingTarget = null
   }
 
+  /**
+   * The way out this person would pick from where they are standing.
+   *
+   * Cost is travel time, and how much of the crowd is counted in it is the
+   * person's own `routeAwareness` — the same number that decides whether they
+   * follow the shortest route or the one that bends around a jam. Somebody who
+   * pays no attention to congestion walks to the nearest door whatever is
+   * happening at it; somebody who does will take a longer walk to a door they
+   * can actually get through. A crowd of mixed awareness therefore splits
+   * across the available doors by degrees rather than all at once, which is
+   * what a real one does.
+   */
+  /**
+   * Seconds of queueing a person should expect if they head for this door.
+   *
+   * The same reasoning `chooseQueue` uses for a counter — how many people are
+   * ahead of you, divided by how fast the thing in front of them is going —
+   * except that a door's rate is measured rather than configured. Eight people
+   * through is enough to tell a wide door from a narrow one and few enough that
+   * it is known within the first seconds of a crush; below that the answer is
+   * zero, so doors are compared on walking time alone until there is something
+   * better to compare them on.
+   */
+  private expectedExitWait(id: string): number {
+    const load = this.exitLoads.get(id)
+    if (!load || load.through < 8) return 0
+    const elapsed = load.lastAt - load.firstAt
+    if (elapsed <= 0) return 0
+    const rate = load.through / elapsed
+    return load.heading / rate
+  }
+
+  /** Recount who is heading where. One pass, once a step. */
+  private updateExitLoads(): void {
+    for (const load of this.exitLoads.values()) load.heading = 0
+    for (const id of this.live) {
+      const target = this.agents[id]?.fieldTarget
+      if (!target) continue
+      const load = this.exitLoads.get(target)
+      if (load) load.heading++
+    }
+  }
+
   private nearestExit(agent: Agent): DestinationRecord | null {
     let best: DestinationRecord | null = null
     let bestCost = Infinity
     for (const exit of this.world.exits) {
-      const cost = this.fields.cost(exit.id, { x: agent.x, y: agent.y })
+      const walk = this.fields.cost(exit.id, { x: agent.x, y: agent.y }, agent.routeAwareness)
+      const cost = walk + this.expectedExitWait(exit.id) * agent.routeAwareness
       if (cost < bestCost) {
         bestCost = cost
         best = exit
       }
     }
     return best ?? this.world.exits[0] ?? null
+  }
+
+  /**
+   * Reconsider the way out.
+   *
+   * Choosing once on the way in is not enough: the queue that makes the far
+   * door worth the walk has not formed yet when a person sets off, and a model
+   * that never looks again has everybody queueing at the nearest door while an
+   * identical one stands open — 300 people through a single 1.2 m door in a
+   * hall that had two of them, and the second never used.
+   */
+  private reviewExit(agent: Agent): void {
+    agent.exitReviewAt = this.time + EXIT_REVIEW_INTERVAL
+    const current = agent.fieldTarget
+    if (!current || agent.routeAwareness <= 0.01 || this.world.exits.length < 2) return
+    const here = { x: agent.x, y: agent.y }
+    const currentCost =
+      this.fields.cost(current, here, agent.routeAwareness) +
+      this.expectedExitWait(current) * agent.routeAwareness
+    if (!Number.isFinite(currentCost)) return
+    let best: DestinationRecord | null = null
+    let bestCost = currentCost * EXIT_SWITCH_MARGIN
+    for (const exit of this.world.exits) {
+      if (exit.id === current) continue
+      const cost =
+        this.fields.cost(exit.id, here, agent.routeAwareness) +
+        this.expectedExitWait(exit.id) * agent.routeAwareness
+      if (cost < bestCost) {
+        bestCost = cost
+        best = exit
+      }
+    }
+    if (!best) return
+    agent.fieldTarget = best.id
+    agent.exactTarget = best.center
+    // They are going somewhere else now, so how well they were doing at getting
+    // to the old door says nothing about whether they are stuck.
+    agent.walkTime = 0
+    agent.bestDistance = Infinity
   }
 
   private claimSeat(agent: Agent, zoneId: string | undefined, rng: Rng): number {
@@ -928,6 +1054,7 @@ export class Simulation {
     this.fields.update(this.time, this.density.values)
     this.steer(dt)
     this.integrate(dt)
+    this.updateExitLoads()
     this.relaxOverlaps()
     this.accumulateAreas(dt)
     this.accumulateLos(dt)
@@ -1104,6 +1231,12 @@ export class Simulation {
   private finish(agent: Agent, liveIndex: number): void {
     agent.state = 'done'
     agent.finishedAt = this.time
+    const load = agent.fieldTarget ? this.exitLoads.get(agent.fieldTarget) : undefined
+    if (load) {
+      if (load.through === 0) load.firstAt = this.time
+      load.through++
+      load.lastAt = this.time
+    }
     this.live.splice(liveIndex, 1)
     this.completed++
     const straight = distance(agent.straightLineFrom, { x: agent.x, y: agent.y })
@@ -1420,6 +1553,17 @@ export class Simulation {
       // Someone who has barely moved for half a minute is stuck on geometry we
       // did not anticipate. Re-planning beats leaving them there for the rest
       // of the run, quietly skewing every average.
+      // Somebody on their way out looks again at which way out, now that the
+      // queues they will meet actually exist.
+      if (
+        agent.state === 'walking' &&
+        this.time >= agent.exitReviewAt &&
+        agent.fieldTarget !== null &&
+        this.exitLoads.has(agent.fieldTarget)
+      ) {
+        this.reviewExit(agent)
+      }
+
       // Are they closing on where they are going?
       //
       // Progress towards the target is the right test, not speed and not

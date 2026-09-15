@@ -144,9 +144,9 @@ TC2, TC3, TC8 and TC13 turn on stairs: walking speed up and down one, a
 multi-floor building, the fundamental diagram on a stair. This version models a
 single floor plate — the plan has no storeys and the navigation grid is one 2-D
 raster — and faking a stair as a sloped corridor would produce numbers that look
-like RiMEA results and mean nothing. Of the cases simply not written, **TC11,
-choice of escape route, is the gap that matters most**: the engine routes people
-to a chosen exit and nothing yet tests that choice.
+like RiMEA results and mean nothing. Of the cases simply not written, TC11 —
+choice of escape route — is the one whose _behaviour_ matters most, and it is
+covered below under its own name rather than the standard's.
 
 ### The narrow openings, stated plainly
 
@@ -160,6 +160,53 @@ worth being blunt about what that means: **do not use this model to size a door
 narrower than about 1.5 m.** The hand calculation alongside it — SFPE hydraulic,
 with the 150 mm boundary layer taken off each side — is the better instrument at
 that width, and the tool reports both precisely so the disagreement is visible.
+
+---
+
+## Choice of exit
+
+Not a RiMEA case either, for the same reason: RiMEA's TC11 covers exactly this
+behaviour, but its geometry and acceptance criterion could not be read from a
+primary source here, and a test that invents them and prints "TC11" is the same
+kind of lie as loosening a threshold.
+
+A 40 m × 20 m hall with a 1.2 m door at each end and everybody starting by the
+west one. Each case runs twice: once with congestion-aware routing on, once off.
+The difference between the two runs is the feature.
+
+| People | Routing          | Near door | Far door      | Cleared in |
+| ------ | ---------------- | --------- | ------------- | ---------- |
+| 40     | congestion-aware | 40        | 0             | 25.9 s     |
+| 40     | shortest path    | 40        | 0             | 19.7 s     |
+| 300    | congestion-aware | 173       | **127 (42%)** | **98.2 s** |
+| 300    | shortest path    | 300       | 0             | 146.8 s    |
+
+With nobody in the way the nearer door is simply the right answer and both
+settings give it. With a crowd too big for one door, congestion-aware routing
+spreads 42% of it to the far door and the hall clears **33% sooner**.
+
+This is the behaviour the tool exists to show, and it did not work until this
+was measured. Exit choice compared travel time over the _static_ field, so
+everybody queued at the nearest door however long the line grew and the second
+door was never used. A planner asking "is a door on the far wall worth it?"
+would have been told it bought nothing — wrong in the direction that gets exits
+left out of a design.
+
+People now weigh the walk against the wait, the same way they already chose
+between service counters: how many people are ahead of you, divided by how fast
+the thing in front of them is going. A door's rate is measured rather than
+configured, because nothing in a plan states it — an exit is a zone and the
+constriction that meters it is a doorway somewhere upstream — so until a door
+has let eight people through, doors are compared on walking time alone. The
+choice is also revisited every six seconds, because the queue that makes the far
+door worth the walk has not formed yet when a person sets off, and it only
+changes for a door a quarter better, or people oscillate between two doors of
+nearly equal cost instead of leaving by either.
+
+How far the split goes depends on how congestion-aware the population is, which
+is a scenario setting rather than a property of the engine. Somebody who pays no
+attention to congestion still walks to the nearest door whatever is happening at
+it.
 
 ---
 
