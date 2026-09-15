@@ -17,6 +17,15 @@ import type {
   CrowdDocument,
 } from './types'
 import { SCHEMA_VERSION } from './types'
+import {
+  DEFAULT_DOOR_HEIGHT,
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
+  DEFAULT_WINDOW_HEIGHT,
+  DEFAULT_WINDOW_SILL,
+  DEFAULT_WINDOW_WIDTH,
+} from './standards'
 import { newDocumentId, newId } from './ids'
 
 export const DEFAULT_SETTINGS: DocumentSettings = {
@@ -25,9 +34,13 @@ export const DEFAULT_SETTINGS: DocumentSettings = {
   snapToGrid: true,
   snapToObjects: true,
   angleSnapDeg: 15,
-  defaultWallHeight: 3.0,
-  defaultWallThickness: 0.15,
-  defaultDoorWidth: 0.9,
+  defaultWallHeight: DEFAULT_WALL_HEIGHT,
+  defaultWallThickness: DEFAULT_WALL_THICKNESS,
+  defaultDoorWidth: DEFAULT_DOOR_WIDTH,
+  defaultDoorHeight: DEFAULT_DOOR_HEIGHT,
+  defaultWindowWidth: DEFAULT_WINDOW_WIDTH,
+  defaultWindowHeight: DEFAULT_WINDOW_HEIGHT,
+  defaultWindowSill: DEFAULT_WINDOW_SILL,
 }
 
 export const AGENT_PROFILES: AgentProfile[] = [

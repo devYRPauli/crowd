@@ -241,6 +241,49 @@ export const collectObstaclePolygons = (plan: Plan): Polygon[] => {
   return polys
 }
 
+/** Cells wanted across the narrowest doorway people have to walk through. */
+const CELLS_ACROSS_AN_OPENING = 8
+/** Above this the eikonal solve and the density field stop being cheap. */
+const CELL_BUDGET = 400_000
+/** Finer than this buys nothing a body 0.46 m across can use. */
+const FINEST_CELL = 0.05
+
+/**
+ * How fine the navigation grid has to be.
+ *
+ * Extent alone is the wrong thing to size it by, and the error is large. A
+ * doorway is rasterised like everything else, so its usable channel quantises
+ * to whole cells — and once the grid dilates the wall by body clearance, a
+ * 0.8 m door on a 0.2 m grid comes out as barely any channel at all. Measured:
+ * that door passed 0.228 persons per metre per second, against 1.544 on a 0.1 m
+ * grid. Almost the whole of what looked like a narrow-door modelling gap was
+ * this. Worse, it was unstable — three millimetres of wall thickness moved the
+ * answer 15%, because it moved where the wall fell between cell centres.
+ *
+ * So the narrowest opening people actually walk through sets the resolution,
+ * with the venue's extent and a cell budget as the two ceilings on it: a big
+ * venue with wide doors stays cheap, and a small one with a tight door gets the
+ * resolution that door needs.
+ */
+const chooseCellSize = (plan: Plan, bounds: Bounds): number => {
+  const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)
+  const byExtent = Math.max(0.2, Math.min(0.5, span / 420))
+
+  let narrowest = Infinity
+  for (const opening of plan.openings) {
+    // Windows are not a way through, so they do not set the resolution.
+    if (opening.kind === 'window') continue
+    if (opening.width > 0 && opening.width < narrowest) narrowest = opening.width
+  }
+  const byOpening = Number.isFinite(narrowest) ? narrowest / CELLS_ACROSS_AN_OPENING : Infinity
+
+  // Whatever the geometry asks for, the grid has to fit in the budget.
+  const area = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY)
+  const byBudget = Math.sqrt(area / CELL_BUDGET)
+
+  return Math.max(FINEST_CELL, byBudget, Math.min(byExtent, byOpening))
+}
+
 export interface BuildWorldOptions {
   /** Navigation grid resolution. Smaller is more accurate and slower. */
   cellSize?: number
@@ -255,9 +298,7 @@ export const buildWorld = (
 ): SimWorld => {
   const margin = options.margin ?? 2
   const bounds = planBounds(plan, margin)
-  const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)
-  // Keep the grid under ~400k cells however large the venue is.
-  const cellSize = options.cellSize ?? Math.max(0.2, Math.min(0.5, span / 420))
+  const cellSize = options.cellSize ?? chooseCellSize(plan, bounds)
   const grid = createNavGrid(bounds, cellSize)
   const cells = grid.cols * grid.rows
 

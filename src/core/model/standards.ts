@@ -110,6 +110,15 @@ export const WALL_HEIGHTS: readonly StandardSize[] = [
   { metres: feet(16), imperial: `16'0"`, note: 'Concourse' },
 ] as const
 
+/**
+ * At and above this, an opening is drawn as a pair of leaves rather than one.
+ *
+ * The smallest pair anybody hangs is two 2'6" leaves, and a single leaf wider
+ * than 4'0" is not made — IBC 1010.1.1 caps an egress leaf there — so anything
+ * from 5'0" up is a pair in practice.
+ */
+export const DOUBLE_DOOR_FROM = feet(5)
+
 /** What the editor reaches for when nothing says otherwise. */
 export const DEFAULT_DOOR_WIDTH = feet(3)
 export const DEFAULT_DOOR_HEIGHT = feet(6, 8)

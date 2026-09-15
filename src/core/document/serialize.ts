@@ -116,9 +116,23 @@ const parseOpening = (raw: unknown, wallIds: Set<string>): Opening | null => {
     id: str(raw.id, newId('open')),
     wallId,
     offset: Math.max(0, num(raw.offset, 1)),
-    width: Math.max(0.1, num(raw.width, DEFAULT_SETTINGS.defaultDoorWidth)),
-    height: Math.max(0.1, num(raw.height, kind === 'window' ? 1.2 : 2.1)),
-    sill: Math.max(0, num(raw.sill, kind === 'window' ? 0.9 : 0)),
+    width: Math.max(
+      0.1,
+      num(
+        raw.width,
+        kind === 'window' ? DEFAULT_SETTINGS.defaultWindowWidth : DEFAULT_SETTINGS.defaultDoorWidth,
+      ),
+    ),
+    height: Math.max(
+      0.1,
+      num(
+        raw.height,
+        kind === 'window'
+          ? DEFAULT_SETTINGS.defaultWindowHeight
+          : DEFAULT_SETTINGS.defaultDoorHeight,
+      ),
+    ),
+    sill: Math.max(0, num(raw.sill, kind === 'window' ? DEFAULT_SETTINGS.defaultWindowSill : 0)),
     kind,
     ...(typeof raw.swing === 'string' ? { swing: raw.swing as Opening['swing'] } : {}),
     ...(raw.locked === true ? { locked: true } : {}),
@@ -386,9 +400,34 @@ export const parseDocument = (input: unknown): ParseResult => {
         snapToGrid: bool(settingsRaw.snapToGrid, true),
         snapToObjects: bool(settingsRaw.snapToObjects, true),
         angleSnapDeg: Math.max(0, num(settingsRaw.angleSnapDeg, 15)),
-        defaultWallHeight: Math.max(0.5, num(settingsRaw.defaultWallHeight, 3)),
-        defaultWallThickness: Math.max(0.02, num(settingsRaw.defaultWallThickness, 0.15)),
-        defaultDoorWidth: Math.max(0.3, num(settingsRaw.defaultDoorWidth, 0.9)),
+        defaultWallHeight: Math.max(
+          0.5,
+          num(settingsRaw.defaultWallHeight, DEFAULT_SETTINGS.defaultWallHeight),
+        ),
+        defaultWallThickness: Math.max(
+          0.02,
+          num(settingsRaw.defaultWallThickness, DEFAULT_SETTINGS.defaultWallThickness),
+        ),
+        defaultDoorWidth: Math.max(
+          0.3,
+          num(settingsRaw.defaultDoorWidth, DEFAULT_SETTINGS.defaultDoorWidth),
+        ),
+        defaultDoorHeight: Math.max(
+          0.5,
+          num(settingsRaw.defaultDoorHeight, DEFAULT_SETTINGS.defaultDoorHeight),
+        ),
+        defaultWindowWidth: Math.max(
+          0.1,
+          num(settingsRaw.defaultWindowWidth, DEFAULT_SETTINGS.defaultWindowWidth),
+        ),
+        defaultWindowHeight: Math.max(
+          0.1,
+          num(settingsRaw.defaultWindowHeight, DEFAULT_SETTINGS.defaultWindowHeight),
+        ),
+        defaultWindowSill: Math.max(
+          0,
+          num(settingsRaw.defaultWindowSill, DEFAULT_SETTINGS.defaultWindowSill),
+        ),
       },
       plan,
       scenario: parseScenario(raw.scenario),

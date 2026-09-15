@@ -263,6 +263,10 @@ export interface DocumentSettings {
   defaultWallHeight: number
   defaultWallThickness: number
   defaultDoorWidth: number
+  defaultDoorHeight: number
+  defaultWindowWidth: number
+  defaultWindowHeight: number
+  defaultWindowSill: number
 }
 
 export interface CrowdDocument {

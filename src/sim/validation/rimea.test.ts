@@ -468,13 +468,13 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   it.fails('TC12: 1.0 m opening passes 1.2–1.4 p/m/s', bandTest(1.0))
 
   /**
-   * KNOWN GAP, and this is the second of the two widths RiMEA TC12 names.
-   * MEASURED 1.126 p/m/s (1.351 p/s); TARGET 1.2–1.4 — 6% below the band, much
-   * closer than the narrower openings because 1.2 m leaves a 0.68 m channel and
-   * two abreast fits with room to stagger. Against effective width it reads
-   * 1.501 p/m/s. Everything from here up is in band.
+   * The second of the two widths RiMEA TC12 names, and it passes: MEASURED
+   * 1.245 p/m/s (1.494 p/s) against 1.2–1.4. It did not until the navigation
+   * grid stopped being a fixed 0.3 m whatever the geometry — see the 0.8 m case
+   * above — at which point it went from 1.126 to 1.245 without the locomotion
+   * model changing at all. Everything from here up is in band.
    */
-  it.fails('TC12: 1.2 m opening passes 1.2–1.4 p/m/s', bandTest(1.2))
+  it('TC12: 1.2 m opening passes 1.2–1.4 p/m/s', bandTest(1.2))
 
   it('TC12: 1.5 m opening passes 1.2–1.4 p/m/s', bandTest(1.5))
 

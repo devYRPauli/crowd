@@ -21,6 +21,16 @@ import type { Vec2 } from '../core/math/vec2'
 import { newId } from '../core/model/ids'
 import { resolveCatalogItem } from './catalog'
 import { ZONE_COLORS, ZONE_LABELS } from '../core/model/defaults'
+import {
+  DEFAULT_DOOR_HEIGHT,
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
+  DEFAULT_WINDOW_HEIGHT,
+  DEFAULT_WINDOW_SILL,
+  DEFAULT_WINDOW_WIDTH,
+  DOUBLE_DOOR_FROM,
+} from '../core/model/standards'
 
 export interface RoomWalls {
   south: Wall
@@ -42,8 +52,8 @@ export class PlanBuilder {
       id: newId('wall'),
       a: { ...a },
       b: { ...b },
-      thickness: 0.2,
-      height: 3.2,
+      thickness: DEFAULT_WALL_THICKNESS,
+      height: DEFAULT_WALL_HEIGHT,
       kind: 'wall',
       ...options,
     }
@@ -60,29 +70,34 @@ export class PlanBuilder {
     return { south, east, north, west, all: [south, east, north, west] }
   }
 
-  door(wall: Wall, offset: number, width = 1.0, kind: Opening['kind'] = 'door'): Opening {
+  door(
+    wall: Wall,
+    offset: number,
+    width = DEFAULT_DOOR_WIDTH,
+    kind: Opening['kind'] = 'door',
+  ): Opening {
     const created: Opening = {
       id: newId('open'),
       wallId: wall.id,
       offset,
       width,
-      height: 2.1,
+      height: DEFAULT_DOOR_HEIGHT,
       sill: 0,
-      kind: width >= 1.5 && kind === 'door' ? 'double-door' : kind,
+      kind: width >= DOUBLE_DOOR_FROM && kind === 'door' ? 'double-door' : kind,
       swing: 'left',
     }
     this.openings.push(created)
     return created
   }
 
-  window(wall: Wall, offset: number, width = 1.6): Opening {
+  window(wall: Wall, offset: number, width = DEFAULT_WINDOW_WIDTH): Opening {
     const created: Opening = {
       id: newId('open'),
       wallId: wall.id,
       offset,
       width,
-      height: 1.4,
-      sill: 0.9,
+      height: DEFAULT_WINDOW_HEIGHT,
+      sill: DEFAULT_WINDOW_SILL,
       kind: 'window',
     }
     this.openings.push(created)

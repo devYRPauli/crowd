@@ -19,6 +19,7 @@ import { resolveCatalogItem } from '../../library/catalog'
 import { newId } from '../../core/model/ids'
 import { formatLength } from '../../core/model/units'
 import { wallLength } from '../../core/model/planGeometry'
+import { DOUBLE_DOOR_FROM } from '../../core/model/standards'
 
 const PREVIEW_COLOR = '#f08a3c'
 
@@ -249,9 +250,10 @@ export class DoorTool extends OpeningTool {
       wallId,
       offset,
       width: ctx.options.doorWidth,
-      height: 2.1,
+      height: ctx.options.doorHeight,
       sill: 0,
-      kind: ctx.options.doorWidth >= 1.4 ? ('double-door' as const) : ('door' as const),
+      kind:
+        ctx.options.doorWidth >= DOUBLE_DOOR_FROM ? ('double-door' as const) : ('door' as const),
       swing: 'left' as const,
     }
   }
@@ -271,8 +273,8 @@ export class WindowTool extends OpeningTool {
       wallId,
       offset,
       width: ctx.options.windowWidth,
-      height: 1.2,
-      sill: 0.9,
+      height: ctx.options.windowHeight,
+      sill: ctx.options.windowSill,
       kind: 'window' as const,
     }
   }

@@ -24,6 +24,15 @@ import {
   undoLabel,
 } from '../core/document/history'
 import { createDocument } from '../core/model/defaults'
+import {
+  DEFAULT_DOOR_HEIGHT,
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_WALL_HEIGHT,
+  DEFAULT_WALL_THICKNESS,
+  DEFAULT_WINDOW_HEIGHT,
+  DEFAULT_WINDOW_SILL,
+  DEFAULT_WINDOW_WIDTH,
+} from '../core/model/standards'
 import { removeObjects } from '../core/document/mutations'
 import type { ThemeName } from '../render/theme'
 import type { ViewPreset } from '../render/CameraRig'
@@ -51,7 +60,10 @@ export interface ToolOptions {
   wallThickness: number
   wallHeight: number
   doorWidth: number
+  doorHeight: number
   windowWidth: number
+  windowHeight: number
+  windowSill: number
 }
 
 export interface ViewOptions {
@@ -135,10 +147,13 @@ export const useEditor = create<EditorState>()((set, get) => ({
     catalogId: 'table-round-6',
     zoneKind: 'entry',
     wallKind: 'wall',
-    wallThickness: 0.15,
-    wallHeight: 3,
-    doorWidth: 0.9,
-    windowWidth: 1.2,
+    wallThickness: DEFAULT_WALL_THICKNESS,
+    wallHeight: DEFAULT_WALL_HEIGHT,
+    doorWidth: DEFAULT_DOOR_WIDTH,
+    doorHeight: DEFAULT_DOOR_HEIGHT,
+    windowWidth: DEFAULT_WINDOW_WIDTH,
+    windowHeight: DEFAULT_WINDOW_HEIGHT,
+    windowSill: DEFAULT_WINDOW_SILL,
   },
   view: {
     theme: 'light',

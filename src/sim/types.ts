@@ -147,15 +147,18 @@ export interface RunSummary {
 export interface SimOptions {
   /** Physics timestep, in seconds. */
   timeStep: number
-  /** Navigation grid resolution, in metres. */
-  cellSize: number
+  /**
+   * Navigation grid resolution, in metres. Omitted, the world picks one from
+   * the geometry — see `chooseCellSize`, which sizes it by the narrowest
+   * doorway people have to get through.
+   */
+  cellSize?: number
   /** Cap on simulated people, to keep a browser tab responsive. */
   maxAgents: number
 }
 
 export const DEFAULT_SIM_OPTIONS: SimOptions = {
   timeStep: 0.1,
-  cellSize: 0.3,
   maxAgents: 6000,
 }
 
