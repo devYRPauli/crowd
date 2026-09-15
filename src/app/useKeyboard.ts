@@ -14,6 +14,35 @@ import { documentFileName, serializeDocument } from '../core/document/serialize'
 import { downloadText, saveProject } from '../core/document/storage'
 import type { ViewportHandle } from './ViewportHost'
 import type { PlanObjectRef } from '../core/model/types'
+import {
+  clipboardSize,
+  copySelection,
+  emptyClipboard,
+  paste,
+  type Clipboard,
+} from '../core/document/clipboard'
+
+/**
+ * One clipboard for the session. It lives outside React because pasting must
+ * work identically whatever is mounted, and because a copy should survive
+ * switching projects.
+ */
+let clipboard: Clipboard = emptyClipboard()
+/** Successive pastes step further out, so a stack of copies stays visible. */
+let pasteCount = 0
+
+const pasteClipboard = (editor: ReturnType<typeof useEditor.getState>): void => {
+  pasteCount++
+  const step = editor.document.settings.gridSize * pasteCount
+  let created: PlanObjectRef[] = []
+  editor.apply((doc) => {
+    const result = paste(doc, clipboard, { x: step, y: step })
+    created = result.refs
+    return result.document
+  }, 'Paste')
+  editor.sealHistory()
+  if (created.length > 0) editor.setSelection(created)
+}
 
 const TOOL_KEYS: Record<string, ToolId> = {
   v: 'select',
@@ -95,10 +124,46 @@ export const useKeyboard = ({
               .catch(() => undefined)
             editor.toast('Project saved.', 'success')
             return
-          case 'd': {
-            event.preventDefault()
+          case 'c': {
             if (editor.selection.length === 0) return
-            editor.toast('Hold Alt while dragging to duplicate.', 'info')
+            event.preventDefault()
+            clipboard = copySelection(editor.document, editor.selection)
+            pasteCount = 0
+            editor.toast(
+              `Copied ${clipboardSize(clipboard)} ${clipboardSize(clipboard) === 1 ? 'object' : 'objects'}.`,
+              'info',
+            )
+            return
+          }
+          case 'x': {
+            if (editor.selection.length === 0) return
+            event.preventDefault()
+            clipboard = copySelection(editor.document, editor.selection)
+            pasteCount = 0
+            editor.deleteSelection()
+            return
+          }
+          case 'v': {
+            if (clipboardSize(clipboard) === 0) return
+            event.preventDefault()
+            pasteClipboard(editor)
+            return
+          }
+          case 'd': {
+            if (editor.selection.length === 0) return
+            event.preventDefault()
+            // Duplicate is copy and paste in one gesture, and leaves the
+            // clipboard alone so a real copy is not clobbered by it.
+            const snapshot = copySelection(editor.document, editor.selection)
+            const step = editor.document.settings.gridSize
+            let created: PlanObjectRef[] = []
+            editor.apply((doc) => {
+              const result = paste(doc, snapshot, { x: step, y: step })
+              created = result.refs
+              return result.document
+            }, 'Duplicate')
+            editor.sealHistory()
+            if (created.length > 0) editor.setSelection(created)
             return
           }
           default:

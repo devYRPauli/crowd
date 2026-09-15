@@ -39,12 +39,14 @@ export const TopBar = ({
   showHeatmap,
   onToggleHeatmap,
   onOpenTemplates,
+  onOpenProjects,
   onOpenShortcuts,
 }: {
   viewportRef: React.MutableRefObject<ViewportHandle>
   showHeatmap: boolean
   onToggleHeatmap: () => void
   onOpenTemplates: () => void
+  onOpenProjects: () => void
   onOpenShortcuts: () => void
 }) => {
   const document = useEditor((state) => state.document)
@@ -120,9 +122,12 @@ export const TopBar = ({
       <button className="btn is-ghost" onClick={onOpenTemplates} title="Start from a template">
         <FolderIcon width={15} height={15} /> Templates
       </button>
+      <button className="btn is-ghost" onClick={onOpenProjects} title="Saved projects">
+        Projects
+      </button>
       <button
         className="btn is-ghost is-icon"
-        title="Open a .crowd.json project"
+        title="Open a .crowd.json file"
         onClick={() => fileInput.current?.click()}
       >
         <FolderIcon width={15} height={15} />

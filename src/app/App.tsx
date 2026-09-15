@@ -19,6 +19,7 @@ import { ResultsPanel } from './panels/ResultsPanel'
 import { LayersPanel } from './panels/LayersPanel'
 import { SettingsPanel } from './panels/SettingsPanel'
 import { InspectorPanel } from './panels/InspectorPanel'
+import { ProjectsModal } from './panels/ProjectsModal'
 import { useKeyboard } from './useKeyboard'
 import { useEditor } from '../state/editorStore'
 import { useSimulation } from '../state/simulationStore'
@@ -113,6 +114,7 @@ const PersonCard = ({ index, onClear }: { index: number; onClear: () => void }) 
 export const App = () => {
   const viewportRef = useRef<ViewportHandle>({ viewport: null, controller: null })
   const [showTemplates, setShowTemplates] = useState(false)
+  const [showProjects, setShowProjects] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showWelcome, setShowWelcome] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
@@ -148,7 +150,7 @@ export const App = () => {
     useEditor.getState().toast('Image downloaded.', 'success')
   }, [])
   const openShortcuts = useCallback(() => setShowShortcuts(true), [])
-  const overlayOpen = showTemplates || showShortcuts || showWelcome
+  const overlayOpen = showTemplates || showShortcuts || showWelcome || showProjects
   useKeyboard({
     viewportRef,
     onToggleHeatmap: toggleHeatmap,
@@ -255,6 +257,7 @@ export const App = () => {
         showHeatmap={showHeatmap}
         onToggleHeatmap={toggleHeatmap}
         onOpenTemplates={() => setShowTemplates(true)}
+        onOpenProjects={() => setShowProjects(true)}
         onOpenShortcuts={openShortcuts}
       />
       <ToolRail />
@@ -343,6 +346,9 @@ export const App = () => {
 
       {showTemplates ? (
         <TemplatePicker onClose={() => setShowTemplates(false)} viewportRef={viewportRef} />
+      ) : null}
+      {showProjects ? (
+        <ProjectsModal onClose={() => setShowProjects(false)} viewportRef={viewportRef} />
       ) : null}
       {showShortcuts ? <ShortcutSheet onClose={() => setShowShortcuts(false)} /> : null}
       {showWelcome ? (

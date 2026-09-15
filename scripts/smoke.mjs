@@ -127,6 +127,42 @@ const run = async () => {
 
   await page.screenshot({ path: `${OUT}/04-panels.png` })
 
+  await step('copy and paste', async () => {
+    await page.getByRole('button', { name: 'View and layers', exact: true }).click()
+    await page.waitForSelector('.side-panel .list-row')
+    const furnitureCount = async () => {
+      const text = await page.locator('.side-panel').innerText()
+      return Number(text.match(/furniture \((\d+)\)/i)?.[1] ?? '0')
+    }
+    const before = await furnitureCount()
+    await page
+      .locator('.side-panel .section')
+      .filter({ hasText: /furniture \(\d+\)/i })
+      .locator('.list-row')
+      .first()
+      .click()
+    await page.waitForTimeout(150)
+    await page.keyboard.press('Control+c')
+    await page.keyboard.press('Control+v')
+    await page.waitForTimeout(250)
+    if ((await furnitureCount()) !== before + 1) throw new Error('Paste did not add an object.')
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(250)
+    if ((await furnitureCount()) !== before) throw new Error('Undo did not reverse the paste.')
+    await page.keyboard.press('Escape')
+  })
+
+  await step('projects dialog', async () => {
+    await page.getByRole('button', { name: 'Projects', exact: true }).click()
+    await page.waitForSelector('.modal')
+    await page.getByRole('button', { name: 'Save this project' }).click()
+    await page.waitForTimeout(500)
+    const listed = await page.locator('.modal .list-row').count()
+    if (listed < 1) throw new Error('The saved project was not listed.')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('.modal', { state: 'detached' })
+  })
+
   await step('select, delete and undo', async () => {
     await page.getByRole('button', { name: 'View and layers', exact: true }).click()
     await page.waitForSelector('.side-panel .list-row')

@@ -84,6 +84,7 @@ const SHORTCUTS: Array<{ group: string; items: Array<[string, string[]]> }> = [
       ['Undo', ['⌘', 'Z']],
       ['Redo', ['⌘', '⇧', 'Z']],
       ['Select everything', ['⌘', 'A']],
+      ['Copy / cut / paste', ['⌘', 'C/X/V']],
       ['Duplicate', ['⌘', 'D']],
       ['Delete', ['Delete']],
       ['Nudge', ['arrows']],
