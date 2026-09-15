@@ -85,6 +85,7 @@ export class WallTool implements Tool {
     return ctx.snap(info.ground, {
       anchor,
       angleSnapDeg: ctx.document.settings.angleSnapDeg,
+      disabled: info.altKey,
     }).point
   }
 
@@ -115,6 +116,7 @@ export class WallTool implements Tool {
       const snapped = ctx.snap(info.ground ?? this.preview, {
         anchor,
         angleSnapDeg: ctx.document.settings.angleSnapDeg,
+        disabled: info.altKey,
       })
       for (const guide of snapped.guides) {
         shapes.push({ kind: 'polyline', points: [guide.from, guide.to], color: '#2f7df6' })
@@ -224,14 +226,14 @@ export class RoomTool implements Tool {
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
     if (!info.ground) return
-    this.start = ctx.snap(info.ground).point
+    this.start = ctx.snap(info.ground, { disabled: info.altKey }).point
     this.current = this.start
   }
 
   onPointerMove(info: PointerInfo, ctx: ToolContext): void {
     if (!info.ground) return
     if (!this.start) return
-    let point = ctx.snap(info.ground, { anchor: this.start }).point
+    let point = ctx.snap(info.ground, { anchor: this.start, disabled: info.altKey }).point
     if (info.shiftKey) {
       const dx = point.x - this.start.x
       const dy = point.y - this.start.y
@@ -309,7 +311,7 @@ export class ZoneTool implements Tool {
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
     if (!info.ground) return
-    const point = ctx.snap(info.ground).point
+    const point = ctx.snap(info.ground, { disabled: info.altKey }).point
     if (this.polygon.length > 0) {
       this.polygon.push(point)
       this.refreshPolygon(ctx)
@@ -321,7 +323,7 @@ export class ZoneTool implements Tool {
 
   onPointerMove(info: PointerInfo, ctx: ToolContext): void {
     if (!info.ground) return
-    const point = ctx.snap(info.ground).point
+    const point = ctx.snap(info.ground, { disabled: info.altKey }).point
     if (this.polygon.length > 0) {
       this.current = point
       this.refreshPolygon(ctx)
@@ -451,6 +453,7 @@ export class MeasureTool implements Tool {
     this.preview = ctx.snap(info.ground, {
       anchor: this.points[this.points.length - 1] ?? null,
       angleSnapDeg: ctx.document.settings.angleSnapDeg,
+      disabled: info.altKey,
     }).point
     this.refresh(ctx)
   }

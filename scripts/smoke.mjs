@@ -39,7 +39,9 @@ const run = async () => {
         .catch(() => [])
       console.log('FAILED')
       if (open.length) console.error(`  (a dialog was open: ${open.join(', ')})`)
-      await page.screenshot({ path: `${OUT}/failure-${name.replace(/\W+/g, '-')}.png` }).catch(() => {})
+      await page
+        .screenshot({ path: `${OUT}/failure-${name.replace(/\W+/g, '-')}.png` })
+        .catch(() => {})
       throw error
     }
     console.log('ok')
@@ -92,8 +94,12 @@ const run = async () => {
     ]) {
       await page.keyboard.press(key)
       await page.waitForTimeout(120)
-      const hint = await page.locator('.stage-bottom-left').innerText().catch(() => '')
-      if (!hint.includes(expected)) throw new Error(`Tool ${key} did not show its hint (saw "${hint}")`)
+      const hint = await page
+        .locator('.stage-bottom-left')
+        .innerText()
+        .catch(() => '')
+      if (!hint.includes(expected))
+        throw new Error(`Tool ${key} did not show its hint (saw "${hint}")`)
     }
   })
 
@@ -120,6 +126,42 @@ const run = async () => {
   })
 
   await page.screenshot({ path: `${OUT}/04-panels.png` })
+
+  await step('select, delete and undo', async () => {
+    await page.getByRole('button', { name: 'View and layers', exact: true }).click()
+    await page.waitForSelector('.side-panel .list-row')
+
+    const furnitureCount = async () => {
+      const text = await page.locator('.side-panel').innerText()
+      // Section titles are upper-cased by CSS, and innerText respects that.
+      return Number(text.match(/furniture \((\d+)\)/i)?.[1] ?? '0')
+    }
+
+    const before = await furnitureCount()
+    if (before < 1) throw new Error('The venue has no furniture to select.')
+
+    // Select through the object list, which is deterministic, then confirm the
+    // inspector picked it up.
+    await page
+      .locator('.side-panel .section')
+      .filter({ hasText: /furniture \(\d+\)/i })
+      .locator('.list-row')
+      .first()
+      .click()
+    await page.waitForTimeout(200)
+    const inspector = await page.locator('.inspector').innerText()
+    if (!/Delete/.test(inspector)) throw new Error('The inspector did not show the selected item.')
+
+    await page.keyboard.press('Delete')
+    await page.waitForTimeout(250)
+    if ((await furnitureCount()) !== before - 1) throw new Error('Delete did not remove the item.')
+
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(250)
+    if ((await furnitureCount()) !== before) throw new Error('Undo did not restore the item.')
+
+    await page.keyboard.press('Escape')
+  })
 
   await step('run the simulation', async () => {
     // Fastest playback, so the run reaches its busy period inside the test.
@@ -176,6 +218,29 @@ const run = async () => {
     await page.screenshot({ path: `${OUT}/08-plan.png` })
     await page.getByRole('button', { name: '3D', exact: true }).click()
     await page.waitForTimeout(900)
+  })
+
+  await step('frame rate with a crowd', async () => {
+    const fps = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          let frames = 0
+          const started = performance.now()
+          const tick = () => {
+            frames++
+            if (performance.now() - started < 2000) requestAnimationFrame(tick)
+            else resolve((frames * 1000) / (performance.now() - started))
+          }
+          requestAnimationFrame(tick)
+        }),
+    )
+    const inside = Number(
+      (await page.locator('.live-stats').innerText()).match(/(\d+)\s*inside/)?.[1] ?? '0',
+    )
+    console.log(`\n    ${fps.toFixed(0)} fps with ${inside} people (software GL)`)
+    // SwiftShader in CI is roughly an order of magnitude slower than a real GPU,
+    // so this only catches a collapse, not a regression in rendering cost.
+    if (fps < 5) throw new Error(`Frame rate collapsed to ${fps.toFixed(1)} fps.`)
   })
 
   await step('dark theme', async () => {

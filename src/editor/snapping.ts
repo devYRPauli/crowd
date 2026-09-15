@@ -60,6 +60,8 @@ export interface SnapOptions {
   /** Turn off object snapping, leaving only the grid. */
   objectSnap?: boolean
   gridSnap?: boolean
+  /** Suspend all snapping for this one move — what holding Alt does. */
+  disabled?: boolean
   gridSize?: number
   /** Restrict snapping to points on walls; used by the door tool. */
   wallsOnly?: boolean
@@ -273,6 +275,7 @@ const gatherAlignment = (
 }
 
 export const snapPoint = (doc: CrowdDocument, raw: Vec2, options: SnapOptions): SnapResult => {
+  if (options.disabled) return { point: raw, kind: 'none', guides: [] }
   const tolerancePx = options.tolerancePx ?? 12
   const tolerance = Math.max(0.02, tolerancePx * options.scale)
   const objectSnap = options.objectSnap ?? doc.settings.snapToObjects

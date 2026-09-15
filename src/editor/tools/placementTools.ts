@@ -47,11 +47,15 @@ export class FurnitureTool implements Tool {
   ): { position: Vec2; rotation: number } | null {
     if (!info.ground) return null
     const entry = resolveCatalogItem(ctx.options.catalogId)
-    const aligned = wallAlignedPlacement(ctx.document, info.ground, entry.size.depth, 1.0)
-    if (aligned) {
-      return { position: aligned.position, rotation: aligned.rotation + this.rotation }
+    // Holding Alt places the item exactly where the cursor is, ignoring both the
+    // grid and the pull of a nearby wall.
+    if (!info.altKey) {
+      const aligned = wallAlignedPlacement(ctx.document, info.ground, entry.size.depth, 1.0)
+      if (aligned) {
+        return { position: aligned.position, rotation: aligned.rotation + this.rotation }
+      }
     }
-    const snapped = ctx.snap(info.ground)
+    const snapped = ctx.snap(info.ground, { disabled: info.altKey })
     return { position: snapped.point, rotation: this.rotation }
   }
 
