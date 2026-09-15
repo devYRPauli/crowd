@@ -1146,9 +1146,13 @@ const DECOR: CatalogItem[] = [
     resize: 'free',
     keywords: ['picture', 'painting', 'frame', 'gallery', 'exhibit'],
     tintRole: 'accent',
+    // The one item whose `height` is its own height rather than its extent above
+    // the floor: a picture hangs, so resizing it changes the picture and not how
+    // high it is hung. Galleries hang to a centre line about 1.5 m up, which is
+    // eye level for a standing adult and what the trade calls 58 inches.
     build: ({ width, depth, height }) => [
-      box(0, 1.5, 0, width, height, depth, 'woodDark'),
-      box(0, 1.5, depth / 2, width - 0.1, height - 0.1, 0.01, 'accent'),
+      box(0, ARTWORK_CENTRE_LINE, 0, width, height, depth, 'woodDark'),
+      box(0, ARTWORK_CENTRE_LINE, depth / 2, width - 0.1, height - 0.1, 0.01, 'accent'),
     ],
   },
   {
@@ -1188,6 +1192,9 @@ const DECOR: CatalogItem[] = [
 ]
 
 // --- registry ----------------------------------------------------------------
+
+/** Gallery hanging height, to the centre of the work: 58 inches. */
+const ARTWORK_CENTRE_LINE = 1.473
 
 export const CATALOG: CatalogItem[] = [
   ...TABLES,
