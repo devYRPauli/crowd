@@ -295,8 +295,9 @@ export const solveEikonal = (
       candidate = b + f
     } else {
       const diff = a - b
-      // Past that spread the two-sided characteristic is inadmissible and the
-      // update falls back to advancing from the nearer axis alone.
+      // When the two upwind values differ by more than one cell's cost, no
+      // characteristic passes through both and the wave arrives along the
+      // nearer axis alone.
       candidate =
         Math.abs(diff) >= f ? Math.min(a, b) + f : (a + b + Math.sqrt(2 * f * f - diff * diff)) / 2
     }
@@ -501,7 +502,13 @@ const segmentDistSq = (
   return dx * dx + dy * dy
 }
 
-/** Rasterise a filled polygon into a Uint8Array mask (scanline fill, with an optional dilation in metres). */
+/**
+ * Rasterise a filled polygon into a Uint8Array mask (scanline fill, with an
+ * optional dilation in metres). Cells are sampled at their centres, so a
+ * feature thinner than a cell can fall between samples and mark nothing —
+ * dilate by at least half a cell wherever the mask has to be conservative,
+ * as a nav mask does.
+ */
 export const rasterizePolygon = (
   grid: NavGrid,
   polygon: readonly Vec2[],
@@ -564,7 +571,9 @@ export const rasterizePolygon = (
       if (out[i] === value) continue
       const px = originX + (c + 0.5) * cellSize
       for (let k = 0, j = n - 1; k < n; j = k++) {
-        if (segmentDistSq(px, py, polygon[j].x, polygon[j].y, polygon[k].x, polygon[k].y) <= dilateSq) {
+        if (
+          segmentDistSq(px, py, polygon[j].x, polygon[j].y, polygon[k].x, polygon[k].y) <= dilateSq
+        ) {
           out[i] = value
           break
         }

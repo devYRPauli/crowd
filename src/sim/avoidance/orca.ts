@@ -172,9 +172,11 @@ export function buildOrcaLinesInto(
       const line = out[j]
       const dx = line.direction.x
       const dy = line.direction.y
-      const d1 = (rel1X * invHorizonObst - line.point.x) * dy - (rel1Y * invHorizonObst - line.point.y) * dx
+      const d1 =
+        (rel1X * invHorizonObst - line.point.x) * dy - (rel1Y * invHorizonObst - line.point.y) * dx
       if (d1 - invHorizonObst * radius < -EPSILON) continue
-      const d2 = (rel2X * invHorizonObst - line.point.x) * dy - (rel2Y * invHorizonObst - line.point.y) * dx
+      const d2 =
+        (rel2X * invHorizonObst - line.point.x) * dy - (rel2Y * invHorizonObst - line.point.y) * dx
       if (d2 - invHorizonObst * radius >= -EPSILON) {
         alreadyCovered = true
         break
@@ -511,4 +513,249 @@ export function buildOrcaLines(
   const lines = out ?? []
   buildOrcaLinesInto(agent, neighbours, obstacles, obstacleNeighbourIndices, lines)
   return lines
+}
+
+/**
+ * Optimise along line `lineNo` subject to every earlier line and the max-speed
+ * circle. Returns false when that leaves nothing feasible.
+ */
+const linearProgram1 = (
+  lines: readonly OrcaLine[],
+  lineNo: number,
+  radius: number,
+  optX: number,
+  optY: number,
+  directionOpt: boolean,
+  result: Vec2,
+): boolean => {
+  const line = lines[lineNo]
+  const along = dot(line.point, line.direction)
+  const discriminant = along * along + radius * radius - lengthSq(line.point)
+  if (discriminant < 0) return false // The speed circle rules the whole line out.
+
+  const root = Math.sqrt(discriminant)
+  let tLeft = -along - root
+  let tRight = -along + root
+
+  for (let i = 0; i < lineNo; i++) {
+    const other = lines[i]
+    const denominator = cross(line.direction, other.direction)
+    const numerator =
+      other.direction.x * (line.point.y - other.point.y) -
+      other.direction.y * (line.point.x - other.point.x)
+
+    if (Math.abs(denominator) <= EPSILON) {
+      // Parallel: either line `i` already excludes this one entirely, or it is slack.
+      if (numerator < 0) return false
+      continue
+    }
+
+    const t = numerator / denominator
+    if (denominator >= 0) {
+      if (t < tRight) tRight = t
+    } else if (t > tLeft) {
+      tLeft = t
+    }
+    if (tLeft > tRight) return false
+  }
+
+  let t: number
+  if (directionOpt) {
+    t = optX * line.direction.x + optY * line.direction.y > 0 ? tRight : tLeft
+  } else {
+    t = line.direction.x * (optX - line.point.x) + line.direction.y * (optY - line.point.y)
+    if (t < tLeft) t = tLeft
+    else if (t > tRight) t = tRight
+  }
+  result.x = line.point.x + t * line.direction.x
+  result.y = line.point.y + t * line.direction.y
+  return true
+}
+
+/**
+ * The 2-D program: walk the constraints and re-optimise whenever one is broken.
+ * Returns the index of the first infeasible line, or `lines.length` on success.
+ */
+const linearProgram2 = (
+  lines: readonly OrcaLine[],
+  radius: number,
+  optX: number,
+  optY: number,
+  directionOpt: boolean,
+  result: Vec2,
+): number => {
+  if (directionOpt) {
+    // `opt` is a unit direction here, so the optimum sits on the speed circle.
+    result.x = optX * radius
+    result.y = optY * radius
+  } else if (optX * optX + optY * optY > radius * radius) {
+    const length = Math.hypot(optX, optY)
+    result.x = (optX / length) * radius
+    result.y = (optY / length) * radius
+  } else {
+    result.x = optX
+    result.y = optY
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    if (violation(lines[i], result.x, result.y) > 0) {
+      const previousX = result.x
+      const previousY = result.y
+      if (!linearProgram1(lines, i, radius, optX, optY, directionOpt, result)) {
+        result.x = previousX
+        result.y = previousY
+        return i
+      }
+    }
+  }
+  return lines.length
+}
+
+/** Scratch for the projected constraints of `linearProgram3`; never escapes. */
+const projectedLines: OrcaLine[] = []
+
+/**
+ * The 3-D "safest possible" program. When the 2-D one is infeasible, minimise the
+ * largest violation instead: each remaining agent line is re-solved against the
+ * lines bisecting it with the earlier ones. Obstacle lines are copied in intact,
+ * so the relaxation never permits walking through a wall.
+ */
+const linearProgram3 = (
+  lines: readonly OrcaLine[],
+  numObstacleLines: number,
+  beginLine: number,
+  radius: number,
+  result: Vec2,
+): void => {
+  let distance = 0
+
+  for (let i = beginLine; i < lines.length; i++) {
+    const lineI = lines[i]
+    if (violation(lineI, result.x, result.y) <= distance) continue
+
+    let count = 0
+    for (let k = 0; k < numObstacleLines && k < lines.length; k++) {
+      const line = lines[k]
+      count = writeLine(
+        projectedLines,
+        count,
+        line.point.x,
+        line.point.y,
+        line.direction.x,
+        line.direction.y,
+      )
+    }
+
+    for (let j = numObstacleLines; j < i; j++) {
+      const lineJ = lines[j]
+      const determinant = cross(lineI.direction, lineJ.direction)
+      let pointX: number
+      let pointY: number
+
+      if (Math.abs(determinant) <= EPSILON) {
+        if (dot(lineI.direction, lineJ.direction) > 0) continue // Same side; j is slack.
+        pointX = 0.5 * (lineI.point.x + lineJ.point.x)
+        pointY = 0.5 * (lineI.point.y + lineJ.point.y)
+      } else {
+        const t =
+          (lineJ.direction.x * (lineI.point.y - lineJ.point.y) -
+            lineJ.direction.y * (lineI.point.x - lineJ.point.x)) /
+          determinant
+        pointX = lineI.point.x + t * lineI.direction.x
+        pointY = lineI.point.y + t * lineI.direction.y
+      }
+
+      let dx = lineJ.direction.x - lineI.direction.x
+      let dy = lineJ.direction.y - lineI.direction.y
+      const length = Math.hypot(dx, dy)
+      if (length > EPSILON) {
+        dx /= length
+        dy /= length
+      } else {
+        dx = 0
+        dy = 0
+      }
+      count = writeLine(projectedLines, count, pointX, pointY, dx, dy)
+    }
+    projectedLines.length = count
+
+    const previousX = result.x
+    const previousY = result.y
+    const optX = -lineI.direction.y
+    const optY = lineI.direction.x
+    if (linearProgram2(projectedLines, radius, optX, optY, true, result) < projectedLines.length) {
+      // Cannot happen in exact arithmetic — the current result is feasible here by
+      // construction — so blame rounding and keep what we had.
+      result.x = previousX
+      result.y = previousY
+    }
+    distance = violation(lineI, result.x, result.y)
+  }
+}
+
+/** Solve for the velocity closest to prefVelocity that satisfies every constraint. */
+export function solveOrca(
+  lines: readonly OrcaLine[],
+  maxSpeed: number,
+  prefVelocity: Vec2,
+  numObstacleLines: number,
+): Vec2 {
+  const radius = Math.max(0, maxSpeed)
+  const result: Vec2 = { x: 0, y: 0 }
+  const failLine = linearProgram2(lines, radius, prefVelocity.x, prefVelocity.y, false, result)
+  if (failLine < lines.length) {
+    linearProgram3(lines, Math.max(0, numObstacleLines), failLine, radius, result)
+  }
+  return result
+}
+
+/** Scratch for `computeNewVelocity`; the lines never outlive the call. */
+const scratchLines: OrcaLine[] = []
+
+/** Convenience: build + solve. Returns the new velocity. */
+export function computeNewVelocity(
+  agent: OrcaAgentState,
+  neighbours: readonly OrcaAgentState[],
+  obstacles: readonly OrcaObstacle[],
+  obstacleNeighbourIndices: readonly number[],
+): Vec2 {
+  const obstacleLineCount = buildOrcaLinesInto(
+    agent,
+    neighbours,
+    obstacles,
+    obstacleNeighbourIndices,
+    scratchLines,
+  )
+  return solveOrca(scratchLines, agent.maxSpeed, agent.prefVelocity, obstacleLineCount)
+}
+
+/** `det(a - c, b - a)`: positive when the turn a→b→c bends left. */
+const leftOf = (a: Vec2, b: Vec2, c: Vec2): number =>
+  (a.x - c.x) * (b.y - a.y) - (a.y - c.y) * (b.x - a.x)
+
+/** Turn closed CCW polygons (solid regions) into the obstacle vertex array ORCA needs. */
+export function buildObstacles(polygons: readonly Vec2[][]): OrcaObstacle[] {
+  const obstacles: OrcaObstacle[] = []
+
+  for (const polygon of polygons) {
+    const count = polygon.length
+    if (count < 2) continue // A single point has no edge to avoid.
+    const base = obstacles.length
+
+    for (let i = 0; i < count; i++) {
+      const current = polygon[i]
+      const next = polygon[(i + 1) % count]
+      const previous = polygon[(i + count - 1) % count]
+      obstacles.push({
+        point: { x: current.x, y: current.y },
+        direction: normalize(sub(next, current)),
+        nextIndex: base + ((i + 1) % count),
+        prevIndex: base + ((i + count - 1) % count),
+        // A two-point loop is a bare wall: both ends are corners you can round.
+        convex: count === 2 || leftOf(previous, current, next) >= 0,
+      })
+    }
+  }
+
+  return obstacles
 }
