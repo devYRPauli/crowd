@@ -204,6 +204,59 @@ export class FlowFieldCache {
  * The kernel is precomputed once as a stamp of cell offsets and weights, so
  * depositing a person costs a fixed handful of adds.
  */
+/**
+ * How far ahead of themselves a walker judges their pace on, in metres.
+ *
+ * Density has to be read in the direction of travel, not in a ring around the
+ * walker, and the difference is not a detail. A ring counts the people *behind*
+ * you, and a person at the front of a bunch — with open floor ahead and the
+ * bunch at their back — is then told to slow down, which closes the gap behind
+ * them and makes the bunch tighter. That is a feedback loop with the sign the
+ * wrong way round: run a corridor at a steady 1.5 persons/m² with a ring and it
+ * does not stay steady, it clots into platoons that each report 2.7 persons/m²
+ * to the people inside them, and the whole crowd walks at the pace of a crowd
+ * twice as dense. Read the space you are walking into instead and the front of
+ * a bunch pulls away, which is what dissolves it — and what real pedestrians
+ * visibly do.
+ *
+ * Three quarters of a metre is about one stride, and close enough to the 0.7 m
+ * kernel width that the two describe the same patch of floor.
+ */
+export const PACE_LOOKAHEAD = 0.45
+
+/** Body radius of a typical adult, and the one the estimator is calibrated on. */
+export const NOMINAL_BODY_RADIUS = 0.23
+
+/**
+ * How much a kernel density estimate under-reads a crowd of solid bodies, and
+ * the factor that puts it right.
+ *
+ * A kernel estimator is unbiased for points that may lie anywhere, including on
+ * top of one another. People may not: nobody else's centre can come closer than
+ * two body radii, so a disc of that radius around everybody is guaranteed
+ * empty. The kernel still expects to find people in it, and what it expects is
+ * a known share of its mass — for a Gaussian, `1 − exp(−(2r)²/2σ²)`, which for
+ * a 0.23 m body and a 0.7 m bandwidth is 19% of the total. So the estimate
+ * comes back about a fifth light, at every density, the shortfall being
+ * proportional to how many people there are.
+ *
+ * The periodic-corridor sweep measures the shortfall at 11–16% once the crowd
+ * is dense enough to have one: a little less than the 19% this predicts,
+ * because the derivation assumes people are otherwise uniformly arranged and
+ * bodies packed to contact are not — they pile extra mass just outside the
+ * exclusion disc, which gives part of the shortfall back.
+ *
+ * It matters well beyond the speed law. This field is what the heat map paints,
+ * what Fruin's bands classify and what the crowd-safety overlay fires on, so
+ * uncorrected it puts a 4.0 persons/m² crush on screen as 3.2 and says nothing
+ * — and disagrees by that much with the per-area figures in the same report,
+ * which count heads inside a polygon and need no correction of any kind.
+ */
+export function hardCoreCorrection(bodyRadius: number, bandwidth: number): number {
+  const contact = 2 * bodyRadius
+  return Math.exp((contact * contact) / (2 * bandwidth * bandwidth))
+}
+
 export class DensityField {
   readonly values: Float32Array
   private accumulator: Float32Array
@@ -211,12 +264,32 @@ export class DensityField {
   private stampWeights: Float32Array
   private stampCols: Int32Array
   private stampRows: Int32Array
+  /**
+   * Fraction of each cell's kernel that lands on floor somebody could stand on.
+   *
+   * Without this a corridor under-reports its own density: the kernel is 0.7 m
+   * wide, so for anyone within that of a wall a large part of it falls inside
+   * the wall, where there is nobody — and the crowd reads as thinner than it
+   * is. In a 3 m corridor that is most of the crowd. Dividing by the walkable
+   * coverage makes the number what Fruin's bands actually mean: persons per
+   * square metre *of usable floor*.
+   */
+  private coverage: Float32Array
+  /** Weight a person deposits at their own cell, before the coverage division. */
+  private peakWeight = 0
+  /** Kernel standard deviation, kept so a walker's own weight can be re-evaluated. */
+  private readonly bandwidth: number
 
   constructor(
     private grid: NavGrid,
     /** Kernel standard deviation in metres. */
     bandwidth = 0.7,
+    /** 1 where a cell is solid. Omitted, every cell counts as walkable. */
+    blocked?: Uint8Array,
+    /** Body radius the hard-core correction is calibrated on. */
+    bodyRadius = NOMINAL_BODY_RADIUS,
   ) {
+    this.bandwidth = bandwidth
     const cells = grid.cols * grid.rows
     this.values = new Float32Array(cells)
     this.accumulator = new Float32Array(cells)
@@ -226,7 +299,8 @@ export class DensityField {
     const weights: number[] = []
     const cols: number[] = []
     const rows: number[] = []
-    const norm = 1 / (2 * Math.PI * bandwidth * bandwidth)
+    const norm =
+      (1 / (2 * Math.PI * bandwidth * bandwidth)) * hardCoreCorrection(bodyRadius, bandwidth)
     for (let dy = -reach; dy <= reach; dy++) {
       for (let dx = -reach; dx <= reach; dx++) {
         const distanceSq = (dx * dx + dy * dy) * grid.cellSize * grid.cellSize
@@ -242,6 +316,29 @@ export class DensityField {
     this.stampWeights = Float32Array.from(weights)
     this.stampCols = Int32Array.from(cols)
     this.stampRows = Int32Array.from(rows)
+
+    let total = 0
+    for (const weight of this.stampWeights) total += weight
+    for (let k = 0; k < this.stampOffsets.length; k++) {
+      if (this.stampCols[k] === 0 && this.stampRows[k] === 0) this.peakWeight = this.stampWeights[k]
+    }
+    this.coverage = new Float32Array(cells)
+    for (let row = 0; row < grid.rows; row++) {
+      for (let col = 0; col < grid.cols; col++) {
+        const index = row * grid.cols + col
+        let walkable = 0
+        for (let k = 0; k < this.stampOffsets.length; k++) {
+          const c = col + this.stampCols[k]
+          const r = row + this.stampRows[k]
+          if (c < 0 || r < 0 || c >= grid.cols || r >= grid.rows) continue
+          if (blocked && blocked[r * grid.cols + c]) continue
+          walkable += this.stampWeights[k]
+        }
+        // Floor the correction: a cell almost entirely enclosed would otherwise
+        // divide by nearly nothing and report an absurd density.
+        this.coverage[index] = Math.max(0.3, walkable / total)
+      }
+    }
   }
 
   /** Rebuild from the current positions, blended towards the previous value. */
@@ -261,8 +358,35 @@ export class DensityField {
       }
     }
     for (let i = 0; i < this.values.length; i++) {
-      this.values[i] += (this.accumulator[i] - this.values[i]) * (1 - smoothing)
+      const corrected = this.accumulator[i] / this.coverage[i]
+      this.values[i] += (corrected - this.values[i]) * (1 - smoothing)
     }
+  }
+
+  /**
+   * Density of *other* people at a point.
+   *
+   * What slows somebody down is the crowd around them, not their own body. The
+   * field deliberately includes everyone — a person standing alone still
+   * occupies space, and level of service is about area per person — but when
+   * the number is used to decide how fast to walk, the walker's own
+   * contribution has to come off first. It is not small: the kernel peaks at
+   * 0.32 persons/m² at its own centre, and against a wall the coverage
+   * correction doubles that, which was enough to slow a lone walker in an empty
+   * corridor below their free speed.
+   *
+   * `distance` is how far the sample point sits from the walker, so that a
+   * walker reading the floor ahead of them (`PACE_LOOKAHEAD`) has the right
+   * amount of themselves taken off rather than all of it.
+   */
+  othersAt(x: number, y: number, sampled: number, distance = 0): number {
+    const { cols, rows, cellSize, originX, originY } = this.grid
+    const col = Math.round((x - originX) / cellSize - 0.5)
+    const row = Math.round((y - originY) / cellSize - 0.5)
+    if (col < 0 || row < 0 || col >= cols || row >= rows) return Math.max(0, sampled)
+    const own =
+      this.peakWeight * Math.exp(-(distance * distance) / (2 * this.bandwidth * this.bandwidth))
+    return Math.max(0, sampled - own / this.coverage[row * cols + col])
   }
 
   reset(): void {

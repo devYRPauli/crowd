@@ -40,9 +40,10 @@ import {
   type SimWorld,
 } from './world'
 import { cellCenter, gridIndex, sampleField, worldToCell } from './nav/eikonal'
-import { DensityField, FlowFieldCache, speedFromDensity } from './nav/flowFields'
+import { DensityField, FlowFieldCache, PACE_LOOKAHEAD, speedFromDensity } from './nav/flowFields'
 import { computeNewVelocity, type OrcaAgentState } from './avoidance/orca'
 import { ObstacleIndex } from './avoidance/obstacleIndex'
+import { SEPARATION, separationScale } from './avoidance/separation'
 import { SpatialHash } from './spatialHash'
 import { scheduleArrivals, splitIntoGroups } from './agents/arrivals'
 import {
@@ -62,7 +63,15 @@ import { CROWD_SAFETY, WALKWAY_LOS, losFor, losIndex } from './metrics/los'
 
 /** How close counts as having arrived at an exact target. */
 const ARRIVE_RADIUS = 0.34
-/** Within this range a person steers straight at their target instead of following the field. */
+/**
+ * Within this range a person steers straight at their target instead of
+ * following the field — but only if the straight line is actually walkable.
+ * Without that check, anybody whose seat or queue slot sits on the far side of a
+ * wall 1.8 m away walks into the wall and stays there: the field knew the way
+ * round and the shortcut threw it away. In the conference venue that stranded a
+ * quarter of the room, and because they never stopped pressing forward the jam
+ * detector never fired either, so they were not even reported.
+ */
 const DIRECT_RANGE = 3.5
 const NEIGHBOUR_RANGE = 5.0
 const MAX_NEIGHBOURS = 12
@@ -152,6 +161,16 @@ interface AreaState {
 
 interface QueueState {
   record: QueueRecord
+  /**
+   * Position of this queue in the plan.
+   *
+   * Random-draw streams are named after it rather than after `record.id`: ids
+   * are minted per document, so keying on one makes the same venue built twice
+   * simulate differently. Two structurally identical plans have to produce
+   * identical numbers or comparing a layout against a baseline measures nothing
+   * but which ids each happened to get.
+   */
+  index: number
   /** Agent ids in queue order, head first. */
   waiting: number[]
   /** Agent id occupying each server, or -1. */
@@ -231,14 +250,15 @@ export class Simulation {
       replanIntervalS: scenario.routing.replanIntervalS,
       budgetPerTick: 2,
     })
-    this.density = new DensityField(this.world.grid)
+    this.density = new DensityField(this.world.grid, 0.7, this.world.solid)
     this.obstacleIndex = new ObstacleIndex(this.world.obstacles, this.world.bounds, 2)
     this.hash = new SpatialHash(NEIGHBOUR_RANGE)
     this.seatTaken = new Uint8Array(this.world.seats.length)
 
-    for (const queue of this.world.queues) {
+    this.world.queues.forEach((queue, queueIndex) => {
       this.queues.set(queue.id, {
         record: queue,
+        index: queueIndex,
         waiting: [],
         servers: new Array(queue.serverCount).fill(-1),
         serverFreeAt: new Array(queue.serverCount).fill(0),
@@ -250,7 +270,7 @@ export class Simulation {
         maxQueue: 0,
         overflowPositions: new Map(),
       })
-    }
+    })
 
     // Measurement areas report what happened inside them, so a planner can ask
     // about the doorway or the dance floor rather than about the whole venue.
@@ -315,7 +335,9 @@ export class Simulation {
   private buildSchedule(): void {
     const arrivals: PendingArrival[] = []
     this.scenario.populations.forEach((population, populationIndex) => {
-      const rng = this.rng.branch(`population:${population.id}`)
+      // Keyed on the population's place in the scenario, not its id: see
+      // `QueueState.index`.
+      const rng = this.rng.branch(`population:${populationIndex}`)
       const count = Math.max(0, Math.round(population.count))
       const groups = splitIntoGroups(count, population.groupSize, rng.branch('groups'))
       const times = scheduleArrivals(population.arrival, count, rng.branch('arrivals'))
@@ -740,11 +762,73 @@ export class Simulation {
     return resolved
   }
 
+  /**
+   * Is the straight line from a person to a point wide enough to walk?
+   *
+   * Sampled from the clearance field at grid resolution, which is signed: a
+   * sample inside a wall or a table comes back negative, so anything that would
+   * not fit a body fails. A target the person cannot walk straight to is not
+   * necessarily unreachable — it usually just needs going round — so a failure
+   * here means keep following the field, not give up.
+   */
+  private lineIsWalkable(agent: Agent, to: Vec2): boolean {
+    const dx = to.x - agent.x
+    const dy = to.y - agent.y
+    const length = Math.hypot(dx, dy)
+    if (length < 1e-6) return true
+    const steps = Math.ceil(length / this.world.grid.cellSize)
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps
+      const clearance = sampleField(
+        this.world.grid,
+        this.world.clearance,
+        agent.x + dx * t,
+        agent.y + dy * t,
+        10,
+      )
+      if (clearance < agent.radius) return false
+    }
+    return true
+  }
+
+  /**
+   * Heading for somebody steering at their exact target with no usable field.
+   *
+   * Usually that means they are nearly there and the potential has flattened
+   * out, and aiming at the target is exactly right. But a person can also be
+   * squeezed into the sliver beside a wall that the navigation grid excludes
+   * for body clearance, and there the potential was never solved at all: the
+   * field has no gradient to offer and aiming at the target walks into the wall
+   * and stays there. One person in a 150-person evacuation ended up pinned like
+   * that for the remaining five minutes of the run.
+   *
+   * So the outward push is for that case only — standing somewhere the field
+   * cannot reach — and not for every blocked line. A target that is genuinely
+   * unreachable has to keep reading as unreachable, so that the person gives up
+   * on it and the run reports that it happened.
+   */
+  private directHeading(agent: Agent, target: Vec2): Vec2 {
+    const toTarget = normalize({ x: target.x - agent.x, y: target.y - agent.y })
+    if (!this.inNavDeadZone(agent.x, agent.y)) return toTarget
+    if (this.lineIsWalkable(agent, target)) return toTarget
+    const out = this.clearanceGradient(agent.x, agent.y)
+    return out.x === 0 && out.y === 0 ? toTarget : out
+  }
+
+  /** Is this point somewhere the navigation grid never solved a route for? */
+  private inNavDeadZone(x: number, y: number): boolean {
+    const { cols, rows, cellSize, originX, originY } = this.world.grid
+    const col = Math.round((x - originX) / cellSize - 0.5)
+    const row = Math.round((y - originY) / cellSize - 0.5)
+    if (col < 0 || row < 0 || col >= cols || row >= rows) return true
+    return this.world.navBlocked[row * cols + col] === 1
+  }
+
   private aimAtQueue(queue: QueueState, agent: Agent, slotIndex: number): void {
     const record = queue.record
     const slotPosition = this.slotPosition(queue, slotIndex)
     const here = { x: agent.x, y: agent.y }
-    if (distance(here, slotPosition) <= DIRECT_RANGE) {
+    if (distance(here, slotPosition) <= DIRECT_RANGE && this.lineIsWalkable(agent, slotPosition)) {
       agent.exactTarget = slotPosition
       agent.fieldTarget = null
       return
@@ -805,7 +889,7 @@ export class Simulation {
         if (distance({ x: head.x, y: head.y }, slot) > record.spacing * 1.6) continue
 
         queue.waiting.shift()
-        const rng = this.rng.branch(`service:${record.id}:${queue.served}:${head.id}`)
+        const rng = this.rng.branch(`service:${queue.index}:${queue.served}:${head.id}`)
         const duration = Math.max(0.5, sampleDistribution(rng, record.serviceTime))
         head.state = 'served'
         head.serverIndex = s
@@ -1166,7 +1250,7 @@ export class Simulation {
     const target = agent.exactTarget
     const toTarget = target ? distance({ x: agent.x, y: agent.y }, target) : Infinity
 
-    if (target && toTarget <= DIRECT_RANGE) {
+    if (target && toTarget <= DIRECT_RANGE && this.lineIsWalkable(agent, target)) {
       const d = normalize({ x: target.x - agent.x, y: target.y - agent.y })
       dirX = d.x
       dirY = d.y
@@ -1185,12 +1269,12 @@ export class Simulation {
         dirX = route.dx
         dirY = route.dy
       } else if (target) {
-        const d = normalize({ x: target.x - agent.x, y: target.y - agent.y })
+        const d = this.directHeading(agent, target)
         dirX = d.x
         dirY = d.y
       }
     } else if (target) {
-      const d = normalize({ x: target.x - agent.x, y: target.y - agent.y })
+      const d = this.directHeading(agent, target)
       dirX = d.x
       dirY = d.y
     }
@@ -1229,9 +1313,22 @@ export class Simulation {
       }
     }
 
-    // People slow down in a crowd even before anyone is in their way.
-    const localDensity = sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0)
-    speed *= speedFromDensity(localDensity)
+    // People slow down in a crowd even before anyone is in their way — but they
+    // read the floor they are walking into, not a ring around themselves, and
+    // not their own body, so the lookahead moves the sample and their own
+    // contribution comes off it. Looking through a wall would read the empty
+    // floor on the far side as free space, so a blocked sight line falls back to
+    // where the walker is standing.
+    let senseX = agent.x + dirX * PACE_LOOKAHEAD
+    let senseY = agent.y + dirY * PACE_LOOKAHEAD
+    let senseDistance = PACE_LOOKAHEAD
+    if (sampleField(this.world.grid, this.world.clearance, senseX, senseY, 0) < agent.radius) {
+      senseX = agent.x
+      senseY = agent.y
+      senseDistance = 0
+    }
+    const sampled = sampleField(this.world.grid, this.density.values, senseX, senseY, 0)
+    speed *= speedFromDensity(this.density.othersAt(senseX, senseY, sampled, senseDistance))
 
     // Somebody who has been going nowhere for a few seconds tries stepping
     // around the obstruction instead of pushing into it. Real crowds unjam by
@@ -1361,63 +1458,76 @@ export class Simulation {
   private relaxOverlaps(): void {
     const count = this.live.length
     if (count < 2) return
+    // The hash is built once and reused across the passes. Each pass moves a
+    // body by at most a third of the step budget, well inside the slack in the
+    // query radius below, so the neighbour set cannot go stale within a step.
     this.rebuildHash()
+    if (this.overlapScratch.length < count * 2) this.overlapScratch = new Float32Array(count * 2)
     const corrections = this.overlapScratch
-    if (corrections.length < count * 2) this.overlapScratch = new Float32Array(count * 2)
-    this.overlapScratch.fill(0, 0, count * 2)
 
     const index = new Map<number, number>()
     for (let i = 0; i < count; i++) index.set(this.live[i], i)
 
-    for (let i = 0; i < count; i++) {
-      const agent = this.agents[this.live[i]]
-      this.hash.query(agent.x, agent.y, agent.radius * 2 + 0.4, (otherId) => {
-        if (otherId <= agent.id) return
-        const slot = index.get(otherId)
-        if (slot === undefined) return
-        const other = this.agents[otherId]
-        const dx = other.x - agent.x
-        const dy = other.y - agent.y
-        const minimum = agent.radius + other.radius
-        const distanceSq = dx * dx + dy * dy
-        if (distanceSq >= minimum * minimum || distanceSq < 1e-12) return
-        const length = Math.sqrt(distanceSq)
-        const penetration = (minimum - length) * 0.5
-        const nx = dx / length
-        const ny = dy / length
-        // Someone seated or being served holds their place; the mover gives way.
-        const agentFixed = agent.state === 'seated' || agent.state === 'served'
-        const otherFixed = other.state === 'seated' || other.state === 'served'
-        const agentShare = agentFixed ? 0 : otherFixed ? 1 : 0.5
-        const otherShare = otherFixed ? 0 : agentFixed ? 1 : 0.5
-        this.overlapScratch[i * 2] -= nx * penetration * 2 * agentShare
-        this.overlapScratch[i * 2 + 1] -= ny * penetration * 2 * agentShare
-        this.overlapScratch[slot * 2] += nx * penetration * 2 * otherShare
-        this.overlapScratch[slot * 2 + 1] += ny * penetration * 2 * otherShare
-      })
+    const bounds = this.world.bounds
+    for (let pass = 0; pass < SEPARATION.iterations; pass++) {
+      corrections.fill(0, 0, count * 2)
+
+      for (let i = 0; i < count; i++) {
+        const agent = this.agents[this.live[i]]
+        this.hash.query(agent.x, agent.y, agent.radius * 2 + 0.4, (otherId) => {
+          if (otherId <= agent.id) return
+          const slot = index.get(otherId)
+          if (slot === undefined) return
+          const other = this.agents[otherId]
+          const dx = other.x - agent.x
+          const dy = other.y - agent.y
+          const minimum = agent.radius + other.radius
+          const distanceSq = dx * dx + dy * dy
+          if (distanceSq >= minimum * minimum || distanceSq < 1e-12) return
+          const length = Math.sqrt(distanceSq)
+          const penetration = (minimum - length) * 0.5
+          const nx = dx / length
+          const ny = dy / length
+          // Someone seated or being served holds their place; the mover gives way.
+          const agentFixed = agent.state === 'seated' || agent.state === 'served'
+          const otherFixed = other.state === 'seated' || other.state === 'served'
+          const agentShare = agentFixed ? 0 : otherFixed ? 1 : 0.5
+          const otherShare = otherFixed ? 0 : agentFixed ? 1 : 0.5
+          corrections[i * 2] -= nx * penetration * 2 * agentShare
+          corrections[i * 2 + 1] -= ny * penetration * 2 * agentShare
+          corrections[slot * 2] += nx * penetration * 2 * otherShare
+          corrections[slot * 2 + 1] += ny * penetration * 2 * otherShare
+        })
+      }
+
+      let resolved = true
+      for (let i = 0; i < count; i++) {
+        const agent = this.agents[this.live[i]]
+        const scale = separationScale(corrections[i * 2], corrections[i * 2 + 1])
+        if (scale === 0) continue
+        resolved = false
+        agent.x += corrections[i * 2] * scale
+        agent.y += corrections[i * 2 + 1] * scale
+        agent.x = Math.min(Math.max(agent.x, bounds.minX + 0.3), bounds.maxX - 0.3)
+        agent.y = Math.min(Math.max(agent.y, bounds.minY + 0.3), bounds.maxY - 0.3)
+      }
+      // Nobody was touching: the remaining passes have nothing to do.
+      if (resolved) break
     }
 
-    const bounds = this.world.bounds
+    // Push anyone the passes left inside geometry back out — once for the step,
+    // not once per pass. Doing it per pass triples the shove somebody gets while
+    // easing through a tight gap, and people who were squeezing through a
+    // doorway at 0.04 m of slack were being bounced back out of it every tick
+    // and never got through at all.
     for (let i = 0; i < count; i++) {
       const agent = this.agents[this.live[i]]
-      const dx = this.overlapScratch[i * 2]
-      const dy = this.overlapScratch[i * 2 + 1]
-      if (dx === 0 && dy === 0) continue
-      // Cap the correction so a deep pile-up eases apart over several steps
-      // rather than exploding outwards in one.
-      const length = Math.hypot(dx, dy)
-      const capped = Math.min(length, 0.08)
-      agent.x += (dx / length) * capped
-      agent.y += (dy / length) * capped
-      agent.x = Math.min(Math.max(agent.x, bounds.minX + 0.3), bounds.maxX - 0.3)
-      agent.y = Math.min(Math.max(agent.y, bounds.minY + 0.3), bounds.maxY - 0.3)
       const clearance = sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10)
-      if (clearance < agent.radius) {
-        const push = this.clearanceGradient(agent.x, agent.y)
-        const correction = Math.min(agent.radius - clearance, 0.2)
-        agent.x += push.x * correction
-        agent.y += push.y * correction
-      }
+      if (clearance >= agent.radius) continue
+      const push = this.clearanceGradient(agent.x, agent.y)
+      const correction = Math.min(agent.radius - clearance, 0.2)
+      agent.x += push.x * correction
+      agent.y += push.y * correction
     }
   }
 
@@ -1503,7 +1613,17 @@ export class Simulation {
         ? this.fields.direction(agent.fieldTarget, { x: agent.x, y: agent.y }, agent.routeAwareness)
         : null,
       clearance: sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10),
-      density: sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0),
+      // The crowd this person is in, which does not include this person. The
+      // field itself counts everybody, because a person standing alone still
+      // occupies floor and that is what level of service measures — but asked
+      // about one person, the honest answer leaves their own body out. Without
+      // that, somebody alone in an empty hall reports 0.40 persons/m², which is
+      // their own kernel peak and nothing else.
+      density: this.density.othersAt(
+        agent.x,
+        agent.y,
+        sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0),
+      ),
     }
   }
 
