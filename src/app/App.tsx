@@ -134,6 +134,19 @@ export const App = () => {
   const warnings = useSimulation((state) => state.warnings)
 
   const toggleHeatmap = useCallback(() => setShowHeatmap((value) => !value), [])
+
+  const exportImage = useCallback(() => {
+    const viewport = viewportRef.current.viewport
+    if (!viewport) return
+    const url = viewport.captureImage(2)
+    const anchor = window.document.createElement('a')
+    anchor.href = url
+    anchor.download = 'crowd-plan.png'
+    window.document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    useEditor.getState().toast('Image downloaded.', 'success')
+  }, [])
   const openShortcuts = useCallback(() => setShowShortcuts(true), [])
   const overlayOpen = showTemplates || showShortcuts || showWelcome
   useKeyboard({
@@ -216,7 +229,11 @@ export const App = () => {
         return <ScenarioPanel />
       case 'results':
         return (
-          <ResultsPanel heatmapFacility={heatmapFacility} onHeatmapFacility={setHeatmapFacility} />
+          <ResultsPanel
+            heatmapFacility={heatmapFacility}
+            onHeatmapFacility={setHeatmapFacility}
+            onExportImage={exportImage}
+          />
         )
       case 'layers':
         return <LayersPanel />
@@ -226,7 +243,7 @@ export const App = () => {
       default:
         return <LibraryPanel />
     }
-  }, [panel, heatmapFacility])
+  }, [panel, heatmapFacility, exportImage])
 
   const frame = useSimulation((state) => state.frame)
   const los = frame ? losFor(frame.stats.peakDensity, heatmapFacility) : null

@@ -21,6 +21,14 @@ import { LOS_TABLES, type FacilityType } from '../../sim/metrics/los'
 import { formatArea, formatDuration, formatNumber, formatPercent } from '../../core/model/units'
 import { Checkbox, Field, NumberInput, Segmented, Select, Sparkline, Stat } from '../components/ui'
 import { TrashIcon } from '../components/icons'
+import { downloadText } from '../../core/document/storage'
+import {
+  reportFileName,
+  seriesToCsv,
+  toBrief,
+  toCsv,
+  toJsonBundle,
+} from '../../core/analysis/report'
 import type { RunSummary } from '../../sim/types'
 
 const compare = (
@@ -201,12 +209,67 @@ const CompliancePanel = () => {
   )
 }
 
+const ExportSection = ({ onExportImage }: { onExportImage: () => void }) => {
+  const document = useEditor((state) => state.document)
+  const toast = useEditor((state) => state.toast)
+  const summary = useSimulation((state) => state.summary)
+  const series = useSimulation((state) => state.series)
+  const totalPeople = useSimulation((state) => state.totalPeople)
+
+  const findings = useMemo(
+    () => (summary && series ? deriveFindings({ summary, series, totalPeople }) : []),
+    [summary, series, totalPeople],
+  )
+
+  if (!summary || !series) return null
+  const input = { document, summary, series, findings }
+
+  const save = (extension: string, text: string, mime: string, label: string) => {
+    downloadText(reportFileName(document, extension), text, mime)
+    toast(`${label} downloaded.`, 'success')
+  }
+
+  return (
+    <div className="section">
+      <div className="section-title">Export</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <button className="btn" onClick={() => save('txt', toBrief(input), 'text/plain', 'Brief')}>
+          Written brief
+        </button>
+        <button className="btn" onClick={onExportImage}>
+          Image of the plan
+        </button>
+        <button className="btn" onClick={() => save('csv', toCsv(input), 'text/csv', 'Summary')}>
+          Summary CSV
+        </button>
+        <button
+          className="btn"
+          onClick={() =>
+            save('series.csv', seriesToCsv(input), 'text/csv', 'Time series')
+          }
+        >
+          Time series CSV
+        </button>
+      </div>
+      <button className="btn" onClick={() => save('json', toJsonBundle(input), 'application/json', 'Report')}>
+        Full report bundle (.json)
+      </button>
+      <p className="hint">
+        The bundle carries the plan, the scenario and the results together, so opening it in CROWD
+        restores exactly the run it describes.
+      </p>
+    </div>
+  )
+}
+
 export const ResultsPanel = ({
   heatmapFacility,
   onHeatmapFacility,
+  onExportImage,
 }: {
   heatmapFacility: FacilityType
   onHeatmapFacility: (facility: FacilityType) => void
+  onExportImage: () => void
 }) => {
   const document = useEditor((state) => state.document)
   const setSelection = useEditor((state) => state.setSelection)
@@ -393,6 +456,7 @@ export const ResultsPanel = ({
           </div>
         ) : null}
 
+        <ExportSection onExportImage={onExportImage} />
         <CompliancePanel />
       </div>
     </>

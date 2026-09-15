@@ -314,7 +314,12 @@ const parseScenario = (raw: unknown): Scenario => {
 /** Parse anything into a usable document, reporting what had to be repaired. */
 export const parseDocument = (input: unknown): ParseResult => {
   const warnings: string[] = []
-  const raw = isObject(input) ? input : {}
+  let raw = isObject(input) ? input : {}
+  // An exported report carries the document it came from. Opening one should
+  // restore that plan rather than fail, because a report is what gets emailed.
+  if (raw.format === 'crowd-report' && isObject(raw.document)) {
+    raw = raw.document
+  }
   if (!isObject(input)) warnings.push('The file did not contain a CROWD document; started empty.')
 
   const version = num(raw.schemaVersion, 0)
