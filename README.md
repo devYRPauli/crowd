@@ -135,9 +135,16 @@ ORCA has a known failure mode: in a tight crowd its linear program becomes
 infeasible and the relaxed fallback can hand every agent a velocity of zero at
 once — a deadlock no amount of simulated time resolves. CROWD shortens the time
 horizon as pressure builds (people in a crush stop planning two seconds ahead and
-deal with the person in front) and lets a jammed person creep forward. A
-positional relaxation pass after integration keeps the packing physical; without
-it, a jam keeps compressing and reports densities no real crowd reaches.
+deal with the person in front) and lets a jammed person creep forward.
+
+Velocity-space avoidance cannot guarantee separation on its own — when the
+program is infeasible the fallback returns the least-bad velocity, and in a crush
+the least-bad velocity still closes the gap — so positional relaxation passes
+after integration keep the packing physical. One pass is enough up to about
+3 persons/m² and not above it: pushing A off B moves A into C, and with a single
+pass the residual grows with density, reaching 27% of a body radius at 4.7
+persons/m². Three passes hold the pack at contact, and across the whole
+fundamental-diagram sweep no pair now overlaps by more than 0.1% of two radii.
 
 **3. Act — a state machine per person.**
 Walk the itinerary: go here, queue there, be served, sit down, leave. People join
@@ -149,6 +156,24 @@ so a crowd slows the way a real one does rather than only through collision
 avoidance. Density is estimated with a 0.7 m Gaussian kernel, not per grid cell:
 per-cell counting makes one person alone in a hall read as eleven persons per
 square metre.
+
+Two details of that estimate matter more than they look.
+
+**It is read one stride ahead, not in a ring.** A ring counts the people behind
+you, so whoever reaches the front of a bunch is told to slow down — which closes
+the gap behind them and makes the bunch tighter. That feedback has the sign the
+wrong way round, and it shows: with a ring, a corridor held at a steady
+1.5 persons/m² does not stay steady, it clots into platoons that each report
+2.7 persons/m² to the people inside them. Read the floor you are walking into
+instead and the front of a bunch pulls away, which is what dissolves it.
+
+**It is corrected for the space bodies cannot occupy.** A kernel estimator is
+unbiased for points that may lie anywhere, including on top of each other.
+People may not: a disc of two body radii around everybody is guaranteed empty,
+and the kernel expects to find about a fifth of its mass in it. Uncorrected, a
+4.0 persons/m² crush paints on the heat map as 3.2 and the safety overlay says
+nothing — while the per-area occupancy in the same report, which counts heads in
+a polygon, disagrees by that same fifth.
 
 Everything is deterministic given the seed. The same scenario replayed produces
 the same numbers, which is what makes two layouts comparable.
@@ -211,17 +236,24 @@ other test.
 - **Fundamental diagram.** A periodic corridor swept across densities, measured
   against Weidmann's speed–density curve. This is the cheapest credibility
   artefact a crowd simulator has: if a model change silently breaks it, nothing
-  else in the output is trustworthy.
-- **RiMEA 3.0 cases** TC1 (corridor speed), TC4 (bottleneck flow), TC6 (90°
-  corner), TC7 (demographic speeds) and TC11 (congestion at a single exit).
-  TC2–TC3 and TC8–TC15 involve stairs and multi-storey geometry, which this
-  version does not model; they are listed as not applicable rather than omitted.
+  else in the output is trustworthy. It tracks the curve to **0.042 m/s RMSE**
+  over 0.5–4.0 persons/m², and peaks at **1.233 persons/m/s at 1.81
+  persons/m²** where the curve's own peak is 1.225 at 1.75 — capacity being the
+  number a model like this is most likely to be quoted on.
+- **RiMEA 3.0 cases** TC1 (corridor speed), TC6 (90° corner), TC7 (demographic
+  speeds) and TC12 (bottleneck flow), plus a single-exit evacuation. TC2–TC3 and
+  TC8–TC15 involve stairs and multi-storey geometry, which this version does not
+  model; they are listed as not applicable rather than omitted.
 - **ORCA** is verified by differential fuzzing against an independent
   transliteration of the RVO2 reference, and its test suite is mutation-tested.
+- **Determinism**, because a comparison that is partly noise is worse than no
+  comparison: every starter venue is built twice and has to produce identical
+  numbers.
 
 Run `npm test` for everything, or `npx vitest run src/sim/validation` for the
 fidelity suite alone. The validation tests print their measured numbers — that
-output is the point.
+output is the point, and [docs/VALIDATION.md](docs/VALIDATION.md) records the
+current ones, including what still misses and by how much.
 
 ---
 
