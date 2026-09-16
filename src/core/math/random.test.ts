@@ -205,9 +205,7 @@ describe('named streams', () => {
     // one of those branches below the loop — a refactor that reads as changing
     // nothing — would move every arrival time in the run, and a comparison
     // against a baseline would measure the edit rather than the layout.
-    expect(draws(drawnFrom.branch('arrivals'), 20)).toEqual(
-      draws(untouched.branch('arrivals'), 20),
-    )
+    expect(draws(drawnFrom.branch('arrivals'), 20)).toEqual(draws(untouched.branch('arrivals'), 20))
   })
 
   // Recorded decision: labels are XORed together, and XOR is commutative and
@@ -398,14 +396,16 @@ describe('the sampling shapes', () => {
     expect(rng.weightedIndex([])).toBe(0)
   })
 
-  // SUSPECTED BUG: the running total is compared with `target <= 0` before the
-  // weight at that index is known to be non-zero, so a draw that lands exactly
-  // on zero returns index 0 even when index 0 was given no weight at all — a
-  // profile the user set to 0% of the crowd then appears in it. Only index 0
-  // can be reached this way and only on an exact-zero draw, so it is rare
-  // rather than harmless; skipping zero-weight entries fixes it.
-  it('can choose a profile that was given no share of the crowd', () => {
-    expect(new LowestDraw(1).weightedIndex([0, 1])).toBe(0)
+  it('never gives the crowd to a profile the user set to no share of it', () => {
+    // The lowest draw in the unit interval lands exactly on the bottom of the
+    // first band, and a profile set to 0% has a band of no width for it to land
+    // in, so the draw belongs to the first profile that does have a share.
+    expect(new LowestDraw(1).weightedIndex([0, 1])).toBe(1)
+    expect(new LowestDraw(1).weightedIndex([0, 0, 3])).toBe(2)
+    // The top of the range belongs to the last profile with a share too, not to
+    // the empty ones the user left sitting after it.
+    const rng = new Rng('empty-tail')
+    for (let i = 0; i < 2000; i++) expect(rng.weightedIndex([3, 0])).toBe(0)
   })
 
   it('shuffles in place, keeping every element exactly once', () => {
@@ -446,12 +446,12 @@ describe('the sampling shapes', () => {
     }
   })
 
-  // SUSPECTED BUG: `pick` is typed as returning T but hands back undefined for
-  // an empty list, so a caller picking from a filtered set of exits gets an
-  // object-shaped undefined that the type checker has promised cannot happen,
-  // and the failure surfaces somewhere else entirely.
   it('returns nothing at all when there is nothing to pick from', () => {
-    expect(new Rng('pick').pick([])).toBeUndefined()
+    // The empty case is in the type, so a caller picking from a filtered set of
+    // exits answers for it where it happens rather than carrying an
+    // object-shaped undefined off into the step that reads its position.
+    const chosen: string | undefined = new Rng('pick').pick([])
+    expect(chosen).toBeUndefined()
   })
 
   it('fills the unit disc evenly rather than crowding its centre', () => {
@@ -557,26 +557,31 @@ describe('durations from a distribution', () => {
     expect(summary.sd).toBeCloseTo(7, 0)
   })
 
-  // SUSPECTED BUG: `distributionMean` returns the `mean` *field*, but whenever a
-  // duration carries explicit bounds the sampler never reads that field:
-  // {mean: 300, min: 120, max: 600} draws an average of 360, and
-  // {mean: 30, min: 10, max: 90} draws (10 + 30 + 90) / 3 = 43.3. The engine
-  // reads this number as the seconds each person costs when it picks the
-  // shortest queue (engine.ts:912, `serviceMean`), and a bounded serviceTime
-  // reaches it: the serialiser keeps min and max for all six kinds, and
-  // `planBuilder.service` takes any Distribution. The desk is then chosen on a
-  // wait under-read by a fifth. The mean of a bounded uniform is (min+max)/2
-  // and of a triangular (min+mode+max)/3.
-  it('reports a mean for a bounded duration that its own samples do not have', () => {
+  it('reports the mean a bounded duration really draws, not the mean field', () => {
     const uniform: Distribution = { kind: 'uniform', mean: 300, min: 120, max: 600 }
     const triangular: Distribution = { kind: 'triangular', mean: 30, min: 10, max: 90 }
     const rng = new Rng('mean')
     const drawn = (dist: Distribution) =>
       summarise(Array.from({ length: BATCH }, () => sampleDistribution(rng, dist))).mean
 
-    expect(distributionMean(uniform)).toBe(300)
+    // The engine multiplies this by the length of a line to guess the wait
+    // behind a counter (engine.ts:912). A uniform never reads its mean field
+    // and draws between its bounds; a triangular reads it as the mode. Taking
+    // the field at its word sent people to a desk on a wait a fifth short.
+    expect(distributionMean(uniform)).toBeCloseTo(360, 6)
     expect(drawn(uniform)).toBeCloseTo(360, -1)
-    expect(distributionMean(triangular)).toBe(30)
+    expect(distributionMean(triangular)).toBeCloseTo(43.33, 2)
     expect(drawn(triangular)).toBeCloseTo(43.3, 0)
+
+    // Unbounded, both shapes are symmetric about the mean they were given, and
+    // the shapes that draw around that mean keep reporting it either way.
+    expect(distributionMean({ kind: 'uniform', mean: 30, sd: 10 })).toBeCloseTo(30, 9)
+    expect(distributionMean({ kind: 'triangular', mean: 30 })).toBeCloseTo(30, 9)
+    expect(distributionMean({ kind: 'lognormal', mean: 20, sd: 7, min: 2 })).toBe(20)
+    expect(distributionMean({ kind: 'exponential', mean: 30 })).toBe(30)
+    // A duration the bounds cut down costs what it can cost, not what it asked
+    // for: the sampler clamps every kind, so the estimate does too.
+    expect(distributionMean({ kind: 'constant', mean: 50, max: 30 })).toBe(30)
+    expect(distributionMean({ kind: 'constant', mean: -9 })).toBe(0)
   })
 })
