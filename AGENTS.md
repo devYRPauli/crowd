@@ -67,11 +67,32 @@ somewhere else.
   it ends.
 - Nothing is committed to the document until the gesture commits. A half-typed
   value never reaches it.
+- A tool that holds state between clicks redraws through `onRefresh`, never
+  `onActivate`. `ToolController.refresh` runs on every document change, and
+  committing part of a gesture *is* a document change — so a tool that redraws
+  by reactivating deletes its own gesture halfway through. The wall chain did
+  exactly that and nothing but the built app could see it.
+- A locked object can be selected, because the inspector is where it gets
+  unlocked, and cannot be moved, rotated, nudged or deleted. A lock that only
+  refuses deletion reads as protection without being any.
 
 ## Validation and honesty
 
 - The validation suite is a public claim. Never loosen a threshold to make a test
   green: mark it failing, state the measured value and the target, and say so.
+- A number the product reports is measured, never substituted. A parser that
+  cannot read something says what it lost; it does not quietly hand back a
+  default in its place. `walkableArea` reports the floor inside the venue, not
+  the ground the grid happens to cover, and a scenario whose groups failed to
+  parse comes back empty rather than full of invented people.
+- Egress capacity is the number this tool exists to produce, so it is measured
+  directly — `src/sim/validation/egress.test.ts` — and not inferred from a run
+  finishing. Width has to buy flow: doubling a door's clear width roughly doubles
+  what it passes, and a change that breaks that relationship has broken the
+  doorway, whatever else still passes.
+- People keep their bodies for `EXIT_TAIL` past a threshold. Deleting somebody
+  the instant they reach the line empties the floor beyond every door, and the
+  person in the gap then walks out at free speed into space nobody is occupying.
 - Where the validation harness reimplements a rule the engine also has, the
   numbers that define the rule are shared between them. A harness that has
   drifted from the engine is measuring something nobody ships.

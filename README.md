@@ -269,16 +269,23 @@ other test.
 - **Fundamental diagram.** A periodic corridor swept across densities, measured
   against Weidmann's speed–density curve. This is the cheapest credibility
   artefact a crowd simulator has: if a model change silently breaks it, nothing
-  else in the output is trustworthy. It tracks the curve to **0.042 m/s RMSE**
-  over 0.5–4.0 persons/m², and peaks at **1.233 persons/m/s at 1.81
-  persons/m²** where the curve's own peak is 1.225 at 1.75 — capacity being the
-  number a model like this is most likely to be quoted on.
+  else in the output is trustworthy. It tracks the curve to **0.044 m/s RMSE**
+  over 0.5–4.0 persons/m² per run, **0.032** pooled, and peaks at **1.194
+  persons/m/s at 1.72 persons/m²** — capacity being the number a model like this
+  is most likely to be quoted on.
 - **RiMEA 3.0 cases** TC1 (corridor speed), TC6 (90° corner), TC7 (demographic
   speeds) and TC12 (bottleneck flow), plus a single-exit evacuation that is
   CROWD's own check rather than a RiMEA case. TC2, TC3, TC8 and TC13 turn on
   stairs, which this version does not model and will not fake as a sloped
   corridor; the rest are listed as not written yet rather than omitted, with
   escape-route choice (TC11) called out as the gap that matters most.
+- **Egress through a door** is measured directly, because it is the number the
+  tool is actually asked for and it went wrong once without anything noticing.
+  A pair of 3'0" leaves passes **1.33 persons per metre per second** of clear
+  width, against the 1.2–1.4 the observational literature reports, and doubling
+  a door's width roughly doubles what it passes. The test that holds that
+  relationship exists because for a long time it did not hold: see
+  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 - **ORCA** is verified by differential fuzzing against an independent
   transliteration of the RVO2 reference, and its test suite is mutation-tested.
 - **Choice of exit**, run with congestion-aware routing on and off so the
@@ -308,6 +315,20 @@ This is an exploratory planning model, not a safety certification.
   floor rather than reproducing the mistake.
 - **Group behaviour is limited.** People can arrive in groups, but there is no
   explicit cohesion model keeping a family together through a crowd.
+- **Theatre seating is not an obstacle.** Loose chairs and seat rows are
+  deliberately not blocked — eight chairs round a banquet round would seal the
+  table off entirely once the grid adds body clearance, and nobody could take
+  their seat. The consequence for a theatre is worth stating plainly: people walk
+  through the rows, so a theatre evacuation ignores the row and aisle geometry
+  that actually governs it. Mark anything you want treated as solid as an
+  obstacle per item.
+- **A counter needs room to queue into.** A desk placed close to a wall can have
+  its queue slots fall beyond that wall, and people will walk out of the building
+  and round the outside to join the back of the line. Nothing warns about it yet.
+- **Narrow doors are pessimistic.** Below about 1.2 m the engine passes fewer
+  people per metre than the observational literature reports, because it keeps a
+  fixed clearance between a body and a jamb and a narrow opening loses
+  proportionally more of itself to it. See `docs/VALIDATION.md`.
 - **No balking or reneging at a counter.** Somebody heading for a door will
   change doors when the queue at one makes the walk to the other worth it, but
   somebody who has joined a service queue stays in it however long the line
