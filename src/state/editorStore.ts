@@ -244,7 +244,13 @@ export const useEditor = create<EditorState>()((set, get) => ({
       (doc) => removeObjects(doc, removable),
       removable.length === 1 ? 'Delete' : `Delete ${removable.length} objects`,
     )
-    set({ selection: [] })
+    // What survived stays selected, which is how a locked object refused in a
+    // mixed selection stays reachable: the inspector is the only place to
+    // unlock it. Reading the new document rather than subtracting `removable`
+    // also drops the refs that went without being named — a door leaves with
+    // the wall it is hung on.
+    const doc = get().document
+    set((state) => ({ selection: state.selection.filter((ref) => referenceExists(doc, ref)) }))
   },
 
   setHover: (ref) => set({ hover: ref }),

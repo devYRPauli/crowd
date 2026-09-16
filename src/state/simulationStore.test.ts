@@ -313,7 +313,9 @@ describe('the transport controls', () => {
     expect(sim().frame).toBeNull()
     expect(sim().summary).toBeNull()
     expect(sim().progress).toBe(0)
-    expect(sim().totalPeople).toBe(240)
+    // The stop emptied the readout; the late `ready` must not refill it with a
+    // crowd size for a run that is over.
+    expect(sim().totalPeople).toBe(0)
   })
 })
 
@@ -468,40 +470,30 @@ describe('reaching the end of the scenario', () => {
     expect(sim().progress).toBe(0)
   })
 
-  // SUSPECTED BUG: `stop` clears the phase, the run id, the progress and the
-  // frame, but leaves `summary`, `series`, `warnings` and `totalPeople` behind,
-  // and the Stop button says "Stop and clear". Opening a project or a template
-  // (TopBar, ProjectsModal, Overlays) is exactly `stop()` then
-  // `replaceDocument()`, so the results panel goes on showing the previous
-  // venue's findings against the plan now on screen — and "Save as baseline"
-  // is still offered, which pairs those numbers with the new document for good.
-  // `stop` should clear the results the way `run` does.
-  it('keeps the finished numbers after a stop, even though the venue is about to change', () => {
+  it('takes the findings off the panel with the crowd when the run is stopped', () => {
     const doc = venue('Foyer')
     sim().run(doc, doc.name)
     const runId = inFlight()
     deliver(ready(runId, { warnings: ['The north exit is only 0.8 m wide'] }))
     deliver(frame(runId, { time: 296, progress: 0.97 }))
     deliver(done(runId, { completed: 238 }))
-    const finished = sim().summary
 
     sim().stop()
 
     expect(sim().phase).toBe('idle')
     expect(sim().frame).toBeNull()
-    expect(sim().summary?.completed).toBe(238)
-    expect(Array.from(sim().series?.active ?? [])).toEqual([12, 6, 0])
-    expect(sim().warnings).toEqual(['The north exit is only 0.8 m wide'])
-    expect(sim().totalPeople).toBe(240)
+    expect(sim().summary).toBeNull()
+    expect(sim().series).toBeNull()
+    expect(sim().warnings).toEqual([])
+    expect(sim().totalPeople).toBe(0)
 
-    // What the leak costs: the venue the user opens next can be saved as a
-    // baseline carrying the numbers of the venue they just closed.
+    // Stopping is the first half of opening a project or a template, so numbers
+    // that outlived it would be read against whatever plan arrives next — and
+    // "Save as baseline" is offered whenever there is a summary, which would
+    // pair the closed venue's results with the new document for good.
     const opened = venue('Foyer with two doors')
     sim().saveCurrentRun(opened.name, opened)
-
-    expect(sim().savedRuns).toHaveLength(1)
-    expect(sim().savedRuns[0].document).toBe(opened)
-    expect(sim().savedRuns[0].summary).toBe(finished)
+    expect(sim().savedRuns).toEqual([])
   })
 })
 
@@ -592,14 +584,7 @@ describe('the baseline a run is compared against', () => {
     expect(saved.some((run) => run.label === 'Option 1')).toBe(false)
   })
 
-  // SUSPECTED BUG: `removeRun` deliberately clears `comparisonId` when the run
-  // it names is deleted, but the twelve-run cap in `saveCurrentRun` evicts the
-  // oldest without doing the same. The baseline the user chose then falls off
-  // the list while still being the comparison, and because the panel finds it
-  // with `savedRuns.find((run) => run.id === comparisonId)`, every "vs
-  // baseline" delta disappears with no explanation. Eviction should clear the
-  // comparison too, or refuse to evict the run being compared against.
-  it('loses track of a baseline that a thirteenth save pushes off the list', () => {
+  it('forgets the comparison when a thirteenth save pushes that baseline off the list', () => {
     const doc = venue('Foyer')
     playToTheEnd(doc)
     for (let option = 1; option <= 12; option++) sim().saveCurrentRun(`Option ${option}`, doc)
@@ -608,8 +593,18 @@ describe('the baseline a run is compared against', () => {
     sim().setComparison(oldest.id)
     sim().saveCurrentRun('Option 13', doc)
 
-    expect(sim().comparisonId).toBe(oldest.id)
+    // The panel finds the baseline by id. An id left pointing at a run the cap
+    // evicted takes every "vs baseline" delta off the panel, with nothing on
+    // screen able to say where they went.
     expect(sim().savedRuns.some((run) => run.id === oldest.id)).toBe(false)
+    expect(sim().comparisonId).toBeNull()
+
+    const survivor = sim().savedRuns[1]
+    sim().setComparison(survivor.id)
+    sim().saveCurrentRun('Option 14', doc)
+
+    // A baseline still on the list is left where the user put it.
+    expect(sim().comparisonId).toBe(survivor.id)
   })
 })
 
@@ -638,17 +633,7 @@ describe('a worker that fails', () => {
     expect(sim().error).toBe('The simulation worker failed.')
   })
 
-  // SUSPECTED BUG: every other reply is dropped when it names a run that is no
-  // longer the one on screen; `error` is not. The worker stamps a start that
-  // threw with that run's own id, and a start can throw long after the user has
-  // moved on — building the nav grid is the slow part. Stopping a run is also
-  // the first half of opening a project or a template (TopBar, ProjectsModal,
-  // Overlays call `stop()` then `replaceDocument()`), so the abandoned venue's
-  // failure is toasted by App.tsx against the venue now on screen, and
-  // `clearError` then forces the phase to 'idle' whatever it was. The guard has
-  // to keep letting `runId: ''` through, because that is what the `onerror`
-  // fallback sends when the worker dies outright and there is no run to name.
-  it('reports the failure of a run the user already stopped', () => {
+  it('keeps quiet about a run the user has already walked away from', () => {
     sim().run(venue('Foyer'))
     const abandoned = inFlight()
     sim().stop()
@@ -656,6 +641,27 @@ describe('a worker that fails', () => {
 
     deliver({ type: 'error', runId: abandoned, message: 'No exit is reachable from the entrance' })
 
+    // Building the nav grid is the slow part, so a start that threw lands long
+    // after the user has moved on — and a stop is the first half of opening
+    // another venue. App.tsx toasts whatever error is here and then forces the
+    // phase to idle, so an abandoned run's failure would be reported against
+    // the plan now on screen and would interrupt the run replacing it.
+    expect(sim().phase).toBe('idle')
+    expect(sim().error).toBeNull()
+
+    sim().run(venue('Foyer with two doors'))
+    const live = inFlight()
+    deliver({ type: 'error', runId: abandoned, message: 'No exit is reachable from the entrance' })
+    expect(sim().phase).toBe('preparing')
+
+    // A worker that dies outright names no run, because there is none to name.
+    // That has to reach the screen whatever is in flight.
+    spawned().onerror?.({ message: '' })
+    expect(sim().phase).toBe('error')
+    expect(sim().error).toBe('The simulation worker failed.')
+
+    sim().clearError()
+    deliver({ type: 'error', runId: live, message: 'No exit is reachable from the entrance' })
     expect(sim().phase).toBe('error')
     expect(sim().error).toBe('No exit is reachable from the entrance')
   })

@@ -430,7 +430,7 @@ describe('a stored venue that cannot be read back', () => {
     expect((await storage.listProjects()).map((project) => project.id)).toEqual([hall.id])
   })
 
-  it('turns an entry that is not a venue at all into a blank one under a new id', async () => {
+  it('says it cannot read an entry that is not a venue at all', async () => {
     const payload = '[1,2,3]'
     db.rows.set('doc_notavenue', {
       id: 'doc_notavenue',
@@ -439,36 +439,27 @@ describe('a stored venue that cannot be read back', () => {
       payload,
     })
 
-    const restored = await storage.loadProject('doc_notavenue')
-
-    // SUSPECTED BUG: `loadProject` only returns null when the payload fails
-    // `JSON.parse`. Anything that parses goes to `parseDocument`, which is
-    // deliberately unfailing and mints a brand-new document id, so a row whose
-    // contents are junk comes back as an empty venue that claims to be a
-    // different project. `parseDocument` knows — it says so in the warning
-    // asserted below — but `loadProject` cannot pass that on through a
-    // `CrowdDocument | null`. ProjectsModal reads null as "that project could
-    // not be read" and never sees it here, so the user is shown an empty grid
-    // with no warning, `rememberLastProject` is pointed at an id that has never
-    // been saved, and the next autosave writes a second row instead of
-    // repairing the first. I believe `loadProject` should return null when the
-    // parsed payload is not an object, or when the parsed id does not match the
-    // row it came out of, so the existing "That project could not be read."
-    // path actually fires.
+    // `parseDocument` never fails — it says what it could not read and starts
+    // empty — so a row of junk would otherwise open as a blank venue wearing a
+    // brand-new id: an empty grid with no warning, the editor remembering an id
+    // that has never been saved, and the next autosave writing a second row
+    // beside the one nobody can read. Null is what ProjectsModal turns into
+    // "That project could not be read."
     expect(parseDocument(JSON.parse(payload)).warnings).toContain(
       'The file did not contain a CROWD document; started empty.',
     )
-    expect(restored?.name).toBe('Untitled venue')
-    expect(restored?.plan.walls).toEqual([])
-    expect(restored?.id).not.toBe('doc_notavenue')
-    // The id the editor is about to remember is not one this store has ever had.
-    expect(await storage.loadProject(restored?.id ?? '')).toBeNull()
+    expect(await storage.loadProject('doc_notavenue')).toBeNull()
 
-    await storage.saveProject(restored as CrowdDocument)
-    expect((await storage.listProjects()).map((project) => project.name)).toEqual([
-      'Untitled venue',
-      'Shopping list',
-    ])
+    // Refusing it does not lose it: the row is still listed, so it can still be
+    // downloaded away or deleted.
+    const listed = await storage.listProjects()
+    expect(listed.map((project) => project.name)).toEqual(['Shopping list'])
+    expect(listed[0].id).toBe('doc_notavenue')
+
+    // A venue this store actually wrote comes back as itself.
+    const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
+    await storage.saveProject(hall)
+    expect((await storage.loadProject(hall.id))?.id).toBe(hall.id)
   })
 
   it('loads a venue with its only door missing without saying so', async () => {
@@ -486,15 +477,18 @@ describe('a stored venue that cannot be read back', () => {
 
     const restored = await storage.loadProject(hall.id)
 
-    // SUSPECTED BUG: `parseDocument` returns `{ document, warnings }` and goes
-    // to real trouble counting what it had to drop. `loadProject` keeps
-    // `.document` and throws the warnings away, so this venue comes back sealed
-    // shut — the wall went, and the only way in or out went with it — and looks
-    // intact. Nobody can leave a room with no doors, so the next evacuation run
-    // reports a failure with no cause, and the next autosave writes the sealed
-    // plan over the only copy that still had the door. I believe `loadProject`
-    // should surface the warnings the way file import does (TopBar toasts every
-    // one), so the user is told before they save.
+    // Recorded decision: a partly damaged row is repaired and opened, and the
+    // repairs are not reported. `parseDocument` counts everything it dropped,
+    // but `loadProject` answers `CrowdDocument | null` and keeps only the
+    // document, so this venue comes back sealed shut — the wall went and the
+    // only way in or out went with it — and looks intact. Opening it beats
+    // refusing it: the plan is otherwise whole, and a row this app wrote itself
+    // is the user's own work. The cost is that the next run reports an
+    // evacuation failure with no stated cause, and the next autosave writes the
+    // sealed plan over the copy that still had the door. Telling them means
+    // widening the return to carry warnings, which is a change in App.tsx and
+    // ProjectsModal.tsx — the file-import path in TopBar already toasts exactly
+    // these strings, so the wording is ready if it is ever worth it.
     expect(parseDocument(JSON.parse(payload)).warnings).toEqual([
       '1 wall(s) had no length or could not be read and were dropped.',
       '1 opening(s) referenced a missing wall or could not be read and were dropped.',
@@ -569,23 +563,25 @@ describe('when the browser will not store anything', () => {
     await expect(storage.deleteProject(hall.id)).rejects.toThrow(reason)
   })
 
-  it('stays shut for the rest of the session after one blocked open', async () => {
+  it('tries the database again once the browser stops blocking it', async () => {
     db.faults.open = new Error('Storage is blocked for this site.')
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
     await expect(storage.saveProject(hall)).rejects.toThrow('Storage is blocked for this site.')
-
-    db.faults.open = null
-    // SUSPECTED BUG: `openDb` caches the promise before it settles, so a
-    // rejection is cached too and every later call replays it without trying
-    // again. Once a single `open` has errored — a browser that blocks storage
-    // until the user answers a prompt, a transient failure under storage
-    // pressure — autosave is off for the life of the tab even after the
-    // condition clears, and the "Save this project" button the UI offers as the
-    // way out can never succeed. I believe `openDb` should clear `dbPromise` on
-    // rejection so the next save opens a fresh connection.
-    await expect(storage.saveProject(hall)).rejects.toThrow('Storage is blocked for this site.')
-    expect(db.opens()).toBe(1)
     expect(db.rows.size).toBe(0)
+
+    // A blocked open is usually a prompt the user has not answered yet, or a
+    // moment of storage pressure. Caching the failed connection for the life of
+    // the tab would leave autosave off after the condition clears, with the
+    // "Save this project" button the UI offers as the way out unable to ever
+    // succeed.
+    db.faults.open = null
+    await expect(storage.saveProject(hall)).resolves.toBeUndefined()
+    expect((await storage.loadProject(hall.id))?.name).toBe('Main hall')
+    expect(db.opens()).toBe(2)
+
+    // The connection that did open is the one that is kept.
+    await storage.listProjects()
+    expect(db.opens()).toBe(2)
   })
 })
 

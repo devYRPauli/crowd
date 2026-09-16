@@ -146,6 +146,11 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         if (message.runId === get().runId) set({ progress: message.progress })
         break
       case 'error':
+        // A start that threw is stamped with its own run's id, and building the
+        // nav grid is slow enough that it can land long after the user moved
+        // on. An empty id is the worker itself dying, which belongs to whatever
+        // is on screen.
+        if (message.runId && message.runId !== get().runId) return
         set({ phase: 'error', error: message.message })
         break
     }
@@ -208,7 +213,19 @@ export const useSimulation = create<SimulationState>()((set, get) => {
     stop: () => {
       const { runId } = get()
       if (runId) send({ type: 'stop', runId })
-      set({ phase: 'idle', runId: null, progress: 0, frame: null })
+      // The findings go with the crowd. Stopping is also the first half of
+      // opening a project or a template, so results left behind would be read
+      // against the plan that arrives next — and saved as its baseline.
+      set({
+        phase: 'idle',
+        runId: null,
+        progress: 0,
+        frame: null,
+        summary: null,
+        series: null,
+        warnings: [],
+        totalPeople: 0,
+      })
     },
 
     setSpeed: (speed) => {
@@ -228,7 +245,14 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         series,
         document: doc,
       }
-      set((state) => ({ savedRuns: [saved, ...state.savedRuns].slice(0, 12) }))
+      set((state) => {
+        const savedRuns = [saved, ...state.savedRuns].slice(0, 12)
+        // The cap can push the baseline itself off the list. The panel looks
+        // the baseline up by id, so an id left pointing at nothing takes every
+        // "vs baseline" delta off the panel without saying why.
+        const kept = savedRuns.some((run) => run.id === state.comparisonId)
+        return { savedRuns, comparisonId: kept ? state.comparisonId : null }
+      })
     },
 
     removeRun: (id) =>

@@ -333,19 +333,24 @@ describe('deleting the selection', () => {
     expect(editor().undoLabel()).toBe('Delete')
   })
 
-  it('SUSPECTED BUG: deselects the locked object it just refused to delete', () => {
+  it('leaves the locked object it refused selected, and drops what it took', () => {
     editor().setSelection([ref('furniture', hall.stage.id), ref('furniture', hall.table.id)])
     editor().deleteSelection()
 
-    // SUSPECTED BUG: the stage is still in the plan, and the same lock that
-    // kept it selected when it was the whole selection loses the selection the
-    // moment anything alongside it was removable — `deleteSelection` clears the
-    // selection outright once it has applied. Nothing tells the user why the
-    // stage survived, and the inspector, the only place to unlock it, is now
-    // showing nothing, so they have to hunt down the object the editor just
-    // refused to delete. The select tool already has the rule: a mixed
-    // selection edits what it may and leaves the locked one where it is —
-    // selected. It should keep the refs it did not remove.
+    // The stage is still in the plan, so it is still selected — the same rule
+    // as when it was the whole selection. The inspector is the only place to
+    // unlock it, and clearing the selection outright left the user hunting for
+    // the object the editor had just declined to delete, with nothing on screen
+    // saying why it survived.
+    expect(editor().document.plan.furniture.map((f) => f.id)).toEqual([hall.stage.id])
+    expect(editor().selection).toEqual([ref('furniture', hall.stage.id)])
+
+    editor().setSelection([ref('wall', hall.room.south.id), ref('opening', hall.door.id)])
+    editor().deleteSelection()
+
+    // The door was never named in the delete; it went because its wall did. The
+    // selection follows the document, so nothing is left pointing at it.
+    expect(editor().document.plan.openings).toEqual([])
     expect(editor().selection).toEqual([])
   })
 })

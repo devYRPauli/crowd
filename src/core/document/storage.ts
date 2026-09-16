@@ -26,7 +26,7 @@ let dbPromise: Promise<IDBDatabase> | null = null
 
 const openDb = (): Promise<IDBDatabase> => {
   if (dbPromise) return dbPromise
-  dbPromise = new Promise((resolve, reject) => {
+  const pending = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       reject(new Error('IndexedDB is not available in this browser context.'))
       return
@@ -42,7 +42,15 @@ const openDb = (): Promise<IDBDatabase> => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('Could not open local storage.'))
   })
-  return dbPromise
+  // Only a connection that opened is worth keeping. A browser that blocks
+  // storage until the user answers a prompt fails the first open and allows the
+  // next one, and a cached rejection would leave autosave off for the life of
+  // the tab with no way back.
+  dbPromise = pending
+  void pending.catch(() => {
+    if (dbPromise === pending) dbPromise = null
+  })
+  return pending
 }
 
 const tx = async <T>(
@@ -78,7 +86,13 @@ export const loadProject = async (id: string): Promise<CrowdDocument | null> => 
   )
   if (!row) return null
   try {
-    return parseDocument(JSON.parse(row.payload)).document
+    const document = parseDocument(JSON.parse(row.payload)).document
+    // A row is keyed on the document's own id. `parseDocument` never fails: fed
+    // something that is not a venue it mints a fresh id and hands back an empty
+    // one, which would open as the project the user asked for and be autosaved
+    // under that new id, leaving the unreadable row behind untouched. A
+    // document that does not know it is this project is a row we cannot read.
+    return document.id === row.id ? document : null
   } catch {
     return null
   }
