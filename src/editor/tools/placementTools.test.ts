@@ -347,7 +347,8 @@ describe('DoorTool placement', () => {
     tool.onPointerDown(pointer({ x: 0.05, y: 0.2 }), atStart.ctx)
     const first = atStart.document.plan.openings[0]
     expect(first.offset - first.width / 2).toBeGreaterThanOrEqual(0)
-    // The tool clamps to half a leaf; `addOpening` then insists on a jamb too.
+    // Half a leaf plus the jamb the wall has to keep: the same sum `addOpening`
+    // makes, so the click and the commit cannot disagree.
     expect(first.offset).toBeCloseTo(DEFAULT_DOOR_WIDTH / 2 + OPENING_JAMB, 9)
 
     const atEnd = harness({ walls: [w] })
@@ -357,38 +358,52 @@ describe('DoorTool placement', () => {
     expect(second.offset).toBeCloseTo(wallLength(w) - DEFAULT_DOOR_WIDTH / 2 - OPENING_JAMB, 9)
   })
 
-  it('shrinks the doorway to a 50 mm slot on a wall too short to take one', () => {
-    // SUSPECTED BUG, asserted as it behaves today: the tool checks that the
-    // pointer is near a wall, never that the wall can carry an opening. The
-    // preview draws a full leaf that is not even over the wall, and what lands
-    // is `fitToWall`'s 50 mm floor: a doorway nobody fits through, which the
-    // engine then reads as the narrowest way through the venue and sizes the
-    // whole navigation grid for — 0.05 m where a 3'0" leaf asks for 0.11 m,
-    // four to five times the cells, for a door that is a mistake. A wall
-    // shorter than a leaf and its two jambs wants the toast an off-wall click
-    // already gets.
+  it('refuses a wall with no room in it for a jamb either side', () => {
+    // `addOpening` fits every opening to its wall and floors the width at 50 mm
+    // so that a width box can never eat a whole wall. Let a click through on a
+    // wall this short and that floor becomes the doorway: 50 mm nobody fits
+    // through, which the engine reads as the narrowest way out of the venue and
+    // sizes the whole navigation grid for — four to five times the cells of a
+    // 3'0" leaf, for a door that was a slip of the mouse.
     const h = harness({ walls: [wall(0, 0, 0.1, 0)] })
     const tool = new DoorTool()
     const at = pointer({ x: 0.05, y: 0.05 })
 
     tool.onPointerMove(at, h.ctx)
-    expect(spanX(h.draft[0].points)).toBeCloseTo(DEFAULT_DOOR_WIDTH, 9)
-    // Clamped to half a leaf from the start of a wall 0.1 m long: the green
-    // rectangle is drawn 0.36 m past the far end of it.
-    expect(centreOf(h.draft[0].points).x).toBeCloseTo(DEFAULT_DOOR_WIDTH / 2, 9)
+    expect(h.draft).toEqual([])
+    expect(h.labels[0].variant).toBe('warning')
+    expect(h.labels[0].text).toBe('This wall is too short')
+
+    tool.onPointerDown(at, h.ctx)
+    expect(h.document.plan.openings).toEqual([])
+    expect(h.undoSteps).toBe(0)
+    expect(h.toasts).toHaveLength(1)
+    expect(h.toasts[0].tone).toBe('warn')
+    expect(h.toasts[0].message).toMatch(/too short/i)
+  })
+
+  it('takes what a short wall can carry rather than the leaf that was asked for', () => {
+    // A metre of wall cannot hold a 3'0" leaf and its jambs, and trimming it to
+    // fit is what `addOpening` does — so the preview has to show the trim, or
+    // the rectangle the user clicks on is wider than the door they get.
+    const h = harness({ walls: [wall(0, 0, 1, 0)] })
+    const tool = new DoorTool()
+    const at = pointer({ x: 0.5, y: 0.2 })
+
+    tool.onPointerMove(at, h.ctx)
+    expect(spanX(h.draft[0].points)).toBeCloseTo(1 - 2 * OPENING_JAMB, 9)
+    expect(h.labels[0].text).toBe('90 cm')
 
     tool.onPointerDown(at, h.ctx)
     const [opening] = h.document.plan.openings
-    expect(opening.width).toBeCloseTo(0.05, 9)
-    expect(opening.offset).toBeCloseTo(0.05, 9)
-    expect(h.toasts).toEqual([])
+    expect(opening.width).toBeCloseTo(1 - 2 * OPENING_JAMB, 9)
+    expect(opening.offset).toBeCloseTo(0.5, 9)
   })
 
-  it('previews the door 5 cm from where it lands at the end of a wall', () => {
-    // SUSPECTED BUG, asserted as it behaves today: the tool clamps the preview
-    // to width/2 from the wall end, but `addOpening` refits every opening with
-    // a jamb either side, so the committed door sits OPENING_JAMB further in
-    // than the green rectangle the user clicked on.
+  it('lands the door on the green rectangle at the end of a wall', () => {
+    // The tool and `addOpening` both have an opinion about how far into the end
+    // of a wall a leaf can go. They have to be the same opinion: a user aiming a
+    // door at the end of a corridor clicks on the rectangle, not on the pointer.
     const h = harness({ walls: [wall(0, 0, 10, 0)] })
     const tool = new DoorTool()
     const at = pointer({ x: 0.05, y: 0.2 })
@@ -397,8 +412,8 @@ describe('DoorTool placement', () => {
     const previewed = centreOf(h.draft[0].points)
     tool.onPointerDown(at, h.ctx)
 
-    expect(previewed.x).toBeCloseTo(DEFAULT_DOOR_WIDTH / 2, 9)
-    expect(h.document.plan.openings[0].offset - previewed.x).toBeCloseTo(OPENING_JAMB, 9)
+    expect(previewed.x).toBeCloseTo(DEFAULT_DOOR_WIDTH / 2 + OPENING_JAMB, 9)
+    expect(h.document.plan.openings[0].offset).toBeCloseTo(previewed.x, 9)
   })
 
   it('takes width, height and sill from the tool options, not from literals', () => {
@@ -428,7 +443,7 @@ describe('DoorTool placement', () => {
     expect(h.labels[0].text).toBe('1.20 m')
 
     tool.onPointerMove(pointer({ x: 0.05, y: 0.3 }), h.ctx)
-    expect(centreOf(h.draft[0].points).x).toBeCloseTo(0.6, 9)
+    expect(centreOf(h.draft[0].points).x).toBeCloseTo(0.6 + OPENING_JAMB, 9)
   })
 
   it('becomes a pair at and above the double-door width', () => {
@@ -678,12 +693,10 @@ describe('FurnitureTool placement', () => {
     expect(h.toolsRequested).toEqual(['select'])
   })
 
-  it('turns the item under the cursor but not the preview of it', () => {
-    // SUSPECTED BUG, asserted as it behaves today: R rotates and does ask for a
-    // redraw, but `refresh` draws `this.preview.rotation` — the angle resolved at
-    // the last pointer move — so the preview comes back identical. The hint
-    // offers R as the way to turn an object; nothing on screen turns until the
-    // mouse moves, and the item that lands is at the angle the user gave up on.
+  it('turns the item on the cursor as R turns it, without waiting for the mouse', () => {
+    // The hint offers R as the way to aim an object. A preview that answers it
+    // only on the next pointer move leaves the user turning something they
+    // cannot see turn, and placing the angle they gave up on.
     const h = harness()
     const tool = new FurnitureTool()
     const at = pointer({ x: 2, y: 3 })
@@ -691,12 +704,15 @@ describe('FurnitureTool placement', () => {
     tool.onPointerMove(at, h.ctx)
     expect(tool.hint).toContain('R rotates')
     expect(spanX(h.draft[0].points)).toBeCloseTo(CHAIR.size.width, 9)
+    expect(h.draft[1].points[1].y).toBeCloseTo(3 + CHAIR.size.depth / 2 + 0.3, 9)
 
     tool.onKeyDown(key('R', { shiftKey: true }), h.ctx)
-    // A quarter turn would put the chair's 48 cm depth across x, not its 45 cm
-    // width, and swing the whisker from one side of it to the other.
-    expect(spanX(h.draft[0].points)).toBeCloseTo(CHAIR.size.width, 9)
-    expect(h.draft[1].points[1].x).toBeCloseTo(2, 9)
+    // A quarter turn puts the chair's 48 cm depth across x, not its 45 cm width,
+    // and swings the whisker from one side of it to the other.
+    expect(spanX(h.draft[0].points)).toBeCloseTo(CHAIR.size.depth, 9)
+    expect(spanY(h.draft[0].points)).toBeCloseTo(CHAIR.size.width, 9)
+    expect(h.draft[1].points[1].x).toBeCloseTo(2 - (CHAIR.size.depth / 2 + 0.3), 9)
+    expect(h.draft[1].points[1].y).toBeCloseTo(3, 9)
 
     tool.onPointerDown(at, h.ctx)
     expect(h.document.plan.furniture[0].rotation).toBeCloseTo(Math.PI / 2, 9)
@@ -732,18 +748,21 @@ describe('FurnitureTool placement', () => {
     expect(item.position.y).toBeCloseTo(previewed.y, 9)
   })
 
-  it('draws the facing whisker towards the wall, not into the room', () => {
-    // SUSPECTED BUG, asserted as it behaves today: the item is oriented with its
-    // front (rotation + π/2) to the room, but the preview's whisker is drawn at
-    // rotation − π/2, so it sticks out of the back of the chair and through the
-    // wall it was just snapped to.
+  it('draws the facing whisker out of the front of the item, into the room', () => {
+    // The whisker is the only thing in the preview that says which way the chair
+    // is turned. Drawn off the back of it, it points through the wall the chair
+    // has just snapped to and promises the user the opposite of what lands.
     const h = harness({ walls: [horizontal] })
     const tool = new FurnitureTool()
-    tool.onPointerMove(pointer({ x: 5, y: 0.4 }), h.ctx)
+    const at = pointer({ x: 5, y: 0.4 })
+    tool.onPointerMove(at, h.ctx)
 
     const [from, to] = h.draft[1].points
-    expect(to.y - from.y).toBeLessThan(0)
-    expect(to.y).toBeLessThan(WALL_THICKNESS / 2)
+    expect(from.y).toBeCloseTo(backOff, 9)
+    expect(to.y).toBeCloseTo(backOff + CHAIR.size.depth / 2 + 0.3, 9)
+
+    tool.onPointerDown(at, h.ctx)
+    expect(frontOf(h.document.plan.furniture[0].rotation).y).toBeCloseTo(1, 9)
   })
 
   it('is one sealed undo step per item and stays armed for the next one', () => {
@@ -809,19 +828,18 @@ describe('ServiceTool placement', () => {
     expect(point.position.x).toBeCloseTo(5, 9)
   })
 
-  it('sends the queue through the wall it snapped to', () => {
-    // SUSPECTED BUG, asserted as it behaves today: `wallAlignedPlacement` turns
-    // the object's front (rotation + π/2) into the room, but a service point is
-    // served from rotation − π/2 (`serviceFacing`). A counter placed against a
-    // wall therefore queues people on the far side of that wall and stands its
-    // staff in the room.
+  it('forms the queue in the room the counter serves, not through the wall behind it', () => {
+    // A counter is served from its back — `serviceFacing` is rotation − π/2,
+    // the opposite side to the front `wallAlignedPlacement` turns to the room —
+    // so placing one at a wall on the alignment angle alone would run the whole
+    // waiting line through that wall and stand the staff out in the room.
     const h = harness({ walls: [horizontal] })
     new ServiceTool().onPointerDown(pointer({ x: 5, y: 0.8 }), h.ctx)
 
     const [point] = h.document.plan.servicePoints
     const [head, tail] = serviceQueue(point)
-    expect(head.y).toBeLessThan(0)
-    expect(tail.y).toBeLessThan(head.y)
+    expect(head.y).toBeCloseTo(point.position.y + point.depth / 2 + 1, 9)
+    expect(tail.y).toBeCloseTo(head.y + 6, 9)
   })
 
   it('numbers counters in the order they are placed', () => {
@@ -870,31 +888,39 @@ describe('ServiceTool placement', () => {
     expect(h.toolsRequested).toEqual(['select'])
 
     tool.onPointerDown(pointer({ x: 5, y: 0.8 }), h.ctx)
-    expect(h.document.plan.servicePoints[0].rotation).toBeCloseTo(Math.PI / 12, 9)
+    // Backed onto the wall and facing the room is half a turn from the raw
+    // alignment angle; R adds its 15° on top of that.
+    expect(h.document.plan.servicePoints[0].rotation).toBeCloseTo(Math.PI + Math.PI / 12, 9)
   })
 
-  it('leaves the preview stale until the pointer moves again', () => {
-    // SUSPECTED BUG, asserted as it behaves today: R turns the counter and the
-    // preview keeps the angle it was drawn at, counter and queue whisker alike.
-    // The furniture tool has the same fault by a different route — see 'turns
-    // the item under the cursor but not the preview of it'; this one does not
-    // even ask for the redraw. Both leave the user turning something they
-    // cannot see turn.
+  it('swings the counter and its queue whisker round as R turns them', () => {
+    // Which side of a counter the line forms on is the whole point of the
+    // preview, and R is how it gets aimed: a preview that does not answer the
+    // key is a counter placed facing a way the user never saw.
     const h = harness({ walls: [horizontal] })
     const tool = new ServiceTool()
-    tool.onPointerMove(pointer({ x: 5, y: 0.8 }), h.ctx)
-    const counterBefore = h.draft[0].points.map((p) => ({ ...p }))
-    const whiskerBefore = h.draft[1].points.map((p) => ({ ...p }))
+    const at = pointer({ x: 5, y: 0.8 })
+    tool.onPointerMove(at, h.ctx)
+    expect(spanX(h.draft[0].points)).toBeCloseTo(1.8, 9)
+    expect(h.draft[1].points[0].y).toBeGreaterThan(0)
 
-    tool.onKeyDown(key('r'), h.ctx)
-    expect(h.draft[0].points).toEqual(counterBefore)
-    expect(h.draft[1].points).toEqual(whiskerBefore)
+    tool.onKeyDown(key('r', { shiftKey: true }), h.ctx)
+    // A quarter turn stands the 1.8 m counter across the wall and sends the line
+    // off along it instead of out into the room.
+    expect(spanX(h.draft[0].points)).toBeCloseTo(0.7, 9)
+    const [head, tail] = h.draft[1].points
+    expect(head.x).toBeCloseTo(5 - (0.7 / 2 + 1), 9)
+    expect(tail.x).toBeCloseTo(head.x - 6, 9)
+    expect(h.labels[0].x).toBeCloseTo(tail.x, 9)
+
+    tool.onPointerDown(at, h.ctx)
+    expect(serviceQueue(h.document.plan.servicePoints[0])[0].x).toBeCloseTo(head.x, 9)
   })
 
   it('draws the queue whisker where the counter will really put the line', () => {
     // The whisker is the whole promise of the preview: it is the only thing
     // that says which side of the counter people will stand on before there is
-    // a counter to look at. The furniture tool draws its equivalent backwards.
+    // a counter to look at.
     const h = harness({ walls: [horizontal] })
     const tool = new ServiceTool()
     const at = pointer({ x: 5, y: 0.8 })
@@ -956,13 +982,15 @@ describe('placement against the document it lands in', () => {
   })
 
   it('keeps placing the app default after the document has asked for another', () => {
-    // SUSPECTED BUG, asserted as it behaves today: the default sizes belong to
-    // the document — the loader falls back to them for any opening that arrives
-    // without a width of its own — but the tools read the editor's toolOptions,
-    // and nothing re-seeds those from the document (editorStore.replaceDocument
-    // resets the history and leaves toolOptions alone). A venue drawn to 2'8"
-    // interior leaves gets 3'0" doors from the second session onwards, and the
-    // drawing ends up disagreeing with the default it carries.
+    // Recorded decision. A tool places what the panel in front of the user says,
+    // and the panel is the editor's tool options; the document's defaults are
+    // what the loader falls back to for an opening that arrives without a width
+    // of its own. Nothing re-seeds one from the other, so a venue drawn to 2'8"
+    // interior leaves gets 3'0" doors from the second session onwards. Seeding
+    // them on open belongs to `state/editorStore.ts`, which owns both the
+    // document and the options, and it has to decide there what becomes of a
+    // width the user has just typed. Until it does, this says where the numbers
+    // a placement actually uses come from.
     const interior = DOOR_WIDTHS.find((size) => size.imperial === `2'8"`)!
     const storefront = WINDOW_SILLS.find((size) => size.note === 'Storefront')!
     const h = harness(
@@ -985,12 +1013,13 @@ describe('placement against the document it lands in', () => {
     const h = harness({ walls: [wall(0, 0, 10, 0)] }, {}, { units: 'imperial' })
     new DoorTool().onPointerMove(pointer({ x: 5, y: 0.3 }), h.ctx)
 
-    // SUSPECTED BUG, asserted as it behaves today: this should read 3'0", the
-    // leaf the whole app defaults to. `formatLength` takes the feet first and
-    // rounds the inches only afterwards, so 0.914 m — that leaf, carried to
-    // the millimetre and so a hair under 36 inches — prints as twelve inches
-    // on top of two feet: the one dimension a user placing a door actually
-    // reads, given as a size that does not exist.
+    // Recorded wart, pinned here so a fix has to come past this test: the label
+    // reads 2' 12.0" where the leaf is a 3'0". `formatLength` floors the feet
+    // and rounds the inches afterwards, and 3'0" carried to the millimetre is a
+    // hair under 36 inches, so the rounding pushes the inches back up to twelve.
+    // The carry belongs to `core/model/units.ts`, which every label in the app
+    // shares; correcting it here would mean this tool formatting its own
+    // dimensions, which is how the four-places-disagreeing problem started.
     expect(h.labels[0].text).toBe(`2' 12.0"`)
 
     new FurnitureTool().onPointerMove(pointer({ x: 5, y: 4 }), h.ctx)
@@ -1084,46 +1113,53 @@ describe('QueueTool', () => {
     expect(h.document.plan.servicePoints[0].queue).toBeUndefined()
   })
 
-  it('adds a point where the user clicks the middle of the line', () => {
+  it('adds a point where the user clicks the line', () => {
     const bar = counter()
     const [head, tail] = serviceQueue(bar)
     const h = harness({ servicePoints: [bar] })
-    new QueueTool().onPointerDown(pointer({ x: 0, y: -4.35 }), h.ctx)
+    const tool = new QueueTool()
+    tool.onPointerDown(pointer({ x: 0, y: -4.35 }), h.ctx)
+    tool.onPointerUp(pointer({ x: 0, y: -4.35 }), h.ctx)
 
     expect(h.document.plan.servicePoints[0].queue).toEqual([head, { x: 0, y: -4.5 }, tail])
-    expect(h.edits).toEqual([{ label: 'Add queue point', coalesceKey: undefined }])
+    // The key is the drag's: the point is left ready to be pulled somewhere, and
+    // releasing without moving is still the one step the click looks like.
+    expect(h.edits).toEqual([{ label: 'Add queue point', coalesceKey: `queue-${bar.id}-1` }])
     expect(h.undoSteps).toBe(1)
     expect(h.sealed).toBe(true)
   })
 
-  it('ignores a click on the line that is not near a segment’s middle', () => {
-    // SUSPECTED BUG, asserted as it behaves today: the hint promises "Click the
-    // line to add a point", but the tool measures the click against each
-    // segment's midpoint rather than against the segment. At this zoom that is a
-    // 0.18 m disc on a 6 m line, so the click lands on the line the user is
-    // aiming at and nothing whatever happens.
-    const h = harness({ servicePoints: [counter()] })
+  it('takes the bend anywhere along the line, not only near a segment’s middle', () => {
+    // The hint offers the whole line, and a user clicks the part of it they want
+    // the bend in. Measured against each segment's midpoint instead, that is a
+    // 0.18 m disc on a 6 m line: the click lands squarely on the line and
+    // nothing whatever happens.
+    const bar = counter()
+    const [head, tail] = serviceQueue(bar)
+    const h = harness({ servicePoints: [bar] })
     const tool = new QueueTool()
     expect(tool.hint).toContain('Click the line to add a point')
 
     tool.onPointerDown(pointer({ x: 0, y: -2.5 }), h.ctx)
-    expect(h.edits).toEqual([])
-    expect(h.document.plan.servicePoints[0].queue).toBeUndefined()
+    tool.onPointerUp(pointer({ x: 0, y: -2.5 }), h.ctx)
+    expect(h.document.plan.servicePoints[0].queue).toEqual([head, { x: 0, y: -2.5 }, tail])
 
-    // Nothing was picked up either, so the drag the user goes on to make is
-    // swallowed with the click: the whole gesture leaves the plan untouched.
-    tool.onPointerMove(pointer({ x: 1.5, y: -2.5 }), h.ctx)
-    tool.onPointerUp(pointer({ x: 1.5, y: -2.5 }), h.ctx)
-    expect(h.edits).toEqual([])
-    expect(h.document.plan.servicePoints[0].queue).toBeUndefined()
+    // Off the line is still nothing: a click out in the room belongs to whatever
+    // else the user is about to do, not to the queue.
+    const away = harness({ servicePoints: [counter()] })
+    const other = new QueueTool()
+    other.onPointerDown(pointer({ x: 1.5, y: -2.5 }), away.ctx)
+    other.onPointerMove(pointer({ x: 1.6, y: -2.5 }), away.ctx)
+    other.onPointerUp(pointer({ x: 1.6, y: -2.5 }), away.ctx)
+    expect(away.edits).toEqual([])
+    expect(away.document.plan.servicePoints[0].queue).toBeUndefined()
   })
 
-  it('takes two presses of undo to undo one click-and-drag on the line', () => {
-    // SUSPECTED BUG, asserted as it behaves today: inserting a point seals
-    // immediately, so the drag the same pointer-down goes on to start becomes a
-    // second step. A gesture is meant to be one undo step; here one press, move
-    // and release costs two, and the state in between is a point sitting where
-    // the user happened to click rather than where they dragged it to.
+  it('undoes one click-and-drag on the line in a single press', () => {
+    // Pressing on the line, pulling the new point where you wanted it and
+    // letting go is one gesture, so it is one step. Sealing at the insert made
+    // it two, and the state in between was a point sitting where the user
+    // happened to click rather than where they took it.
     const h = harness({ servicePoints: [counter()] })
     const tool = new QueueTool()
 
@@ -1131,11 +1167,10 @@ describe('QueueTool', () => {
     tool.onPointerMove(pointer({ x: 2.1, y: -4.4 }), h.ctx)
     tool.onPointerUp(pointer({ x: 2.1, y: -4.4 }), h.ctx)
 
-    expect(h.undoSteps).toBe(2)
     expect(h.document.plan.servicePoints[0].queue?.[1]).toEqual({ x: 2, y: -4.5 })
+    expect(h.undoSteps).toBe(1)
+    expect(h.sealed).toBe(true)
 
-    h.undo()
-    expect(h.document.plan.servicePoints[0].queue?.[1]).toEqual({ x: 0, y: -4.5 })
     h.undo()
     expect(h.document.plan.servicePoints[0].queue).toBeUndefined()
   })
@@ -1177,12 +1212,12 @@ describe('QueueTool', () => {
     expect(spaced.labels[0].text).toBe('Bar\nholds about 6 people')
   })
 
-  it('reshapes the queue without marking the venue as edited', () => {
-    // SUSPECTED BUG, asserted as it behaves today: every one of the queue edits
-    // builds the new document inline rather than through a function in
-    // core/document/mutations, and a plan edit is stamped with the time nowhere
-    // else. The projects list sorts on that stamp, so an afternoon spent laying
-    // out queues leaves the venue looking untouched at the bottom of the list.
+  it('marks the venue as edited when the queue is reshaped', () => {
+    // A plan edit is stamped with the time in one place — the mutations the
+    // document is edited through — and the projects list sorts on that stamp.
+    // Build the new document inline in the tool instead and the stamp is missed,
+    // so an afternoon spent laying out queues leaves the venue looking untouched
+    // at the bottom of the list.
     const h = harness({ servicePoints: [counter()] })
     vi.useFakeTimers()
     try {
@@ -1197,7 +1232,7 @@ describe('QueueTool', () => {
       tool.onPointerUp(pointer({ x: 1.1, y: -1.4 }), h.ctx)
 
       expect(h.document.plan.servicePoints[0].queue).toHaveLength(2)
-      expect(h.document.updatedAt).toBe('2030-01-01T00:00:00.000Z')
+      expect(h.document.updatedAt).toBe('2030-01-01T00:30:00.000Z')
     } finally {
       vi.useRealTimers()
     }

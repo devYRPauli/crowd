@@ -12,16 +12,23 @@ import type { Tool, ToolContext } from '../types'
 import type { PointerInfo } from '../../render/Viewport'
 import type { Vec2 } from '../../core/math/vec2'
 import { angleOf, distance, fromAngle, sub, add, scale, normalize } from '../../core/math/vec2'
-import { rectPolygon } from '../../core/math/geometry'
-import { addFurniture, addOpening, addServicePoint } from '../../core/document/mutations'
+import { distanceToSegment, rectPolygon } from '../../core/math/geometry'
+import {
+  addFurniture,
+  addOpening,
+  addServicePoint,
+  updateServicePoint,
+} from '../../core/document/mutations'
 import { makeFurniture, nearestWall, wallAlignedPlacement } from '../geometryHelpers'
 import { resolveCatalogItem } from '../../library/catalog'
 import { newId } from '../../core/model/ids'
 import { formatLength } from '../../core/model/units'
 import { wallLength } from '../../core/model/planGeometry'
-import { DOUBLE_DOOR_FROM } from '../../core/model/standards'
+import { DOUBLE_DOOR_FROM, OPENING_JAMB } from '../../core/model/standards'
 
 const PREVIEW_COLOR = '#f08a3c'
+/** How far from a wall the door and window tools still take hold of it. */
+const OPENING_REACH = 1.2
 
 export class FurnitureTool implements Tool {
   readonly id = 'furniture' as const
@@ -78,7 +85,9 @@ export class FurnitureTool implements Tool {
       entry.size.depth,
       this.preview.rotation,
     )
-    const facing = fromAngle(this.preview.rotation - Math.PI / 2, entry.size.depth / 2 + 0.3)
+    // Local +Z is the front — what `wallAlignedPlacement` turns towards the room
+    // — so the whisker has to leave the item that way, not through its back.
+    const facing = fromAngle(this.preview.rotation + Math.PI / 2, entry.size.depth / 2 + 0.3)
     ctx.setDraft([
       { kind: 'rect', points: polygon, color: PREVIEW_COLOR, filled: true },
       {
@@ -119,7 +128,12 @@ export class FurnitureTool implements Tool {
       return true
     }
     if (event.key.toLowerCase() === 'r') {
-      this.rotation += (event.shiftKey ? Math.PI / 2 : Math.PI / 12) * (event.altKey ? -1 : 1)
+      const step = (event.shiftKey ? Math.PI / 2 : Math.PI / 12) * (event.altKey ? -1 : 1)
+      this.rotation += step
+      // The preview carries the angle resolved at the last pointer move, wall
+      // alignment included. Turning it here rather than re-resolving keeps that
+      // alignment and makes the item on the cursor turn while the mouse is still.
+      if (this.preview) this.preview = { ...this.preview, rotation: this.preview.rotation + step }
       this.refresh(ctx)
       return true
     }
@@ -133,7 +147,14 @@ abstract class OpeningTool implements Tool {
   abstract readonly hint: string
   readonly cursor = 'crosshair'
 
-  protected preview: { wallId: string; offset: number; position: Vec2; angle: number } | null = null
+  protected preview: {
+    wallId: string
+    offset: number
+    position: Vec2
+    angle: number
+    /** What the wall will let through, which is not always what was asked for. */
+    width: number
+  } | null = null
 
   protected abstract width(ctx: ToolContext): number
   protected abstract build(
@@ -150,13 +171,22 @@ abstract class OpeningTool implements Tool {
 
   private resolve(info: PointerInfo, ctx: ToolContext) {
     if (!info.ground) return null
-    const near = nearestWall(ctx.document, info.ground, 1.2)
+    const near = nearestWall(ctx.document, info.ground, OPENING_REACH)
     if (!near) return null
-    const width = this.width(ctx)
     const length = wallLength(near.wall)
+    // A wall with no room left between its two jambs cannot carry an opening at
+    // all: `addOpening` would fit one anyway, at the 50 mm floor it keeps so a
+    // width box can never eat a whole wall — and the narrowest door in the plan
+    // is what sizes the navigation grid, so that slot costs the whole run.
+    if (length <= 2 * OPENING_JAMB) return null
+    // Everything below fits the opening the way `addOpening` will, jambs and
+    // all, so the door lands inside the green rectangle the user clicked on.
+    const width = Math.min(this.width(ctx), length - 2 * OPENING_JAMB)
+    const half = width / 2
+    const nearestEnd = Math.min(half + OPENING_JAMB, length / 2)
     const offset = Math.min(
-      Math.max(near.offset, width / 2),
-      Math.max(width / 2, length - width / 2),
+      Math.max(near.offset, nearestEnd),
+      Math.max(nearestEnd, length - half - OPENING_JAMB),
     )
     const direction = normalize(sub(near.wall.b, near.wall.a))
     return {
@@ -164,7 +194,22 @@ abstract class OpeningTool implements Tool {
       offset,
       position: add(near.wall.a, scale(direction, offset)),
       angle: angleOf(direction),
+      width,
     }
+  }
+
+  /** Why there is nowhere here to cut an opening, said briefly and then in full. */
+  private refusal(info: PointerInfo, ctx: ToolContext): { hint: string; toast: string } {
+    const near = info.ground ? nearestWall(ctx.document, info.ground, OPENING_REACH) : null
+    return near
+      ? {
+          hint: 'This wall is too short',
+          toast: 'That wall is too short for an opening — it has to keep a jamb either side.',
+        }
+      : {
+          hint: 'Move onto a wall',
+          toast: 'Doors and windows are placed on a wall — move onto one first.',
+        }
   }
 
   onPointerMove(info: PointerInfo, ctx: ToolContext): void {
@@ -176,7 +221,7 @@ abstract class OpeningTool implements Tool {
           ? [
               {
                 id: 'opening-hint',
-                text: 'Move onto a wall',
+                text: this.refusal(info, ctx).hint,
                 x: info.ground.x,
                 y: 0.6,
                 z: info.ground.y,
@@ -189,7 +234,7 @@ abstract class OpeningTool implements Tool {
     }
     const wall = ctx.document.plan.walls.find((w) => w.id === this.preview!.wallId)
     if (!wall) return
-    const width = this.width(ctx)
+    const width = this.preview.width
     ctx.setDraft([
       {
         kind: 'rect',
@@ -218,7 +263,7 @@ abstract class OpeningTool implements Tool {
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
     const resolved = this.resolve(info, ctx)
     if (!resolved) {
-      ctx.toast('Doors and windows are placed on a wall — move onto one first.', 'warn')
+      ctx.toast(this.refusal(info, ctx).toast, 'warn')
       return
     }
     const opening = this.build(ctx, resolved.wallId, resolved.offset)
@@ -297,12 +342,23 @@ export class ServiceTool implements Tool {
   private resolve(info: PointerInfo, ctx: ToolContext) {
     if (!info.ground) return null
     const aligned = wallAlignedPlacement(ctx.document, info.ground, 0.7, 1.4)
-    if (aligned) return { position: aligned.position, rotation: aligned.rotation + this.rotation }
+    // `wallAlignedPlacement` turns an object's front — its local +Z — into the
+    // room, but a counter is served from the other side (`serviceFacing`): staff
+    // work against the wall and the queue forms in the room. Half a turn is the
+    // whole difference between the two conventions, and without it the line runs
+    // through the wall the counter was just snapped to.
+    if (aligned) {
+      return { position: aligned.position, rotation: aligned.rotation + Math.PI + this.rotation }
+    }
     return { position: ctx.snap(info.ground).point, rotation: this.rotation }
   }
 
   onPointerMove(info: PointerInfo, ctx: ToolContext): void {
     this.preview = this.resolve(info, ctx)
+    this.refresh(ctx)
+  }
+
+  private refresh(ctx: ToolContext): void {
     if (!this.preview) return
     const width = 1.8
     const depth = 0.7
@@ -357,7 +413,12 @@ export class ServiceTool implements Tool {
       return true
     }
     if (event.key.toLowerCase() === 'r') {
-      this.rotation += event.shiftKey ? Math.PI / 2 : Math.PI / 12
+      const step = event.shiftKey ? Math.PI / 2 : Math.PI / 12
+      this.rotation += step
+      // Turn what is already on the cursor as well as the next placement, so the
+      // counter and its queue whisker answer the key without waiting for a move.
+      if (this.preview) this.preview = { ...this.preview, rotation: this.preview.rotation + step }
+      this.refresh(ctx)
       return true
     }
     return false
@@ -451,15 +512,7 @@ export class QueueTool implements Tool {
       if (info.altKey && queue.points.length > 2) {
         const points = queue.points.filter((_, i) => i !== index)
         ctx.apply(
-          (doc) => ({
-            ...doc,
-            plan: {
-              ...doc.plan,
-              servicePoints: doc.plan.servicePoints.map((s) =>
-                s.id === queue.id ? { ...s, queue: points } : s,
-              ),
-            },
-          }),
+          (doc) => updateServicePoint(doc, queue.id, { queue: points }),
           'Remove queue point',
         )
         ctx.seal()
@@ -469,14 +522,13 @@ export class QueueTool implements Tool {
       this.dragging = { serviceId: queue.id, index }
       return
     }
-    // Insert a point on the nearest segment.
+    // Insert a point on the nearest segment — measured to the segment, because
+    // the hint offers the whole line and a user aims at the part of it they want
+    // the bend in, which on a six-metre queue is nowhere near its midpoint.
     let bestIndex = -1
     let bestDistance = tolerance * 1.5
     for (let i = 1; i < queue.points.length; i++) {
-      const a = queue.points[i - 1]
-      const b = queue.points[i]
-      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-      const d = distance(mid, info.ground)
+      const d = distanceToSegment(info.ground, queue.points[i - 1], queue.points[i])
       if (d < bestDistance) {
         bestDistance = d
         bestIndex = i
@@ -485,19 +537,14 @@ export class QueueTool implements Tool {
     if (bestIndex > 0) {
       const points = [...queue.points]
       points.splice(bestIndex, 0, ctx.snap(info.ground).point)
+      // The same key the drag below uses: clicking the line and dragging the new
+      // point where you wanted it is one gesture, so it is one undo step, and
+      // `onPointerUp` seals it whether or not the pointer moved at all.
       ctx.apply(
-        (doc) => ({
-          ...doc,
-          plan: {
-            ...doc.plan,
-            servicePoints: doc.plan.servicePoints.map((s) =>
-              s.id === queue.id ? { ...s, queue: points } : s,
-            ),
-          },
-        }),
+        (doc) => updateServicePoint(doc, queue.id, { queue: points }),
         'Add queue point',
+        `queue-${queue.id}-${bestIndex}`,
       )
-      ctx.seal()
       this.dragging = { serviceId: queue.id, index: bestIndex }
     }
     this.refresh(ctx)
@@ -515,15 +562,7 @@ export class QueueTool implements Tool {
     const serviceId = this.dragging.serviceId
     const points = queue.points.map((p, i) => (i === index ? snapped.point : p))
     ctx.apply(
-      (doc) => ({
-        ...doc,
-        plan: {
-          ...doc.plan,
-          servicePoints: doc.plan.servicePoints.map((s) =>
-            s.id === serviceId ? { ...s, queue: points } : s,
-          ),
-        },
-      }),
+      (doc) => updateServicePoint(doc, serviceId, { queue: points }),
       'Reshape queue',
       `queue-${serviceId}-${index}`,
     )
