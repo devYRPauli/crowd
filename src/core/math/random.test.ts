@@ -194,33 +194,34 @@ describe('named streams', () => {
     expect(draws(named, 20)).toEqual(draws(bare, 20))
   })
 
-  // SUSPECTED BUG: `branch` mixes the label into the generator's *current*
-  // state, not into its seed as the doc comment claims. A generator therefore
-  // renames all of its streams the moment it draws once itself, and
-  // `buildSchedule` (engine.ts:414-424) both branches from the population
-  // generator and calls `rng.int` / `rng.weightedIndex` on it. Moving a
-  // `rng.branch(...)` below that loop — a refactor that changes no behaviour —
-  // would silently change every arrival time in the run, so a comparison
-  // against a baseline would measure the edit rather than the layout. Deriving
-  // from the seed would make a name mean one stream for the generator's life.
-  it('renames every stream under a generator as soon as that generator draws', () => {
+  it('keeps a name on one stream however much the generator above it has drawn', () => {
     const untouched = new Rng(4242).branch('population:0')
     const drawnFrom = new Rng(4242).branch('population:0')
     drawnFrom.int(0, 3)
 
-    expect(draws(drawnFrom.branch('arrivals'), 20)).not.toEqual(
+    // `buildSchedule` (engine.ts:414-426) branches `groups` and `arrivals` off
+    // the population generator and then draws entrances and profile picks from
+    // that same generator. If a name were read against the live state, moving
+    // one of those branches below the loop — a refactor that reads as changing
+    // nothing — would move every arrival time in the run, and a comparison
+    // against a baseline would measure the edit rather than the layout.
+    expect(draws(drawnFrom.branch('arrivals'), 20)).toEqual(
       draws(untouched.branch('arrivals'), 20),
     )
   })
 
-  // SUSPECTED BUG: the label is XORed into the state and XOR is commutative and
-  // self-inverse, so a stream is named by the unordered multiset of labels on
-  // the way to it rather than by the path. Two different structural positions
-  // therefore share one stream and draw identical numbers, and a name used
-  // twice down a path hands back the parent's own stream — the correlation
-  // between unrelated decisions that naming streams after position exists to
-  // prevent. Folding the parent's state through the hash (or hashing the joined
-  // path) would give each position its own stream.
+  // Recorded decision: labels are XORed together, and XOR is commutative and
+  // self-inverse, so a stream is named by the multiset of labels on the way to
+  // it rather than by the path. Two positions whose names are a rearrangement
+  // share a stream, and a label spent twice down one path lands back on the
+  // parent's own. The engine's names cannot reach either: `groups` and
+  // `arrivals` are the only second level, they hang off `population:N`, and no
+  // label repeats down a path. Folding the parent's seed through the hash would
+  // give every path its own stream, but it re-seeds every nested stream in the
+  // product — group sizes and arrival times all move — and every threshold in
+  // src/sim/validation is calibrated against the numbers those produce. The
+  // test stands as the record of what the naming scheme does and does not
+  // promise, so a new pair of labels is chosen knowing it.
   it('gives unrelated positions one stream when their names are a rearrangement', () => {
     const root = new Rng(7)
     expect(draws(root.branch('population:0').branch('groups'), 20)).toEqual(

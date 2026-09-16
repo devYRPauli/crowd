@@ -139,18 +139,14 @@ describe('length and direction', () => {
     expect(clampLength(v(1e-13, 0), 0)).toEqual({ x: 1e-13, y: 0 })
   })
 
-  // SUSPECTED BUG: `clampLength` documents that it shortens a vector
-  // "preserving direction", but `max` only ever reaches the arithmetic as
-  // `max * max` and as a divisor, so a negative cap reverses the vector. No
-  // caller exists yet — the contract is what is wrong. The obvious caller is a
-  // speed limit, where a negative limit would send a walker backwards at that
-  // speed instead of stopping them. A negative `max` should clamp to zero, as
-  // `max === 0` already does.
-  it('turns a vector round when the cap is negative', () => {
-    expect(clampLength(v(3, 0), -2).x).toBeCloseTo(-2, 12)
-    expect(dot(clampLength(v(3, 0), -2), v(3, 0))).toBeLessThan(0)
-    // Anything already shorter than the magnitude of the cap slips through whole.
-    expect(clampLength(v(1, 0), -2)).toEqual({ x: 1, y: 0 })
+  it('stops a vector dead when the cap is negative rather than turning it round', () => {
+    // A cap is a speed limit, and a limit of less than nothing leaves nowhere to
+    // travel. Scaling by it sent the walker backwards at the capped speed, and
+    // anything shorter than its magnitude slipped through the limit untouched.
+    expect(clampLength(v(3, 0), -2)).toEqual({ x: 0, y: 0 })
+    expect(clampLength(v(1, 0), -2)).toEqual({ x: 0, y: 0 })
+    expect(length(clampLength(v(-3, 4), -0.5))).toBe(0)
+    expect(clampLength(v(0, 0), -2)).toEqual({ x: 0, y: 0 })
   })
 })
 

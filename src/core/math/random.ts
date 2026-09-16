@@ -23,15 +23,29 @@ export const hashString = (value: string): number => {
 export class Rng {
   private state: number
   private spare: number | null = null
+  /** The seed the stream started from, kept because `branch` derives from it. */
+  private readonly seed: number
 
   constructor(seed: number | string = 1) {
     const numeric = typeof seed === 'string' ? hashString(seed) : Math.floor(seed)
-    this.state = numeric >>> 0 || 0x9e3779b9
+    this.seed = numeric >>> 0 || 0x9e3779b9
+    this.state = this.seed
   }
 
-  /** A generator whose stream is derived from this one's seed and a label. */
+  /**
+   * A generator whose stream is derived from this one's seed and a label.
+   *
+   * From the seed, never from the live state: a stream is named after a thing's
+   * position in the plan, and a name resolved against the state would mean a
+   * different stream the moment the parent drew once itself. `buildSchedule`
+   * branches `groups` and `arrivals` off the population generator and then
+   * draws entrances and profile picks from it, so moving one of those branches
+   * below the loop — a refactor that reads as changing nothing — would move
+   * every arrival time in the run, and a comparison against a baseline would
+   * measure the edit rather than the layout.
+   */
   branch(label: string): Rng {
-    return new Rng((this.state ^ hashString(label)) >>> 0)
+    return new Rng((this.seed ^ hashString(label)) >>> 0)
   }
 
   /** Uniform in [0, 1). mulberry32 — fast, and adequate for crowd sampling. */
@@ -106,21 +120,33 @@ export class Rng {
       : max - Math.sqrt((1 - u) * (max - min) * (max - mode))
   }
 
-  pick<T>(items: readonly T[]): T {
+  /** An item chosen uniformly, or `undefined` when there is nothing to pick. */
+  pick<T>(items: readonly T[]): T | undefined {
     return items[Math.floor(this.next() * items.length)]
   }
 
-  /** Index into `weights`, chosen proportionally. Returns 0 when all are zero. */
+  /**
+   * Index into `weights`, chosen proportionally. Returns 0 when all are zero.
+   *
+   * An entry with no weight is skipped rather than tested: its band has no
+   * width, and a draw landing exactly on the bottom of the interval would
+   * otherwise be handed to it — a profile the user set to 0% of the crowd
+   * turning up in the crowd.
+   */
   weightedIndex(weights: readonly number[]): number {
     let total = 0
     for (const w of weights) total += Math.max(0, w)
     if (total <= 0) return 0
     let target = this.next() * total
+    let last = 0
     for (let i = 0; i < weights.length; i++) {
-      target -= Math.max(0, weights[i])
+      const weight = Math.max(0, weights[i])
+      if (weight <= 0) continue
+      last = i
+      target -= weight
       if (target <= 0) return i
     }
-    return weights.length - 1
+    return last
   }
 
   /** In-place Fisher–Yates shuffle. */
@@ -181,4 +207,31 @@ export const sampleDistribution = (rng: Rng, dist: Distribution): number => {
   return Math.min(Math.max(value, min), max)
 }
 
-export const distributionMean = (dist: Distribution): number => dist.mean
+/**
+ * The average duration the distribution actually draws.
+ *
+ * `chooseQueue` multiplies this by the length of a line to guess the wait
+ * behind a counter, so it has to be the mean of the samples and not of the
+ * `mean` field: bounds are part of the shape for two kinds. A uniform never
+ * reads `mean` at all and draws between its bounds, and a triangular reads it
+ * as the mode — a 120-600 s desk reported 300 s when its people cost 360, and
+ * the desk was chosen on a wait under-read by a fifth. A clamped normal or
+ * exponential still reports its nominal mean, because the exact answer needs
+ * the distribution's CDF; holding the result inside the bounds keeps it to
+ * something the desk can actually produce.
+ */
+export const distributionMean = (dist: Distribution): number => {
+  const sd = dist.sd ?? 0
+  let mean: number
+  switch (dist.kind) {
+    case 'uniform':
+      mean = ((dist.min ?? Math.max(0, dist.mean - sd)) + (dist.max ?? dist.mean + sd)) / 2
+      break
+    case 'triangular':
+      mean = ((dist.min ?? 0) + dist.mean + (dist.max ?? dist.mean * 2)) / 3
+      break
+    default:
+      mean = dist.mean
+  }
+  return Math.min(Math.max(mean, dist.min ?? 0), dist.max ?? Infinity)
+}

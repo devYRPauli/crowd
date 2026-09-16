@@ -74,11 +74,14 @@ export const angleOf = (a: Vec2): number => Math.atan2(a.y, a.x)
 export const equals = (a: Vec2, b: Vec2, epsilon = 1e-9): boolean =>
   Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon
 
-/** Shorten `a` to at most `max` metres, preserving direction. */
+/** Shorten `a` to at most `max` metres, preserving direction. A cap below zero stops it dead. */
 export const clampLength = (a: Vec2, max: number): Vec2 => {
+  // `max` reached the arithmetic only as `max * max` and as a scale factor, so a
+  // negative cap flipped the vector and sent it backwards at the capped speed.
+  const limit = max > 0 ? max : 0
   const lenSq = a.x * a.x + a.y * a.y
-  if (lenSq <= max * max || lenSq < 1e-24) return { x: a.x, y: a.y }
-  const k = max / Math.sqrt(lenSq)
+  if (lenSq <= limit * limit || lenSq < 1e-24) return { x: a.x, y: a.y }
+  const k = limit / Math.sqrt(lenSq)
   return { x: a.x * k, y: a.y * k }
 }
 

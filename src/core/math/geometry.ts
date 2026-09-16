@@ -80,10 +80,21 @@ export const polygonArea = (poly: readonly Vec2[]): number => Math.abs(signedAre
 
 export const isCounterClockwise = (poly: readonly Vec2[]): boolean => signedArea(poly) > 0
 
-export const ensureWinding = (poly: Vec2[], counterClockwise: boolean): Vec2[] =>
-  isCounterClockwise(poly) === counterClockwise ? poly : [...poly].reverse()
+export const ensureWinding = (poly: Vec2[], counterClockwise: boolean): Vec2[] => {
+  // A polygon with no area has no winding to correct, and asking for the one it
+  // can never report used to reverse it every time — a new array on every
+  // rebuild, which is exactly what the identity diff behind structural sharing
+  // reads as "this changed".
+  if (polygonArea(poly) < 1e-12) return poly
+  return isCounterClockwise(poly) === counterClockwise ? poly : [...poly].reverse()
+}
 
 export const polygonCentroid = (poly: readonly Vec2[]): Vec2 => {
+  // The bounding box of no points is inside out, so the fallback below would
+  // hand back NaN: a NaN centre is a NaN destination, and an agent sent to one
+  // never arrives. The origin is this module's answer for geometry that is not
+  // there, as it is for an empty polyline.
+  if (poly.length === 0) return { x: 0, y: 0 }
   let area = 0
   let cx = 0
   let cy = 0
@@ -205,8 +216,13 @@ export const raySegmentIntersection = (
 
 /** Axis-aligned rectangle as a counter-clockwise polygon. */
 export const rectPolygon = (center: Vec2, width: number, depth: number, rotation = 0): Polygon => {
-  const hw = width / 2
-  const hd = depth / 2
+  // A negative size covers the same floor but emits the corners in reverse, and
+  // the clockwise footprint that came out broke the promise above: anything
+  // taking an outward direction from the winding faced into the object instead
+  // of away from it. `servicePolygon` passes a counter's width through with no
+  // lower bound under it, so the case is reachable from the document.
+  const hw = Math.abs(width) / 2
+  const hd = Math.abs(depth) / 2
   const c = Math.cos(rotation)
   const s = Math.sin(rotation)
   const corners: Array<[number, number]> = [
@@ -271,7 +287,10 @@ export const samplePolyline = (
   count?: number,
 ): Vec2[] => {
   const total = polylineLength(points)
-  const n = count ?? Math.floor(total / spacing) + 1
+  // `floor(total / 0) + 1` is Infinity, and the loop below then never returns:
+  // a zero spacing on a path with any length at all hung the tab outright. A
+  // negative spacing already yielded nothing, so non-positive ones all do.
+  const n = count ?? (spacing > 0 ? Math.floor(total / spacing) + 1 : 0)
   const out: Vec2[] = []
   for (let i = 0; i < n; i++) out.push(pointAlongPolyline(points, i * spacing))
   return out
@@ -344,6 +363,11 @@ export const convexHull = (points: readonly Vec2[]): Polygon => {
  * Offset a convex-ish polygon outward by `d` metres by pushing each vertex along
  * the bisector of its adjacent edge normals. Adequate for the near-rectangular
  * footprints the editor produces; not a general straight-skeleton offset.
+ *
+ * An inset deeper than the polygon's narrowest half-span turns it inside out
+ * rather than collapsing it, and the result is still wound the same way and
+ * still reports a plausible area. A caller insetting has to check for itself
+ * that the polygon shrank.
  */
 export const offsetPolygon = (poly: readonly Vec2[], d: number): Polygon => {
   const n = poly.length
@@ -377,9 +401,15 @@ export const offsetPolygon = (poly: readonly Vec2[], d: number): Polygon => {
 
 /** True when the polygons overlap, using the separating-axis test (convex inputs). */
 export const convexPolygonsOverlap = (a: readonly Vec2[], b: readonly Vec2[]): boolean => {
+  let axes = 0
   for (const poly of [a, b]) {
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
       const axis = { x: -(poly[i].y - poly[j].y), y: poly[i].x - poly[j].x }
+      // A repeated vertex, or a footprint that is a single point, offers no
+      // direction to separate along: everything projects onto 0 and the pair
+      // passes the test. Two such footprints once read as always overlapping.
+      if (axis.x === 0 && axis.y === 0) continue
+      axes++
       let minA = Infinity
       let maxA = -Infinity
       let minB = Infinity
@@ -397,7 +427,9 @@ export const convexPolygonsOverlap = (a: readonly Vec2[], b: readonly Vec2[]): b
       if (maxA < minB || maxB < minA) return false
     }
   }
-  return true
+  // With no axis between them nothing above could have separated the pair, so
+  // fall back to their extents: two points overlap only where they coincide.
+  return axes > 0 || boundsOverlap(boundsOf(a), boundsOf(b))
 }
 
 export const clampToBounds = (p: Vec2, b: Bounds): Vec2 => ({
