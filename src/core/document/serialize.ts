@@ -300,12 +300,29 @@ const parsePopulation = (raw: unknown, index: number): Population | null => {
   }
 }
 
-const parseScenario = (raw: unknown): Scenario => {
+/**
+ * The crowd, and what it means when a file does not describe one.
+ *
+ * A scenario that never mentioned `populations` is a document saved before
+ * anybody set a crowd up, and giving it the starter crowd is the helpful thing
+ * to do. A scenario that *did* mention one and lost it is a different matter
+ * entirely: substituting the default there hands back a venue full of people
+ * who were never in the file, with the same shape and none of the numbers, and
+ * whoever opens it runs a simulation on a fabricated crowd believing it is
+ * theirs. So that case keeps the empty list and says what was lost.
+ */
+const parseScenario = (raw: unknown, warnings: string[]): Scenario => {
   const base = createScenario()
   if (!isObject(raw)) return base
-  const populations = array(raw.populations)
-    .map(parsePopulation)
-    .filter((p): p is Population => p !== null)
+  const described = Array.isArray(raw.populations)
+  const entries = array(raw.populations)
+  const populations = entries.map(parsePopulation).filter((p): p is Population => p !== null)
+  const lostPopulations = entries.length - populations.length
+  if (lostPopulations > 0) {
+    warnings.push(
+      `${lostPopulations} group(s) of people could not be read and were dropped.`,
+    )
+  }
   const profiles = array(raw.profiles).filter(isObject).length
     ? array(raw.profiles)
         .filter(isObject)
@@ -335,7 +352,7 @@ const parseScenario = (raw: unknown): Scenario => {
     name: str(raw.name, base.name),
     durationS: Math.max(10, num(raw.durationS, base.durationS)),
     seed: Math.max(0, Math.round(num(raw.seed, base.seed))),
-    populations: populations.length ? populations : base.populations,
+    populations: populations.length || described ? populations : base.populations,
     profiles,
     speedFactor: Math.max(0.1, num(raw.speedFactor, 1)),
     routing: {
@@ -485,7 +502,7 @@ export const parseDocument = (input: unknown): ParseResult => {
       updatedAt: now,
       settings,
       plan,
-      scenario: parseScenario(raw.scenario),
+      scenario: parseScenario(raw.scenario, warnings),
     },
     warnings,
   }

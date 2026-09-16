@@ -235,6 +235,57 @@ describe('fields a file leaves out', () => {
   })
 })
 
+describe('the crowd a damaged file comes back with', () => {
+  it('never invents people the file did not describe', () => {
+    // The worst way to be wrong. A scenario whose groups all failed to parse
+    // used to fall back to the starter crowd, so a damaged file reopened full
+    // of people who were never in it — right shape, wrong numbers — and
+    // whoever opened it ran a simulation on a fabricated crowd believing it
+    // was theirs.
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: { name: 'Damaged', populations: ['not a group', null, 42] },
+    })
+
+    expect(result.document.scenario.populations).toEqual([])
+    expect(result.warnings.join(' ')).toMatch(/3 group\(s\) of people/i)
+  })
+
+  it('says how many groups it lost while keeping the ones it read', () => {
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: {
+        populations: [{ id: 'p1', name: 'Guests', count: 40 }, null, 'rubbish'],
+      },
+    })
+
+    expect(result.document.scenario.populations.map((p) => p.name)).toEqual(['Guests'])
+    expect(result.warnings.join(' ')).toMatch(/2 group\(s\) of people/i)
+  })
+
+  it('still gives a starter crowd to a file that never mentioned one', () => {
+    // A document saved before anybody set a crowd up is not damaged, and
+    // opening it onto an empty scenario would be unhelpful rather than honest.
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: { name: 'Fresh' },
+    })
+
+    expect(result.document.scenario.populations.length).toBeGreaterThan(0)
+    expect(result.warnings.join(' ')).not.toMatch(/group\(s\) of people/i)
+  })
+
+  it('respects a file that says, explicitly, that nobody comes', () => {
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: { name: 'Empty on purpose', populations: [] },
+    })
+
+    expect(result.document.scenario.populations).toEqual([])
+    expect(result.warnings.join(' ')).not.toMatch(/group\(s\) of people/i)
+  })
+})
+
 describe('files that are not documents', () => {
   const hostile: Array<[string, unknown]> = [
     ['null', null],
