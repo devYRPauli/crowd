@@ -545,28 +545,24 @@ describe('degenerate crowds', () => {
     expect(collect(hash, 0, 0, 0)).toContain(40)
   })
 
-  it('answers with one cell of the grid when the query is not a finite number', () => {
+  it('sweeps the whole grid for a radius wider than it, rather than one corner', () => {
     const rng = new Rng('spatial-hash-nonfinite')
     const extent: Extent = { minX: 0, minY: 0, maxX: 40, maxY: 40 }
     const points = scatter(rng, 200, extent)
     const hash = build(5, points, extent)
     expect(collect(hash, 20, 20, 60)).toHaveLength(200)
 
-    const firstCell = sorted(collect(hash, extent.minX, extent.minY, 0))
-    expect(firstCell.length).toBeGreaterThan(0)
+    // Truncating the span with `| 0` is ToInt32, so a radius that reached past
+    // two billion cells wrapped and collapsed onto the grid's first cell: the
+    // answer came back as whoever was standing in the venue's bottom-left
+    // corner, which a caller cannot tell from an empty stretch of floor.
+    expect(sorted(collect(hash, 20, 20, Infinity))).toEqual(everyone(200))
+    expect(sorted(collect(hash, 20, 20, 1e12))).toEqual(everyone(200))
 
-    // SUSPECTED BUG: every bound in query() ends in `| 0`, which is ToInt32 and
-    // so turns both Infinity and NaN into 0. The column and row spans collapse
-    // onto the grid's first cell, and the answer is the handful of people who
-    // happen to be in the venue's bottom-left corner — the one thing the
-    // contract forbids, a silent near-miss a caller cannot tell apart from an
-    // empty stretch of floor. A non-finite radius should sweep the whole grid
-    // (or be rejected outright) and a non-finite position should find nobody.
-    // Nothing in the engine reaches this today: every radius it passes is built
-    // from finite constants and profile body radii.
-    expect(sorted(collect(hash, 20, 20, Infinity))).toEqual(firstCell)
-    expect(sorted(collect(hash, 20, 20, NaN))).toEqual(firstCell)
-    expect(sorted(collect(hash, NaN, NaN, 5))).toEqual(firstCell)
+    // A bound that is not a number is no span at all, so the loops walk nothing
+    // and the caller gets an empty answer instead of a plausible wrong one.
+    expect(collect(hash, 20, 20, NaN)).toEqual([])
+    expect(collect(hash, NaN, NaN, 5)).toEqual([])
 
     // A negative radius inverts the span, which the loop bounds reject outright.
     expect(collect(hash, 20, 20, -1)).toEqual([])

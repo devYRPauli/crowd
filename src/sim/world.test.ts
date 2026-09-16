@@ -173,12 +173,11 @@ describe('grid resolution', () => {
     expect(compile(sealed(250)).grid.cellSize).toBeCloseTo(0.5, 6)
   })
 
-  it('refines for a hatch nobody can climb through', () => {
-    // SUSPECTED BUG — asserted as it behaves today. `chooseCellSize` excludes
-    // windows by kind, but `isWalkableOpening`, which is what decides whether
-    // the wall is solid there, also excludes anything with a sill. A serving
-    // hatch is therefore solid wall people route around, and still sets the
-    // resolution for the whole venue.
+  it('sizes the grid by the doors people use, not by a hatch over a counter', () => {
+    // A serving hatch is an opening with a sill, which leaves no gap in the
+    // wall at floor level: people route round it exactly as they do round the
+    // wall it is cut into. Sizing the grid by it anyway bought the whole venue
+    // seven times the cells to resolve a hole nobody can walk through.
     const withHatch = (sill: number): Plan => {
       const b = new PlanBuilder()
       const room = b.room(0, 0, 20, 12)
@@ -194,12 +193,13 @@ describe('grid resolution', () => {
     const walkThrough = compile(withHatch(0))
     const overCounter = compile(withHatch(1.0))
 
-    // The hatch at counter height leaves no gap in the wall at all...
     expect(overCounter.solid[cellAt(overCounter, 10, 12)]).toBe(1)
     expect(walkThrough.solid[cellAt(walkThrough, 10, 12)]).toBe(0)
-    // ...and is still costing the same 0.6 / 8 m cell as the one people use.
-    expect(overCounter.grid.cellSize).toBeCloseTo(walkThrough.grid.cellSize, 6)
-    expect(overCounter.grid.cellSize).toBeCloseTo(0.075, 6)
+    // With the hatch solid the double door is the narrowest way in, and the
+    // venue's extent caps the grid at 0.2 m. Drop the same hatch to the floor
+    // and it is a way through, worth the 0.6 / 8 m cell it takes to resolve.
+    expect(overCounter.grid.cellSize).toBeCloseTo(0.2, 6)
+    expect(walkThrough.grid.cellSize).toBeCloseTo(0.075, 6)
   })
 })
 
@@ -570,26 +570,26 @@ describe('obstacle zones', () => {
     expect(walkInto(world).y).toBeLessThan(-0.5)
   })
 
-  it('stops seeing a plinth whose outline was clicked the other way round', () => {
-    // SUSPECTED BUG. `buildObstacles` says it wants counter-clockwise loops, and
-    // every polygon `collectObstaclePolygons` builds for itself is one — but a
-    // zone carries whatever outline the author clicked, and the zone tool's
-    // free-form mode is happy to go clockwise. Reversed, each edge's solid side
-    // faces inward and every corner comes out concave, so local avoidance stops
-    // constraining anybody. The grid still blocks the cells, so routing goes
-    // round it and the run looks fine — until somebody shoved off their path
-    // walks through the plinth instead of being pushed off it, which is the one
-    // case obstacle avoidance exists for. `collectObstaclePolygons` should put
-    // zone polygons through `ensureWinding` as it does not today.
+  it('sees a plinth whose outline was clicked the other way round just the same', () => {
+    // The zone tool's free-form mode is happy to go clockwise, and ORCA reads a
+    // clockwise loop as solid on the outside: every corner comes out concave
+    // and nothing is avoided. Routing would still go round the plinth, so the
+    // run looked fine — until somebody shoved off their line walked through it,
+    // which is the one case local avoidance exists for.
     const clockwise = withPlinth([...PLINTH].reverse())
 
     expect(clockwise.solid[cellAt(clockwise, 9, 6)]).toBe(1)
     expect(clockwise.navBlocked[cellAt(clockwise, 9, 6)]).toBe(1)
-    expect(clockwise.obstacles.slice(-4).map((o) => o.convex)).toEqual([false, false, false, false])
+    expect(clockwise.obstacles.slice(-4).map((o) => o.convex)).toEqual([true, true, true, true])
 
     const straightOn = walkInto(clockwise)
-    expect(straightOn.x).toBeCloseTo(1.2, 6)
-    expect(straightOn.y).toBeCloseTo(0, 6)
+    expect(straightOn.y).toBeLessThan(-0.5)
+    // The same four edges, so the same deflection to the millimetre as the
+    // outline drawn the other way: winding is the author's habit, not a
+    // property of the plinth.
+    const anticlockwise = walkInto(withPlinth(PLINTH))
+    expect(straightOn.x).toBeCloseTo(anticlockwise.x, 12)
+    expect(straightOn.y).toBeCloseTo(anticlockwise.y, 12)
   })
 })
 

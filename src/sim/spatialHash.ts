@@ -72,24 +72,35 @@ export class SpatialHash {
     this.cellCount[cell]++
   }
 
-  /** Visit every id within `radius` of the point. The callback may be called for items slightly outside. */
+  /**
+   * Visit every id within `radius` of the point. The callback may be called for
+   * items slightly outside.
+   *
+   * The bounds are floored rather than truncated with `| 0`, which is ToInt32:
+   * that turned a span reaching past two billion cells — an infinite radius,
+   * most obviously — into the grid's first cell, and answered with whoever
+   * happened to be standing in the venue's bottom-left corner. A near-miss a
+   * caller cannot tell from an empty stretch of floor is the one thing this
+   * contract forbids. Floored, an unbounded span clamps to the whole grid and
+   * a bound that is not a number leaves the loops with nothing to walk.
+   */
   query(x: number, y: number, radius: number, visit: (id: number) => void): void {
     if (this.count === 0) return
     const minCol = Math.min(
       this.cols - 1,
-      Math.max(0, ((x - radius - this.originX) * this.invCell) | 0),
+      Math.max(0, Math.floor((x - radius - this.originX) * this.invCell)),
     )
     const maxCol = Math.min(
       this.cols - 1,
-      Math.max(0, ((x + radius - this.originX) * this.invCell) | 0),
+      Math.max(0, Math.floor((x + radius - this.originX) * this.invCell)),
     )
     const minRow = Math.min(
       this.rows - 1,
-      Math.max(0, ((y - radius - this.originY) * this.invCell) | 0),
+      Math.max(0, Math.floor((y - radius - this.originY) * this.invCell)),
     )
     const maxRow = Math.min(
       this.rows - 1,
-      Math.max(0, ((y + radius - this.originY) * this.invCell) | 0),
+      Math.max(0, Math.floor((y + radius - this.originY) * this.invCell)),
     )
     for (let row = minRow; row <= maxRow; row++) {
       const base = row * this.cols

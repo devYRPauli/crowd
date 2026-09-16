@@ -146,6 +146,11 @@ export class FlowFieldCache {
    * follows the congestion-aware one. Blending the *directions* rather than the
    * potentials keeps the result a sensible heading even when the two fields
    * disagree completely.
+   *
+   * The cost reported alongside the heading is blended the way `cost` blends
+   * it, and for the same reason: it is the seconds this walker has left, and
+   * somebody who took the long way round precisely because it is quicker
+   * through this crowd is not walking the empty-venue route they turned down.
    */
   direction(id: string, point: Vec2, awareness: number): RouteDirection | null {
     const field = this.fields.get(id)
@@ -164,9 +169,10 @@ export class FlowFieldCache {
     if (!shortest) return { dx: congested.dx, dy: congested.dy, cost: congested.value }
     const dx = shortest.dx * (1 - awareness) + congested.dx * awareness
     const dy = shortest.dy * (1 - awareness) + congested.dy * awareness
+    const cost = shortest.value * (1 - awareness) + congested.value * awareness
     const length = Math.hypot(dx, dy)
-    if (length < 1e-6) return { dx: shortest.dx, dy: shortest.dy, cost: shortest.value }
-    return { dx: dx / length, dy: dy / length, cost: shortest.value }
+    if (length < 1e-6) return { dx: shortest.dx, dy: shortest.dy, cost }
+    return { dx: dx / length, dy: dy / length, cost }
   }
 
   /**

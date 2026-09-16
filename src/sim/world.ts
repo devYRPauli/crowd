@@ -13,6 +13,7 @@ import { add, distance, fromAngle, normalize, scale, sub } from '../core/math/ve
 import type { Bounds, Polygon } from '../core/math/geometry'
 import {
   boundsOf,
+  ensureWinding,
   pointInPolygon,
   polygonCentroid,
   polygonArea,
@@ -238,7 +239,13 @@ export const collectObstaclePolygons = (plan: Plan): Polygon[] => {
   }
   for (const sp of plan.servicePoints) polys.push(servicePolygon(sp))
   for (const zone of plan.zones) {
-    if (zone.kind === 'obstacle') polys.push(zone.polygon)
+    // Every polygon above is built counter-clockwise here; a zone carries
+    // whatever outline the author clicked, and free-form mode is happy to go
+    // clockwise. Reversed, each edge's solid side faces inward, every corner
+    // comes out concave and ORCA stops constraining anybody — the grid still
+    // routes people round the thing, so the run looks fine until somebody
+    // shoved off their line walks straight through it.
+    if (zone.kind === 'obstacle') polys.push(ensureWinding(zone.polygon, true))
   }
   return polys
 }
@@ -273,8 +280,12 @@ const chooseCellSize = (plan: Plan, bounds: Bounds): number => {
 
   let narrowest = Infinity
   for (const opening of plan.openings) {
-    // Windows are not a way through, so they do not set the resolution.
-    if (opening.kind === 'window') continue
+    // Only a gap people walk through sets the resolution, and that is the same
+    // test that decides whether the wall is open there at all. Going by kind
+    // alone made a serving hatch — solid wall at floor level, because of its
+    // sill — buy the whole venue a grid fine enough to resolve a 0.6 m hole
+    // nobody can use, at seven times the cells and the solve to match.
+    if (!isWalkableOpening(opening)) continue
     if (opening.width > 0 && opening.width < narrowest) narrowest = opening.width
   }
   const byOpening = Number.isFinite(narrowest) ? narrowest / CELLS_ACROSS_AN_OPENING : Infinity

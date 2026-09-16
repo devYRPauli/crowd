@@ -229,23 +229,29 @@ describe('DensityField', () => {
     expect(onCentre.alone).toBeCloseTo(0.476, 3)
     expect(onCentre.asRead / onCentre.alone).toBeCloseTo(1, 6)
 
-    // SUSPECTED BUG, pinned as it behaves today. Step half a cell — 15 cm, with
-    // the walker no further from their companion than they were — and part of
-    // the companion disappears from the reading. `othersAt` subtracts the
-    // walker's kernel *peak*, which is what they deposited at their own cell
-    // centre, while `sampled` is a bilinear read at their true sub-cell
-    // position, where their own kernel is lower; the excess comes off whoever
-    // else is near. It should take their own contribution off interpolated at
-    // the sample point, the way the sample itself was taken.
+    // Step half a cell — 15 cm, with the walker no further from their companion
+    // than they were — and part of the companion goes with them. What comes off
+    // is the walker's kernel *peak*, which is what they deposited at their own
+    // cell centre, while `sampled` is a bilinear read at their true sub-cell
+    // position, where their own kernel is lower; the excess is taken off
+    // whoever else is near.
     const halfACellEast = companion(6, 4.65)
     expect(halfACellEast.asRead / halfACellEast.alone).toBeCloseTo(0.9453, 4)
     // Worst against a wall, where the two rows the sample interpolates between
-    // carry different coverage corrections and the shortfall reaches 18%. What
-    // it costs is a bias of up to 0.09 persons/m² on every per-person density
-    // the engine asks for, and because it tracks where somebody stands inside a
-    // cell it sawtooths at the 0.3 m cell pitch as they walk — here the same
-    // pair of people, unmoved with respect to each other, are reported a whole
-    // Fruin band apart on where the walker's feet fell.
+    // carry different coverage corrections and the shortfall reaches 18%: a
+    // bias of up to 0.09 persons/m² on every per-person density, sawtoothing at
+    // the 0.3 m cell pitch as somebody walks, so the same pair of people —
+    // unmoved with respect to each other — are reported a Fruin band apart on
+    // where the walker's feet fell.
+    //
+    // Interpolating the walker's own contribution at the sample point, the way
+    // the sample itself was taken, would be the better estimator and is what a
+    // rewrite should do. It is not a patch, though: this is the per-person
+    // density the pace law reads, so it moves every walking speed in the
+    // product, and the fundamental diagram and RiMEA cases in
+    // `src/sim/validation` are pinned to published numbers measured with this
+    // subtraction in them. Changing it means recalibrating against those, not
+    // editing this line — so it is written down here instead.
     const offBothAxes = companion(6, 4.75)
     expect(offBothAxes.alone).toBeCloseTo(0.5, 2)
     expect(offBothAxes.asRead).toBeCloseTo(0.408, 3)
@@ -546,18 +552,17 @@ describe('FlowFieldCache', () => {
     expect(requireRoute(cache.direction('east', from, 0.005)).dy).toBe(shortest.dy)
     expect(requireRoute(cache.direction('east', from, 0.02)).dy).toBeGreaterThan(shortest.dy)
 
-    // SUSPECTED BUG, pinned as it behaves today: `direction` reports the
-    // empty-venue cost however congestion-aware it was asked to be, while
-    // `cost` on the same cache, point and awareness reports the blended one —
-    // and `direction` itself does return the congested value in the one branch
-    // where the shortest-path sample is unreachable, so it contradicts itself.
-    // It should blend the way `cost` does. A walker's `route.cost` in the run
-    // snapshot is the seconds they have left to walk: for the congestion-aware
-    // people — the ones who took the long way round precisely because it is
-    // quicker through this crowd — it under-reports the walk they are on and
-    // disagrees with the number their own door choice was made on.
-    expect(aware.cost).toBe(cache.cost('east', from, 0))
-    expect(aware.cost).toBeLessThan(cache.cost('east', from, 1))
+    // The seconds reported with the heading are the seconds on the route being
+    // walked. A walker's `route.cost` in the run snapshot is how long they have
+    // left, and for the congestion-aware — the ones who took the long way round
+    // precisely because it is quicker through this crowd — the empty-venue
+    // number is neither the walk they are on nor the one their door choice was
+    // made on.
+    expect(aware.cost).toBeCloseTo(cache.cost('east', from, 1), 12)
+    expect(aware.cost).toBeGreaterThan(cache.cost('east', from, 0))
+    // Half-aware people are quoted the same blend they are steering on.
+    const halfAware = requireRoute(cache.direction('east', from, 0.5))
+    expect(halfAware.cost).toBeCloseTo(cache.cost('east', from, 0.5), 12)
   })
 
   it('prices a jam on the curve people walk it at, and still finds a way out', () => {
