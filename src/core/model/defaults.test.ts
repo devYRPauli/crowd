@@ -33,10 +33,22 @@ import {
 } from './standards'
 import type { StandardSize } from './standards'
 import { SCHEMA_VERSION } from './types'
-import type { Wall, ZoneKind } from './types'
+import type { AgentProfile, Wall, ZoneKind } from './types'
 import { parseDocument, serializeDocument } from '../document/serialize'
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/
+
+const MOBILITIES: AgentProfile['mobility'][] = ['walking', 'assisted', 'wheelchair']
+
+/** The ids of the profiles that fail a check, so a failure names the culprit. */
+const profilesFailing = (predicate: (profile: AgentProfile) => boolean): string[] =>
+  AGENT_PROFILES.filter(predicate).map((profile) => profile.id)
+
+const profile = (id: string): AgentProfile => {
+  const found = AGENT_PROFILES.find((candidate) => candidate.id === id)
+  if (!found) throw new Error(`No profile called ${id}`)
+  return found
+}
 
 interface DimensionRow {
   name: string
@@ -146,6 +158,8 @@ describe('the editor defaults', () => {
     expect(defaultDoorHeight).toBeLessThan(defaultWallHeight)
     expect(defaultWindowSill + defaultWindowHeight).toBeLessThanOrEqual(defaultWallHeight)
     expect(defaultWallHeight).toBeGreaterThanOrEqual(CODE_MINIMUMS.egressCeilingHeight)
+    // A wall thicker than the door is wide is a tunnel, and the opening tool
+    // has nowhere to put the jambs.
     expect(DEFAULT_SETTINGS.defaultWallThickness).toBeLessThan(DEFAULT_SETTINGS.defaultDoorWidth)
   })
 
@@ -162,57 +176,70 @@ describe('the editor defaults', () => {
 })
 
 describe('the shipped agent profiles', () => {
-  it('gives every kind of person their own id, name and colour', () => {
-    const ids = AGENT_PROFILES.map((profile) => profile.id)
-    // The mix names profiles by id and the crowd renderer colours people by
-    // profile; a duplicate id sends a whole group to the wrong body, and a
-    // duplicate colour makes two kinds of person indistinguishable on screen.
-    expect(new Set(ids).size).toBe(ids.length)
-    expect(new Set(AGENT_PROFILES.map((profile) => profile.color)).size).toBe(ids.length)
-    expect(new Set(AGENT_PROFILES.map((profile) => profile.name)).size).toBe(ids.length)
-    for (const profile of AGENT_PROFILES) {
-      expect([profile.id, profile.color]).toEqual([profile.id, expect.stringMatching(HEX_COLOR)])
-      expect(profile.name.length).toBeGreaterThan(0)
-      expect(['walking', 'assisted', 'wheelchair']).toContain(profile.mobility)
-      expect(profile.radius).toBeGreaterThan(0.1)
-      expect(profile.radius).toBeLessThan(0.5)
-      expect(profile.heightScale).toBeGreaterThan(0.5)
-      expect(profile.heightScale).toBeLessThanOrEqual(1)
-      expect(profile.caution).toBeGreaterThan(0)
-      expect(profile.assertiveness).toBeGreaterThanOrEqual(0)
-      expect(profile.assertiveness).toBeLessThanOrEqual(1)
-    }
+  it('keeps the roster of people a saved document refers to by id', () => {
+    // A profile id is written into every `.crowd.json` as the key of a mix
+    // entry, so the list is a file-format contract. The engine resolves a miss
+    // to index 0: rename one and that share of every saved crowd silently
+    // becomes adults.
+    expect(AGENT_PROFILES.map((p) => p.id)).toEqual([
+      'adult',
+      'hurried',
+      'senior',
+      'child',
+      'wheelchair',
+      'staff',
+      'luggage',
+    ])
+    expect(new Set(AGENT_PROFILES.map((p) => p.name)).size).toBe(AGENT_PROFILES.length)
+    // The crowd is drawn coloured by profile, so two profiles sharing a colour
+    // are two kinds of person nobody can tell apart in the viewport.
+    expect(new Set(AGENT_PROFILES.map((p) => p.color)).size).toBe(AGENT_PROFILES.length)
+    expect(profilesFailing((p) => !HEX_COLOR.test(p.color))).toEqual([])
+    expect(profilesFailing((p) => !MOBILITIES.includes(p.mobility))).toEqual([])
+    // Height scales the rendered character against the reference adult, so
+    // nobody is drawn taller than one; caution multiplies the avoidance time
+    // horizon, and at zero people walk through each other.
+    expect(profilesFailing((p) => p.heightScale <= 0 || p.heightScale > 1)).toEqual([])
+    expect(profilesFailing((p) => p.caution <= 0)).toEqual([])
+    expect(profilesFailing((p) => p.assertiveness < 0 || p.assertiveness > 1)).toEqual([])
+  })
+
+  it('fits its widest body through the narrowest door the code allows', () => {
+    const widest = [...AGENT_PROFILES].sort((a, b) => b.radius - a.radius)[0]
+    const narrowest = [...AGENT_PROFILES].sort((a, b) => a.radius - b.radius)[0]
+    expect([widest.id, narrowest.id]).toEqual(['wheelchair', 'child'])
+    expect(widest.mobility).toBe('wheelchair')
+    // Clearances are judged against the widest body that has to get through. If
+    // that body no longer fits a code-minimum opening, a venue that passes
+    // every compliance check still deadlocks at its own front door.
+    expect(2 * widest.radius).toBeLessThan(CODE_MINIMUMS.egressDoorClearWidth)
+    expect(2 * widest.radius).toBeLessThan(DEFAULT_SETTINGS.defaultDoorWidth)
+    expect(narrowest.radius).toBeGreaterThan(0)
   })
 
   it('leaves room for two standard deviations inside every speed clamp', () => {
     // Speeds are sampled normally and then clamped. A clamp inside 2 sd throws
     // away a real tail and drags the sampled mean off the profile's own figure,
     // so the crowd walks at a speed nobody chose.
-    for (const { id, speed } of AGENT_PROFILES) {
-      expect([id, speed.sd > 0]).toEqual([id, true])
-      expect([id, speed.min < speed.mean && speed.mean < speed.max]).toEqual([id, true])
-      expect([id, speed.mean - 2 * speed.sd >= speed.min]).toEqual([id, true])
-      expect([id, speed.mean + 2 * speed.sd <= speed.max]).toEqual([id, true])
-    }
+    expect(profilesFailing(({ speed }) => !(speed.sd > 0))).toEqual([])
+    expect(
+      profilesFailing(({ speed }) => !(speed.min < speed.mean && speed.mean < speed.max)),
+    ).toEqual([])
+    expect(profilesFailing(({ speed }) => speed.mean - 2 * speed.sd < speed.min)).toEqual([])
+    expect(profilesFailing(({ speed }) => speed.mean + 2 * speed.sd > speed.max)).toEqual([])
   })
 
   it('walks the average adult at the speed Weidmann measured', () => {
     // The validation suite is a public claim, and it is measured against these
     // two numbers. Anything else here quietly re-baselines every run.
-    const adult = AGENT_PROFILES.find((profile) => profile.id === 'adult')
-    expect(adult?.speed.mean).toBeCloseTo(1.34, 6)
-    expect(adult?.speed.sd).toBeCloseTo(0.26, 6)
-    expect(adult?.radius).toBeCloseTo(0.23, 6)
-  })
-
-  it('gives the wheelchair user the widest body and the child the narrowest', () => {
-    // Clearances are checked against the widest body that has to get through;
-    // if that stops being the wheelchair user, a door they cannot use passes.
-    const widest = [...AGENT_PROFILES].sort((a, b) => b.radius - a.radius)[0]
-    const narrowest = [...AGENT_PROFILES].sort((a, b) => a.radius - b.radius)[0]
-    expect(widest.id).toBe('wheelchair')
-    expect(narrowest.id).toBe('child')
-    expect(widest.mobility).toBe('wheelchair')
+    const adult = profile('adult')
+    expect(adult.speed.mean).toBeCloseTo(1.34, 6)
+    expect(adult.speed.sd).toBeCloseTo(0.26, 6)
+    expect(adult.radius).toBeCloseTo(0.23, 6)
+    // Every other profile is described relative to this one; a hurried walker
+    // slower than the average adult would make the label a lie.
+    expect(profile('hurried').speed.mean).toBeGreaterThan(adult.speed.mean)
+    expect(profile('senior').speed.mean).toBeLessThan(adult.speed.mean)
   })
 })
 
@@ -222,18 +249,21 @@ describe('the default crowd mix', () => {
     expect(total).toBe(100)
     const ids = DEFAULT_PROFILE_MIX.map((entry) => entry.profileId)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const entry of DEFAULT_PROFILE_MIX) {
-      // The engine resolves a mix entry with `findIndex`, and clamps a miss to
-      // index 0 — so a misspelt id does not throw, it silently turns that share
-      // of the crowd into adults and the mix stops meaning anything.
-      expect([entry.profileId, AGENT_PROFILES.some((p) => p.id === entry.profileId)]).toEqual([
-        entry.profileId,
-        true,
-      ])
-      expect(entry.weight).toBeGreaterThan(0)
-    }
+    // The engine resolves a mix entry with `findIndex` and clamps a miss to
+    // index 0 — so a misspelt id does not throw, it silently turns that share
+    // of the crowd into adults and the mix stops meaning anything.
+    expect(ids.filter((id) => !AGENT_PROFILES.some((p) => p.id === id))).toEqual([])
+    expect(DEFAULT_PROFILE_MIX.filter((entry) => !(entry.weight > 0))).toEqual([])
     const heaviest = [...DEFAULT_PROFILE_MIX].sort((a, b) => b.weight - a.weight)[0]
     expect(heaviest.profileId).toBe('adult')
+  })
+
+  it('puts somebody in a wheelchair in every crowd the editor opens with', () => {
+    // The widest body is the one that finds a door too narrow or a queue lane
+    // too tight. Drop it from the default mix and the first run of a new venue
+    // reports clearances nobody in it was ever wide enough to test.
+    const wheelchair = DEFAULT_PROFILE_MIX.find((entry) => entry.profileId === 'wheelchair')
+    expect(wheelchair?.weight).toBeGreaterThan(0)
   })
 })
 
@@ -243,6 +273,8 @@ describe('a new population', () => {
     const population = scenario.populations[0]
     expect(population.name).toBe('Attendees')
     expect(population.count).toBe(120)
+    // An empty entry list means every entry in the plan, which is the only
+    // thing a document with no zones drawn yet can mean.
     expect(population.entryIds).toEqual([])
     expect(population.arrival).toEqual({ kind: 'uniform', startS: 0, windowS: 600 })
     // Arrivals that ran past the end of the run would leave a fresh document's
@@ -263,16 +295,21 @@ describe('a new population', () => {
     expect(createPopulation(1).name).toBe('Group 2')
     expect(createPopulation(1).color).toBe(POPULATION_COLORS[1])
     // The palette wraps rather than handing out `undefined` to the seventh group.
+    expect(createPopulation(POPULATION_COLORS.length).name).toBe('Group 7')
     expect(createPopulation(POPULATION_COLORS.length).color).toBe(POPULATION_COLORS[0])
     expect(new Set(POPULATION_COLORS).size).toBe(POPULATION_COLORS.length)
-    for (const color of POPULATION_COLORS) expect(color).toMatch(HEX_COLOR)
+    expect(POPULATION_COLORS.filter((color) => !HEX_COLOR.test(color))).toEqual([])
+    expect(createPopulation(1).id).not.toBe(createPopulation(1).id)
   })
 
   it('gives two steps of the same kind ids of their own', () => {
     const first = createItineraryStep('goto', 'zone_a')
     const second = createItineraryStep('goto', 'zone_a')
     expect(first.id).not.toBe(second.id)
-    expect(second).toMatchObject({ kind: 'goto', targetId: 'zone_a' })
+    // Nothing beyond the three fields: a step carries its optional duration and
+    // probability only once somebody sets them, and the loader drops the keys
+    // it does not find rather than inventing defaults for them.
+    expect(second).toEqual({ id: second.id, kind: 'goto', targetId: 'zone_a' })
   })
 })
 
@@ -286,9 +323,10 @@ describe('a new scenario', () => {
     expect(scenario.durationS).toBe(1800)
     expect(scenario.speedFactor).toBe(1)
     expect(scenario.evacuationAtS).toBeNull()
-    expect(scenario.profiles.map((profile) => profile.id)).toEqual(
-      AGENT_PROFILES.map((profile) => profile.id),
-    )
+    // Field for field, not just id for id: the scenario copies the shipped
+    // profiles, and a copy that dropped a field would leave the engine sampling
+    // a speed or a radius of `undefined`.
+    expect(scenario.profiles).toEqual(AGENT_PROFILES)
   })
 
   it('routes around congestion with weights the parser would not have to clamp', () => {
@@ -309,7 +347,6 @@ describe('a new document', () => {
     expect(doc.name).toBe('Untitled venue')
     expect(createDocument('Hall 3').name).toBe('Hall 3')
     expect(doc.id).toMatch(/^doc_[0-9a-z]{10}$/)
-    expect(doc.plan).toEqual(createEmptyPlan())
     expect(doc.plan).toEqual({
       walls: [],
       openings: [],
@@ -318,6 +355,9 @@ describe('a new document', () => {
       servicePoints: [],
     })
     expect(doc.plan.backdrop).toBeUndefined()
+    // Every document gets its own arrays; a shared empty one would collect the
+    // walls of every venue opened in the session.
+    expect(createEmptyPlan().walls).not.toBe(doc.plan.walls)
     // Nothing has been edited yet, so the two stamps have to agree — the
     // projects list sorts on `updatedAt` and would otherwise show a document
     // that was modified before it existed.
@@ -328,9 +368,13 @@ describe('a new document', () => {
   it('is a document the loader takes back without repairing anything', () => {
     const doc = createDocument('Hall 3')
     const result = parseDocument(JSON.parse(serializeDocument(doc)))
-    // Every field survives a save and a load untouched, and the parser — which
-    // coerces anything it does not like — finds nothing to complain about.
+    // The parser coerces everything it does not like — clamping a speed, a
+    // radius or a routing weight into range without a word — so a fresh
+    // document that comes back unchanged is the proof that every number shipped
+    // here is one the loader accepts as it stands.
     expect(result.warnings).toEqual([])
+    // `updatedAt` is the one field a load is meant to move: opening a file
+    // stamps it. Everything else, `createdAt` included, is the file's.
     expect({ ...result.document, updatedAt: doc.updatedAt }).toEqual(doc)
   })
 
@@ -345,13 +389,18 @@ describe('two documents made the same way', () => {
     const b = createDocument()
 
     // SUSPECTED BUG: `createScenario` copies each profile with `{ ...profile }`,
-    // which is shallow, so every document in the session — and the shipped
-    // AGENT_PROFILES constant itself — shares one `speed` object per profile. I
-    // believe the correct behaviour is for this list to be empty: a profile
-    // editor writing `profile.speed.mean` would change the adult's walking speed
-    // in every open document and in the defaults the next one is built from,
-    // which invalidates a comparison against a baseline. The fix is to copy
-    // `speed` too, and then this assertion should read `toEqual([])`.
+    // which is a copy of everything but the one nested object it has, so all
+    // seven `speed` objects stay shared — between every document in the session
+    // and with the exported `AGENT_PROFILES` constant itself. The copy is there
+    // to stop exactly that, so the correct behaviour is an empty list here: a
+    // profile editor writing `profile.speed.mean` would move the adult's
+    // walking speed in every open document and in the defaults the next one is
+    // built from, which is the comparison-against-a-baseline the seed exists to
+    // protect. Nothing writes speed in place today, so it is latent. The same
+    // shallow copy is in src/library/templates.ts:46 and in the profile
+    // fallback in src/core/document/serialize.ts, so fixing defaults.ts alone
+    // would not close it. Once fixed this reads `toEqual([])` and the
+    // identity assertion below goes.
     expect(sharedReferences(a, b)).toEqual(
       AGENT_PROFILES.map((_, index) => `scenario.profiles.${index}.speed`),
     )
@@ -389,22 +438,22 @@ describe('two documents made the same way', () => {
 
 describe('zone colours and labels', () => {
   it('names and colours every kind of zone a plan can hold', () => {
-    // Both tables are read by plain key: an unlisted kind draws a zone labelled
-    // "undefined" in the layers list and on the plan while it is being drawn.
+    // The tables are keyed by plain string, so an unlisted kind is only found
+    // at runtime: the draw tool names the zone it just created `undefined 1`
+    // and labels the outline the same while it is being dragged.
     expect(Object.keys(ZONE_LABELS).sort()).toEqual([...ZONE_KINDS].sort())
     expect(Object.keys(ZONE_COLORS).sort()).toEqual([...ZONE_KINDS].sort())
-    for (const kind of ZONE_KINDS) {
-      expect([kind, ZONE_COLORS[kind]]).toEqual([kind, expect.stringMatching(HEX_COLOR)])
-      expect(ZONE_LABELS[kind].length).toBeGreaterThan(0)
-    }
+    expect(ZONE_KINDS.filter((kind) => !HEX_COLOR.test(ZONE_COLORS[kind]))).toEqual([])
+    expect(ZONE_KINDS.filter((kind) => ZONE_LABELS[kind].length === 0)).toEqual([])
     const labels = ZONE_KINDS.map((kind) => ZONE_LABELS[kind])
     expect(new Set(labels).size).toBe(labels.length)
+    expect(new Set(ZONE_KINDS.map((kind) => ZONE_COLORS[kind])).size).toBe(ZONE_KINDS.length)
   })
 
   it('tells the way in apart from the way out', () => {
-    // The renderer borrows these two for entry and exit doors as well as zones,
-    // so they are the only colours in the product carrying a direction.
+    // The renderer reaches into this table for entry and exit doors as well as
+    // zones, so these two are the only colours in the product that carry a
+    // direction: match them and a plan stops saying which way people go.
     expect(ZONE_COLORS.entry).not.toBe(ZONE_COLORS.exit)
-    expect(new Set(ZONE_KINDS.map((kind) => ZONE_COLORS[kind])).size).toBe(ZONE_KINDS.length)
   })
 })

@@ -32,12 +32,14 @@ import {
   pointOnWall,
   solidSpans,
   wallLength,
+  wallObstacleSegments,
   type WorldSeat,
 } from '../core/model/planGeometry'
 import { detectRooms } from '../core/model/rooms'
 import { isCounterClockwise, polygonArea } from '../core/math/geometry'
 import { ZONE_COLORS, ZONE_LABELS, createDocument, createScenario } from '../core/model/defaults'
 import { parseDocument, serializeDocument } from '../core/document/serialize'
+import { updateOpening } from '../core/document/mutations'
 import { feetToMetres } from '../core/model/units'
 import { buildWorld } from '../sim/world'
 import type { Plan } from '../core/model/types'
@@ -45,10 +47,10 @@ import type { Plan } from '../core/model/types'
 const INCH = 0.0254
 
 /** A venue described the way a template describes one. */
-const venue = (): Plan => {
+const venue = (entrance = 6): Plan => {
   const b = new PlanBuilder()
   const room = b.room(0, 0, 20, 12)
-  b.door(room.south, 6, 1.829, 'door', 'entry')
+  b.door(room.south, entrance, 1.829, 'door', 'entry')
   b.door(room.north, 6, 1.829, 'door', 'exit')
   b.window(room.west, 4)
   b.zone('waypoint', 2, 8, 6, 11, 'Cloakroom')
@@ -148,6 +150,12 @@ describe('a room', () => {
     expect(wall.a).toEqual({ x: 1, y: 2 })
     expect(wall.a).not.toBe(corner)
     expect(wallLength(wall)).toBe(4)
+
+    // Two walls meeting at a corner hold two points, not one shared one:
+    // dragging a wall end writes to it, and a shared corner would drag the
+    // neighbouring wall with it without anything saying so.
+    const room = b.room(0, 0, 4, 4)
+    expect(room.south.b).not.toBe(room.east.a)
   })
 })
 
@@ -174,6 +182,21 @@ describe('doors and windows', () => {
     // that eats the whole wall deletes the wall without deleting it.
     expect(west.end - west.start).toBeGreaterThan(OPENING_JAMB)
     expect(east.end - east.start).toBeGreaterThan(OPENING_JAMB)
+  })
+
+  it('measures an offset from the corner its own wall starts at, not from the west', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 12)
+    const front = b.door(room.south, 14)
+    const back = b.door(room.north, 14)
+
+    // A room is walled counter-clockwise, so the north wall runs east to west
+    // and its offsets are measured from the north-east corner. Two doors given
+    // the same number are not opposite each other, and an author who reads the
+    // number as "14 m from the left" puts the fire exit in the wrong half of
+    // the building — where the egress figures it produces are somebody else's.
+    expect(pointOnWall(room.south, front.offset)).toEqual({ x: 14, y: 0 })
+    expect(pointOnWall(room.north, back.offset)).toEqual({ x: 6, y: 12 })
   })
 
   it('draws a pair of leaves once one leaf would be wider than anybody makes', () => {
@@ -211,11 +234,15 @@ describe('doors and windows', () => {
     const room = b.room(0, 0, 20, 12)
     const entrance = b.door(room.south, 6, 1.829, 'door', 'entry')
     const fireExit = b.door(room.north, 14, 1.829, 'door', 'exit')
+    const street = b.door(room.east, 6, 1.829, 'door', 'both')
     const internal = b.door(room.west, 6)
     const world = buildWorld(b.build(), createScenario())
 
-    expect(world.entries.map((record) => record.id)).toEqual([entrance.id])
-    expect(world.exits.map((record) => record.id)).toEqual([fireExit.id])
+    // The street door is the one every template has: people arrive and leave
+    // through it, so it has to be in both lists rather than in the first one
+    // that matched.
+    expect(world.entries.map((record) => record.id)).toEqual([entrance.id, street.id])
+    expect(world.exits.map((record) => record.id)).toEqual([fireExit.id, street.id])
     // An unmarked door is a hole people may walk through, not a destination.
     expect(world.targets.has(internal.id)).toBe(false)
     // The doorway stands on the wall the door was hung on, and on floor an
@@ -228,34 +255,73 @@ describe('doors and windows', () => {
 
   it('hangs a door wherever it is told, including where there is no wall', () => {
     // SUSPECTED BUG: `door()` never checks the offset against the wall it
-    // names. Twenty-five metres along a twenty-metre wall is accepted, kept in
-    // the plan and saved; `solidSpans` clamps it to nothing, so the wall stays
+    // names, and it is the only way into a plan that does not. Twenty-five
+    // metres along a twenty-metre wall is accepted, kept in the plan and saved
+    // without a murmur; `solidSpans` clamps it to nothing, so the wall stays
     // solid, and `buildWorld` still takes it as a way in — standing five metres
     // outside the building. A population told to arrive through that door is
     // spawned in the car park with no way into a sealed room, and the run
     // reports people who could not reach anything rather than the typo.
-    // Correct, I think, is what the placement tool and the inspector already
-    // do: clamp the offset so the leaf stays on the wall with OPENING_JAMB of
+    // `fitToWall` in core/document/mutations.ts is what the inspector, the
+    // tools and a plan arriving from a file all go through already, and it is
+    // what `door()` should do: keep the leaf on the wall with OPENING_JAMB of
     // wall either side of it.
     const b = new PlanBuilder()
     const room = b.room(0, 0, 20, 12)
     const stray = b.door(room.south, 25, DEFAULT_DOOR_WIDTH, 'door', 'entry')
     const plan = b.build()
+    const document = { ...createDocument('Stray door'), plan }
 
-    expect(plan.openings.map((opening) => opening.offset)).toEqual([25])
     expect(stray.wallId).toBe(room.south.id)
+    expect(stray.offset).toBe(25)
     expect(solidSpans(room.south, plan.openings)).toEqual([{ start: 0, end: 20 }])
-    expect(Math.min(...openingThreshold(room.south, stray).map((p) => p.x))).toBeGreaterThan(20)
+    const threshold = openingThreshold(room.south, stray)
+    expect(Math.min(...threshold.map((corner) => corner.x))).toBeGreaterThan(20)
     expect(buildWorld(plan, createScenario()).entries[0].center.x).toBeCloseTo(25, 6)
 
-    // The same at a corner, where half the leaf falls off the end of the wall
-    // and the other half opens the room with no jamb to hang it from.
+    // The same offset through the document's own edit path — where the
+    // inspector and every tool put it — comes back on the wall, jamb and all.
+    // That is the behaviour this test is waiting for.
+    const fitted = updateOpening(document, stray.id, { offset: 25 }).plan.openings[0]
+    expect(fitted.offset).toBeCloseTo(20 - DEFAULT_DOOR_WIDTH / 2 - OPENING_JAMB, 9)
+
+    // It survives the file, too: nothing on the way out or back in notices, so
+    // the venue can be sent to somebody else with its door still off the wall.
+    const reloaded = parseDocument(JSON.parse(serializeDocument(document)))
+    expect(reloaded.warnings).toEqual([])
+    expect(reloaded.document.plan.openings[0].offset).toBe(25)
+
+    // At the other end of the wall, half the leaf falls off the corner and the
+    // other half opens the room with no jamb to hang it from.
     const flush = new PlanBuilder()
     const flushRoom = flush.room(0, 0, 20, 12)
     flush.door(flushRoom.south, 0)
     const spans = solidSpans(flushRoom.south, flush.build().openings)
     expect(spans).toHaveLength(1)
     expect(spans[0].start).toBeCloseTo(DEFAULT_DOOR_WIDTH / 2, 9)
+  })
+
+  it('lets one door swallow the wall it is cut into', () => {
+    // SUSPECTED BUG: the same unchecked opening geometry in the other
+    // dimension, and this one costs more. A 30 m leaf in a 20 m wall leaves no
+    // solid stretch at all, so the wall hands the engine no collision edges:
+    // the plan still lists four walls and the editor still draws four, while
+    // the room stands open along its whole south side and everybody walks out
+    // through the wall. `fitToWall` caps a leaf at the wall it is cut into
+    // less a jamb either side, which is the cap `door()` is missing.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 12)
+    const swallow = b.door(room.south, 10, 30)
+    const plan = b.build()
+    const document = { ...createDocument('Swallowed wall'), plan }
+
+    expect(plan.walls).toHaveLength(4)
+    expect(solidSpans(room.south, plan.openings)).toEqual([])
+    const walled = new Set(wallObstacleSegments(plan).map((edge) => edge.sourceId))
+    expect(walled).toEqual(new Set([room.east.id, room.north.id, room.west.id]))
+
+    const fitted = updateOpening(document, swallow.id, { width: 30 }).plan.openings[0]
+    expect(fitted.width).toBeCloseTo(20 - 2 * OPENING_JAMB, 9)
   })
 })
 
@@ -338,17 +404,20 @@ describe('the plan it emits', () => {
     // SUSPECTED BUG: `build()` returns the builder's own arrays rather than
     // copies of them. A document is meant to be a snapshot — plain, immutable,
     // and diffed by array identity by the renderer — but anything added to the
-    // builder afterwards appears inside a plan that was already handed over,
-    // behind undo's back and without the array identity changing to say so.
-    // A fixture that builds a plan and then goes on to build a variant of it
-    // gets two references to one growing plan. `build()` should copy.
+    // builder afterwards appears inside a document that was handed over long
+    // before, behind undo's back and without the array identity changing to
+    // say anything happened. A fixture that builds a venue and then goes on to
+    // build a variant of it ends up with two references to one growing plan.
+    // `build()` should copy.
     const b = new PlanBuilder()
     b.room(0, 0, 4, 4)
     const plan = b.build()
+    const document = { ...createDocument('Snapshot'), plan }
     expect(plan.walls).toHaveLength(4)
 
     b.wall({ x: 10, y: 0 }, { x: 14, y: 0 })
-    expect(plan.walls).toHaveLength(5)
+
+    expect(document.plan.walls).toHaveLength(5)
     expect(b.build().walls).toBe(plan.walls)
   })
 })
@@ -365,6 +434,12 @@ describe('furniture', () => {
     expect(table.catalogId).toBe('table-round-8')
     expect(chairs).toHaveLength(8)
     expect(new Set(chairs.map((chair) => chair.catalogId))).toEqual(new Set(['chair']))
+
+    // Whatever the table is turned to, the chairs ring it evenly and none of
+    // them is standing on the table top.
+    const reach = chairs.map((chair) => Math.hypot(chair.position.x - 4, chair.position.y - 3))
+    for (const radius of reach) expect(radius).toBeCloseTo(reach[0], 12)
+    expect(reach[0]).toBeGreaterThan(1.829 / 2)
 
     const seats = planSeats(plan)
     const laid = seats.filter((seat) => seat.furnitureId === table.id).sort(byPlace)
@@ -412,15 +487,27 @@ describe('furniture', () => {
       expect(row.size).toEqual({ width: 4, depth: 0.7, height: 0.95 })
     })
 
+    const seats = planSeats(plan)
+    // The width given to the block is what decides how many people it holds:
+    // seven to a 4 m row, not the five of the catalogue's 3 m default. A row
+    // that kept the default would under-count the house by a quarter while
+    // drawing at the size that was asked for.
+    expect(seats).toHaveLength(21)
+    expect(new Set(seats.map((seat) => seat.furnitureId)).size).toBe(3)
+
     // SUSPECTED BUG: the JSDoc says these rows face +Y, and they face -Y. The
     // geometry is the self-consistent reading — rows recede in +Y, so the
     // audience looks back down the block at a stage in front of row one — which
-    // makes the comment the thing that is wrong. It is not harmless: a template
-    // author who believes it puts the stage behind the audience, and every
-    // seated person in the venue faces away from what they came to watch.
-    for (const seat of planSeats(plan)) {
+    // makes the comment the thing that is wrong. No template uses
+    // `seatingBlock` yet, so nothing ships facing backwards today; the cost is
+    // to the next author, who believes the comment, puts the stage behind the
+    // audience, and seats a whole venue facing away from what they came to
+    // watch.
+    for (const seat of seats) {
       expect(Math.sin(seat.facing)).toBeCloseTo(-1, 9)
       expect(Math.cos(seat.facing)).toBeCloseTo(0, 9)
+      // Nobody is sitting off the end of the row they belong to.
+      expect(Math.abs(seat.position.x - 5)).toBeLessThan(2)
     }
   })
 })
@@ -431,12 +518,9 @@ describe('the same description built twice', () => {
     const second = venue()
 
     expect(canonical(second)).toBe(canonical(first))
-    // A venue that differs by one door has to come out different, or the
-    // comparison above is comparing nothing.
-    const moved = new PlanBuilder()
-    const room = moved.room(0, 0, 20, 12)
-    moved.door(room.south, 6.5, 1.829, 'door', 'entry')
-    expect(canonical(moved.build())).not.toBe(canonical(first))
+    // The same venue with its entrance half a metre along has to come out
+    // different, or the comparison above is comparing nothing.
+    expect(canonical(venue(6.5))).not.toBe(canonical(first))
 
     // And the ids themselves are not identical, which is the whole reason the
     // simulation names its random streams after where a thing sits rather than

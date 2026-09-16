@@ -54,8 +54,16 @@ const fractions = (times: number[]): number[] => times.map((t) => t / WINDOW)
 
 const mean = (values: number[]): number => values.reduce((a, b) => a + b, 0) / values.length
 
+const sd = (values: number[]): number => {
+  const m = mean(values)
+  return Math.sqrt(mean(values.map((v) => (v - m) ** 2)))
+}
+
 /** Times come back sorted, so the middle element is the median. */
 const median = (values: number[]): number => values[Math.floor(values.length / 2)]
+
+/** The wait between one arrival and the next. */
+const gapsOf = (times: number[]): number[] => times.slice(1).map((t, i) => t - times[i])
 
 /** How many arrivals fall in each of `bins` equal slices of the window. */
 const histogram = (times: number[], bins: number): number[] => {
@@ -77,7 +85,7 @@ describe('every arrival profile', () => {
     // person the nth time and a whole group its first member's time. Out of
     // order, a group would be spawned before the people ahead of it.
     const times = scheduleArrivals(profileFor(kind), 300, new Rng(11))
-    expect(times.every((t, i) => i === 0 || times[i - 1] <= t)).toBe(true)
+    expect(times).toEqual([...times].sort((a, b) => a - b))
   })
 
   it.each(ALL_KINDS)('lets nobody in before the doors open (%s)', (kind) => {
@@ -104,24 +112,26 @@ describe('every arrival profile', () => {
     },
   )
 
-  it.each(ALL_KINDS)(
-    'clamps a negative start and window instead of scheduling the past (%s)',
-    (kind) => {
-      const times = scheduleArrivals(
-        profileFor(kind, { startS: -60, windowS: -30 }),
-        5,
-        new Rng(11),
-      )
-      expect(times).toHaveLength(5)
-      expect(times.every((t) => t >= 0 && Number.isFinite(t))).toBe(true)
-    },
-  )
+  it.each(ALL_KINDS)('schedules a population of one without dividing by it (%s)', (kind) => {
+    // Uniform and waves both divide by the headcount to place somebody, and a
+    // population of one is a perfectly ordinary way to model a single VIP.
+    const [only] = scheduleArrivals(profileFor(kind, { startS: 60 }), 1, new Rng(11))
+    expect(only).toBeGreaterThanOrEqual(60)
+    expect(only).toBeLessThanOrEqual(60 + WINDOW)
+  })
+
+  it.each(ALL_KINDS)('pulls a negative start and window up to the run start (%s)', (kind) => {
+    // The clock starts at zero, so a person scheduled before it is a person the
+    // run never reaches. A loaded document can carry either number negative.
+    const times = scheduleArrivals(profileFor(kind, { startS: -60, windowS: -30 }), 5, new Rng(11))
+    expect(times).toEqual([0, 0, 0, 0, 0])
+  })
 })
 
 describe('staying inside the window', () => {
-  // Poisson and waves are left out on purpose: both overrun, and each has a
-  // test of its own below saying by how much.
-  const BOUNDED: ArrivalKind[] = ['uniform', 'front-loaded', 'peak', 'all-at-once']
+  // Waves is the exception, and owns a test of its own below: the last coach
+  // lands on the end of the window and only then unloads.
+  const BOUNDED = ALL_KINDS.filter((kind) => kind !== 'waves')
 
   it.each(BOUNDED)('keeps every arrival between start and start + window (%s)', (kind) => {
     const times = scheduleArrivals(profileFor(kind, { startS: 300 }), 2000, new Rng(19))
@@ -129,14 +139,14 @@ describe('staying inside the window', () => {
     expect(Math.max(...times)).toBeLessThanOrEqual(300 + WINDOW)
   })
 
-  it.each([...BOUNDED, 'poisson' as ArrivalKind])(
-    'collapses a zero-length window onto the start instant (%s)',
-    (kind) => {
-      // Poisson's rate is count / window, so this is also the division by zero.
-      const times = scheduleArrivals(profileFor(kind, { startS: 120, windowS: 0 }), 12, new Rng(7))
-      expect(times).toEqual(new Array(12).fill(120))
-    },
-  )
+  it.each(ALL_KINDS)('collapses a zero-length window onto the start instant (%s)', (kind) => {
+    // Waves used to be the one exception: its unload spread had a flat 10 s
+    // floor that ignored the window, so "in waves, over no time at all" still
+    // trickled people in for ten seconds while every other profile opened the
+    // doors once. This is also where poisson would divide by the window.
+    const times = scheduleArrivals(profileFor(kind, { startS: 120, windowS: 0 }), 12, new Rng(7))
+    expect(times).toEqual(new Array(12).fill(120))
+  })
 })
 
 describe('uniform arrivals', () => {
@@ -148,7 +158,9 @@ describe('uniform arrivals', () => {
     expect(times[count - 1]).toBeCloseTo(WINDOW - gap / 2, 9)
     // Half a gap at each end is what keeps the flow rate constant across two
     // back-to-back windows instead of doubling up on the seam.
-    times.slice(1).forEach((t, i) => expect(t - times[i]).toBeCloseTo(gap, 9))
+    gapsOf(times).forEach((g) => expect(g).toBeCloseTo(gap, 9))
+    // The same rule taken to its limit: one person waits until mid-window.
+    expect(scheduleArrivals(profileFor('uniform'), 1, new Rng(3))).toEqual([WINDOW / 2])
   })
 
   it('is perfectly flat: every tenth of the window gets the same number', () => {
@@ -166,87 +178,74 @@ describe('all-at-once arrivals', () => {
 })
 
 describe('poisson arrivals', () => {
-  it('draws gaps at the rate the count and window imply', () => {
-    const count = 2000
-    const nominal = WINDOW / count
-    const gapMeans = Array.from({ length: 12 }, (_, i) => {
-      const times = scheduleArrivals(profileFor('poisson'), count, new Rng(i + 1))
-      return mean(times.slice(1).map((t, j) => t - times[j]))
-    })
-    for (const gapMean of gapMeans) {
-      expect(gapMean).toBeGreaterThan(nominal * 0.9)
-      expect(gapMean).toBeLessThan(nominal * 1.1)
+  it('holds one average rate from one end of the window to the other', () => {
+    // Averaged over enough runs the tenths even out at 60 apiece, which is what
+    // makes a poisson run comparable with the uniform baseline at all: same
+    // people, same window, same average rate, different bunching. A sagging or
+    // rising average here would be a different process wearing the name.
+    const runs = Array.from({ length: 24 }, (_, i) =>
+      histogram(scheduleArrivals(profileFor('poisson'), 600, new Rng(i + 1)), 10),
+    )
+    const averaged = runs[0].map((_, bin) => mean(runs.map((run) => run[bin])))
+    for (const count of averaged) {
+      expect(count).toBeGreaterThan(55)
+      expect(count).toBeLessThan(65)
     }
-    expect(mean(gapMeans)).toBeGreaterThan(nominal * 0.95)
-    expect(mean(gapMeans)).toBeLessThan(nominal * 1.05)
+    // Averaging is the only place 60s belong: no single run may come out flat.
+    expect(runs.some((run) => run.every((count) => count === 60))).toBe(false)
   })
 
   it('is genuinely bursty rather than uniform with jitter', () => {
-    // Flat would put exactly 60 in every tenth and space everyone 2 s apart.
-    // Choosing poisson over uniform buys the busy tenths and the lulls, which
-    // are what make a queue build and clear at all.
-    for (let seed = 1; seed <= 20; seed++) {
-      const times = scheduleArrivals(profileFor('poisson'), 600, new Rng(seed))
-      const gaps = times.slice(1).map((t, i) => t - times[i])
-      expect(Math.max(...histogram(times, 10))).toBeGreaterThan(60)
-      expect(Math.max(...gaps)).toBeGreaterThan(mean(gaps) * 3)
+    // The busy tenths and the lulls are what make a queue build and clear at
+    // all, and they are the whole reason to pick this over evenly spread. Gaps
+    // in a Poisson process are exponential, so they scatter about as widely as
+    // they are long — a ratio near 1, against a ratio of 0 for even spacing.
+    for (const seed of [3, 7, 19]) {
+      const times = scheduleArrivals(profileFor('poisson'), 400, new Rng(seed))
+      const spacing = gapsOf(times)
+      expect(Math.max(...histogram(times, 10))).toBeGreaterThan(44)
+      expect(Math.max(...spacing)).toBeGreaterThan(mean(spacing) * 3)
+      expect(sd(spacing) / mean(spacing)).toBeGreaterThan(0.8)
+      expect(sd(spacing) / mean(spacing)).toBeLessThan(1.3)
     }
+    const even = gapsOf(scheduleArrivals(profileFor('uniform'), 400, new Rng(7)))
+    expect(sd(even) / mean(even)).toBeLessThan(0.01)
   })
 
-  it('still finishes roughly when the window says it should', () => {
-    for (let seed = 1; seed <= 20; seed++) {
-      const times = scheduleArrivals(profileFor('poisson'), 600, new Rng(seed))
-      const last = times[times.length - 1] / WINDOW
-      expect(last).toBeGreaterThan(0.8)
-      expect(last).toBeLessThan(1.3)
-    }
-  })
-
-  it('delivers everybody inside the window it was given', () => {
-    // This used to be a running sum of exponential gaps, whose total is a
-    // random variable with the window as its mean — so about half of all runs
-    // put their last arrivals after the window had closed. Anybody past the
-    // scenario duration never entered the venue at all, which left a Poisson
-    // run quietly short of people against the uniform baseline it was being
-    // compared with. Fifty seeds, none of them over.
+  it('delivers everybody inside the window, and keeps arriving until it closes', () => {
+    // This used to be a running sum of exponential gaps, a total whose mean is
+    // the window itself — so about half of all runs put their last arrivals
+    // after the doors had shut, and anybody past the scenario duration never
+    // entered the venue at all. A poisson run was then quietly short of people
+    // against the uniform baseline it was being compared with. Bounding it must
+    // not make it finish early either: 200 people over twenty minutes are still
+    // turning up in the last two of them.
     for (let seed = 1; seed <= 50; seed++) {
       const times = scheduleArrivals(profileFor('poisson'), 200, new Rng(seed))
-      expect(times[times.length - 1]).toBeLessThanOrEqual(WINDOW)
-      expect(times[0]).toBeGreaterThanOrEqual(0)
       expect(times).toHaveLength(200)
+      expect(times[0]).toBeGreaterThanOrEqual(0)
+      expect(times[0]).toBeLessThan(WINDOW * 0.1)
+      expect(times[199]).toBeGreaterThan(WINDOW * 0.9)
+      expect(times[199]).toBeLessThanOrEqual(WINDOW)
     }
-  })
-
-  it('keeps its clustering, which is the reason to choose it', () => {
-    // Bounding the process must not flatten it into the uniform profile. The
-    // gaps between consecutive arrivals in a Poisson process are exponential,
-    // so their spread is about as large as their mean; evenly spread arrivals
-    // have a spread of nothing at all.
-    const times = scheduleArrivals(profileFor('poisson'), 400, new Rng(7))
-    const gaps = times.slice(1).map((t, i) => t - times[i])
-    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length
-    const sd = Math.sqrt(gaps.reduce((a, g) => a + (g - mean) ** 2, 0) / gaps.length)
-    expect(sd / mean).toBeGreaterThan(0.7)
-
-    const even = scheduleArrivals(profileFor('uniform'), 400, new Rng(7))
-    const evenGaps = even.slice(1).map((t, i) => t - even[i])
-    const evenMean = evenGaps.reduce((a, b) => a + b, 0) / evenGaps.length
-    const evenSd = Math.sqrt(
-      evenGaps.reduce((a, g) => a + (g - evenMean) ** 2, 0) / evenGaps.length,
-    )
-    expect(evenSd / evenMean).toBeLessThan(0.01)
   })
 })
 
 describe('wave arrivals', () => {
+  const nominalGap = (waves: number): number => WINDOW / (waves - 1)
+
   /** Which wave a time belongs to, given that the unload only runs forwards. */
   const waveOf = (times: number[], gap: number): number[] => times.map((t) => Math.floor(t / gap))
 
   const countPerWave = (times: number[], waves: number): number[] => {
     const counts = new Array<number>(waves).fill(0)
-    for (const wave of waveOf(times, WINDOW / (waves - 1))) counts[wave]++
+    for (const wave of waveOf(times, nominalGap(waves))) counts[wave]++
     return counts
   }
+
+  /** Runs of arrivals with a real lull between them — coaches, as seen from the door. */
+  const coachesSeen = (times: number[], gap: number): number =>
+    1 + gapsOf(times).filter((g) => g > gap / 4).length
 
   it('splits the headcount as evenly across the waves as it divides', () => {
     const even = scheduleArrivals(profileFor('waves', { waves: 5 }), 100, new Rng(3))
@@ -264,14 +263,18 @@ describe('wave arrivals', () => {
     ])
   })
 
-  it('lands each wave on its nominal time plus a short unload', () => {
-    const gap = WINDOW / 4
+  it('arrives as separate coach-loads rather than as a steady stream', () => {
+    // Five coaches have to read as five arrivals with quiet between them: the
+    // unload is capped at 45 s so the batches stay distinguishable instead of
+    // smearing into the uniform profile, which is the point of choosing this.
     const times = scheduleArrivals(profileFor('waves', { waves: 5 }), 400, new Rng(12))
-    const offsets = times.map((t) => t - Math.floor(t / gap) * gap)
+    expect(coachesSeen(times, nominalGap(5))).toBe(5)
+
+    const offsets = times.map((t) => t % nominalGap(5))
     expect(Math.min(...offsets)).toBeGreaterThanOrEqual(0)
-    // A coach does not empty instantly, but it does empty: capped at 45 s so
-    // the waves stay distinguishable instead of smearing into a uniform run.
     expect(Math.max(...offsets)).toBeLessThanOrEqual(45)
+    // A coach does not empty instantly either, or this would be all-at-once
+    // five times over.
     expect(Math.max(...offsets)).toBeGreaterThan(30)
   })
 
@@ -287,32 +290,45 @@ describe('wave arrivals', () => {
   it('does not fabricate a wave it has nobody for', () => {
     const times = scheduleArrivals(profileFor('waves', { waves: 10 }), 3, new Rng(8))
     expect(times).toHaveLength(3)
-    expect(new Set(waveOf(times, WINDOW / 9)).size).toBe(3)
+    expect(new Set(waveOf(times, nominalGap(10))).size).toBe(3)
   })
 
-  it('runs the last wave and its unload past the end of the window', () => {
-    // SUSPECTED BUG: the final wave starts at exactly start + window and only
-    // then has its unload spread added, so a wave schedule always overruns by
-    // up to 45 s. Correct would be to fit the waves so the last one has emptied
-    // by the end of the window; as it stands "in waves" and "evenly spread"
-    // over the same window are not over the same window.
+  it('lets the last coach finish unloading after the window has closed', () => {
+    // The final wave lands on the end of the window and only then unloads, so a
+    // wave schedule overruns by up to the unload. That is the coach arriving on
+    // time and the people getting off it afterwards, but it does mean "in
+    // waves" and "evenly spread" over the same window do not finish together,
+    // and anyone past the scenario duration never gets in at all.
     const times = scheduleArrivals(profileFor('waves', { waves: 5 }), 200, new Rng(3))
     expect(Math.max(...times)).toBeGreaterThan(WINDOW)
     expect(Math.max(...times)).toBeLessThanOrEqual(WINDOW + 45)
   })
 
-  it('puts everybody at the start when the window is zero', () => {
-    // The unload spread used to have a flat 10 s floor that ignored the window,
-    // which made waves the one profile where "everybody at once" was not at
-    // once. It is capped by the window now, like the 45 s ceiling above it.
-    const times = scheduleArrivals(profileFor('waves', { startS: 120, windowS: 0 }), 20, new Rng(3))
-    expect(times).toHaveLength(20)
-    for (const t of times) expect(t).toBe(120)
+  it('runs its coaches together into one stream when the window is short', () => {
+    // SUSPECTED BUG: the unload is `min(45, window, gap / 4 + 10)`, and that
+    // 10 s floor does not shrink with the gap — so once the coaches are under
+    // ~13 s apart, each is still unloading when the next pulls up. Twelve waves
+    // (the slider's maximum) over two minutes then reads as a continuous flow:
+    // three distinguishable arrivals here instead of twelve, where the same
+    // twelve over twenty minutes read as exactly twelve. That is the one
+    // setting where "in waves" and "evenly spread" produce the same schedule,
+    // which is the comparison the profile exists to make. Correct would be to
+    // cap the unload by the gap as well as by the window and 45 s.
+    const short = scheduleArrivals(
+      profileFor('waves', { waves: 12, windowS: 120 }),
+      240,
+      new Rng(3),
+    )
+    expect(coachesSeen(short, 120 / 11)).toBeLessThan(6)
+
+    const long = scheduleArrivals(profileFor('waves', { waves: 12 }), 240, new Rng(3))
+    expect(coachesSeen(long, nominalGap(12))).toBe(12)
   })
 })
 
 describe('front-loaded arrivals', () => {
-  const positions = fractions(scheduleArrivals(profileFor('front-loaded'), 3000, new Rng(13)))
+  const times = scheduleArrivals(profileFor('front-loaded'), 3000, new Rng(13))
+  const positions = fractions(times)
 
   it('puts more than half the crowd in the first quarter and a trickle in the last', () => {
     expect(positions.filter((f) => f < 0.25).length / positions.length).toBeGreaterThan(0.5)
@@ -320,19 +336,23 @@ describe('front-loaded arrivals', () => {
   })
 
   it('sits well before the midpoint a uniform profile would give', () => {
-    // u^2.2 has median 0.5^2.2 ~= 0.22 and mean 1/3.2 ~= 0.31. A median near
-    // 0.5 would mean the exponent has been lost and this is uniform in disguise.
+    // u^2.2 has median 0.5^2.2 ~= 0.22 and mean 1/3.2 ~= 0.31. A median near 0.5
+    // means the exponent has been lost and this is uniform in disguise; a median
+    // near 0 means it has grown and this is all-at-once in disguise.
+    expect(median(positions)).toBeGreaterThan(0.17)
     expect(median(positions)).toBeLessThan(0.25)
     expect(mean(positions)).toBeGreaterThan(0.28)
     expect(mean(positions)).toBeLessThan(0.34)
   })
 
   it('thins out steadily rather than stopping dead', () => {
-    const bins = histogram(scheduleArrivals(profileFor('front-loaded'), 3000, new Rng(13)), 4)
-    expect(bins[0]).toBeGreaterThan(bins[1])
-    expect(bins[1]).toBeGreaterThan(bins[2])
-    expect(bins[2]).toBeGreaterThan(bins[3])
-    expect(bins[3]).toBeGreaterThan(0)
+    // The late trickle is what keeps a door staffed after the rush; a profile
+    // that ran dry would let every queue clear early and flatter the layout.
+    const quarters = histogram(times, 4)
+    expect(quarters[0]).toBeGreaterThan(quarters[1])
+    expect(quarters[1]).toBeGreaterThan(quarters[2])
+    expect(quarters[2]).toBeGreaterThan(quarters[3])
+    expect(quarters[3]).toBeGreaterThan(0)
   })
 })
 
@@ -366,14 +386,14 @@ describe('peak arrivals', () => {
     expect(nearPeak(tight)).toBeGreaterThan(nearPeak(wide) * 2)
   })
 
-  it('floors a zero spread so the peak is sampled rather than degenerate', () => {
+  it('keeps a spread of zero from collapsing the peak onto one instant', () => {
+    // Floored at 0.02 of the window rather than taken literally, because a
+    // spread of nothing is the all-at-once profile, not a peak.
     const positions = fractions(
       scheduleArrivals(profileFor('peak', { spread: 0 }), 2000, new Rng(5)),
     )
-    const range = Math.max(...positions) - Math.min(...positions)
-    expect(range).toBeGreaterThan(0)
-    // The floor is 0.02 of the window, so a few sigma either side at most.
-    expect(range).toBeLessThan(0.2)
+    expect(sd(positions)).toBeCloseTo(0.02, 3)
+    expect(new Set(positions).size).toBe(2000)
   })
 
   it('clamps a peak outside the window to its edge', () => {
@@ -386,16 +406,19 @@ describe('peak arrivals', () => {
   })
 
   it('stacks a quarter of the crowd on one instant when the spread is very wide', () => {
-    // SUSPECTED BUG: truncatedNormal resamples 16 times and then gives up and
-    // returns the clamped *mean*, so a spread wide enough that most samples
-    // miss [0, 1] hands hundreds of people the identical arrival second — a
-    // fake surge in the very profile meant to model a gentle one. A spread over
-    // 1 has no UI control but survives a load: parseArrival passes it through
-    // unclamped. Correct would be to clamp the failed sample, or the spread.
+    // SUSPECTED BUG: Rng.truncatedNormal resamples 16 times and then gives up
+    // and returns the clamped *mean* rather than a clamped sample, so a spread
+    // wide enough that most draws miss [0, 1] hands hundreds of people the
+    // identical arrival second — a fabricated surge in the one profile meant to
+    // model a gentle one. At spread 5, 521 of 2000 land on exactly the peak
+    // instant; at spread 2, 59 do; at the 0.18 default, nobody does. There is no
+    // slider for spread, but serialize.ts passes a loaded one straight through
+    // unclamped, so a hand-edited or third-party document reaches this. Correct
+    // would be to clamp the failed sample rather than the mean — in
+    // core/math/random.ts, which every other caller of truncatedNormal shares.
     const times = scheduleArrivals(profileFor('peak', { spread: 5 }), 2000, new Rng(5))
-    const onTheDot = times.filter((t) => t === WINDOW * 0.5)
-    expect(onTheDot.length).toBeGreaterThan(300)
-    // At a spread the UI can produce, nobody shares an instant with anybody.
+    expect(times.filter((t) => t === WINDOW * 0.5).length).toBeGreaterThan(300)
+    // At a spread the product can produce, nobody shares an instant with anybody.
     const sane = scheduleArrivals(profileFor('peak'), 2000, new Rng(5))
     expect(sane.filter((t) => t === WINDOW * 0.5)).toHaveLength(0)
   })
@@ -452,6 +475,8 @@ describe('splitting a headcount into groups', () => {
   it('sends people in on their own when nobody is grouped', () => {
     expect(splitIntoGroups(4, undefined, new Rng(1))).toEqual([1, 1, 1, 1])
     expect(splitIntoGroups(4, { min: 1, max: 1 }, new Rng(1))).toEqual([1, 1, 1, 1])
+    // A maximum of nobody means no grouping, whatever the minimum claims.
+    expect(splitIntoGroups(4, { min: 5, max: 0 }, new Rng(1))).toEqual([1, 1, 1, 1])
   })
 
   it('keeps every group inside the configured size but for the remainder', () => {
@@ -473,17 +498,24 @@ describe('splitting a headcount into groups', () => {
   })
 
   it('makes about as many groups as the mean group size implies', () => {
+    // Sizes 2–6 average 4, so 400 people arrive in about 100 groups. Many more
+    // and the sizes have collapsed towards the minimum, which quietly removes
+    // most of the grouping the scenario asked for.
     const counts = Array.from(
       { length: 40 },
       (_, i) => splitIntoGroups(400, { min: 2, max: 6 }, new Rng(i + 1)).length,
     )
-    expect(mean(counts)).toBeGreaterThan(90)
-    expect(mean(counts)).toBeLessThan(112)
+    expect(mean(counts)).toBeGreaterThan(97)
+    expect(mean(counts)).toBeLessThan(104)
+    expect(Math.min(...counts)).toBeGreaterThan(80)
+    expect(Math.max(...counts)).toBeLessThan(125)
   })
 
-  it('splits a headcount of zero into no groups', () => {
-    expect(splitIntoGroups(0, { min: 2, max: 4 }, new Rng(1))).toEqual([])
-    expect(splitIntoGroups(0, undefined, new Rng(1))).toEqual([])
+  it('splits a headcount of zero or less into no groups', () => {
+    for (const count of [0, -5]) {
+      expect(splitIntoGroups(count, { min: 2, max: 4 }, new Rng(1))).toEqual([])
+      expect(splitIntoGroups(count, undefined, new Rng(1))).toEqual([])
+    }
   })
 
   it('gives a lone person their own group even where groups are large', () => {

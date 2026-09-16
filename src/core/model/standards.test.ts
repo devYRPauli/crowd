@@ -54,18 +54,23 @@ const labelInches = (imperial: string): number => {
   throw new Error(`unreadable imperial label: ${imperial}`)
 }
 
+/** A nominal inch figure as the module stores it: 25.4 mm to the inch, to the mm. */
+const metricOf = (nominalInches: number): number => Math.round(nominalInches * 25.4) / 1000
+
 const isPair = (size: StandardSize): boolean => size.imperial.endsWith('pair')
 
-const allSizes = (): StandardSize[] => CATALOGUES.flatMap((catalogue) => [...catalogue.sizes])
+/** `WINDOW_WIDTHS 4'0"` — enough to name the offender when a table check fails. */
+const named = (name: string, size: StandardSize): string => `${name} ${size.imperial}`
+
+const everySize = CATALOGUES.flatMap(({ name, sizes }) =>
+  sizes.map((size) => ({ name, size, sizes })),
+)
 
 describe('the size catalogue', () => {
   it.each(CATALOGUES)('$name stores the metric value of every imperial label', ({ sizes }) => {
-    for (const size of sizes) {
-      expect([size.imperial, size.metres]).toEqual([
-        size.imperial,
-        Math.round(labelInches(size.imperial) * 25.4) / 1000,
-      ])
-    }
+    expect(sizes.map((size) => [size.imperial, size.metres])).toEqual(
+      sizes.map((size) => [size.imperial, metricOf(labelInches(size.imperial))]),
+    )
   })
 
   it('converts at 25.4 mm to the inch, rounded to the millimetre', () => {
@@ -77,6 +82,7 @@ describe('the size catalogue', () => {
     expect(DOOR_WIDTHS[0].metres).toBe(0.61)
     expect(DEFAULT_DOOR_WIDTH).toBe(0.914)
     expect(DEFAULT_DOOR_HEIGHT).toBe(2.032)
+    expect(DEFAULT_DOUBLE_DOOR_WIDTH).toBe(1.829)
     expect(DEFAULT_WINDOW_WIDTH).toBe(1.219)
     expect(DEFAULT_WINDOW_SILL).toBe(0.914)
     expect(WINDOW_SILLS[0].metres).toBe(0.305)
@@ -88,28 +94,25 @@ describe('the size catalogue', () => {
     expect(OPENING_JAMB).toBe(0.051)
   })
 
-  it.each(CATALOGUES)('$name is stored in whole millimetres', ({ sizes }) => {
+  it('carries every size in whole millimetres', () => {
     // Sizes are compared, summed and serialised all over the product; a value
     // carrying a fraction of a millimetre of conversion dust makes two plans
     // built the same way differ in the tenth decimal, and the "Not a stock
     // size" hint is decided half a millimetre either side of these numbers.
-    for (const size of sizes) {
-      expect([size.imperial, size.metres * 1000]).toEqual([
-        size.imperial,
-        Math.round(size.metres * 1000),
-      ])
-    }
+    const dusty = everySize
+      .filter(({ size }) => size.metres * 1000 !== Math.round(size.metres * 1000))
+      .map(({ name, size }) => named(name, size))
+    expect(dusty).toEqual([])
   })
 
   it('offers doors and windows only in even inches', () => {
     // Leaves and sashes are made in even inches; a 2'7" door or a 4'3" window
     // is a custom order, and offering one as stock prices the plan wrong.
-    for (const sizes of [DOOR_WIDTHS, DOOR_HEIGHTS, WINDOW_WIDTHS, WINDOW_HEIGHTS, WINDOW_SILLS]) {
-      for (const size of sizes) {
-        const nominal = labelInches(size.imperial)
-        expect([size.imperial, nominal % 2]).toEqual([size.imperial, 0])
-      }
-    }
+    const odd = everySize
+      .filter(({ name }) => name !== 'WALL_THICKNESSES' && name !== 'WALL_HEIGHTS')
+      .filter(({ size }) => labelInches(size.imperial) % 2 !== 0)
+      .map(({ name, size }) => named(name, size))
+    expect(odd).toEqual([])
   })
 
   it('reserves the half-inch sizes for walls, where a stud makes them', () => {
@@ -117,6 +120,10 @@ describe('the size catalogue', () => {
     // is 6½". These are the only sizes in the product that are not whole
     // inches, and they are not roundable: 4" of wall does not exist.
     expect(WALL_THICKNESSES.map((size) => labelInches(size.imperial))).toEqual([4.5, 6.5, 8, 12])
+    const fractional = everySize
+      .filter(({ size }) => labelInches(size.imperial) % 1 !== 0)
+      .map(({ name, size }) => named(name, size))
+    expect(fractional).toEqual([`WALL_THICKNESSES 4½"`, `WALL_THICKNESSES 6½"`])
   })
 
   it.each(CATALOGUES)('$name ascends with no repeated size', ({ sizes }) => {
@@ -139,34 +146,30 @@ describe('the size catalogue', () => {
 })
 
 describe('the metric round trip', () => {
-  it.each(CATALOGUES)('$name still measures its own nominal in inches', ({ sizes }) => {
-    for (const size of sizes) {
-      const nominal = labelInches(size.imperial)
-      // Back through the inch and onto the nearest half — what a schedule or a
-      // dimension string has to come out as. Anything that lands on a different
-      // size has re-dimensioned the opening.
-      expect([size.imperial, Math.round((size.metres / INCH) * 2) / 2]).toEqual([
-        size.imperial,
-        nominal,
-      ])
-      expect(size.metres).toBeCloseTo(nominal * INCH, 3)
-    }
+  it('still measures every size as its own nominal, to the nearest half inch', () => {
+    // Back through the inch and onto the nearest half — what a schedule or a
+    // dimension string has to come out as. Anything that lands on a different
+    // size has re-dimensioned the opening.
+    const misread = everySize
+      .filter(({ size }) => Math.round((size.metres / INCH) * 2) / 2 !== labelInches(size.imperial))
+      .map(({ name, size }) => named(name, size))
+    expect(misread).toEqual([])
   })
 
   it('recognises a size the user typed rather than picked', () => {
     // The inspector accepts a typed length and then asks `isStandard` whether
     // to flag it. Typing the very size the picker offers must not come back
     // "Not a stock size" — but the two paths never produce the same float: the
-    // catalogue rounds to the millimetre and `parseLength` does not.
-    for (const size of allSizes()) {
-      const typed = parseLength(size.imperial.replace(/ pair$/, '').replace('½', '.5'), 'metric')
-      expect([size.imperial, typed === null]).toEqual([size.imperial, false])
-      const catalogue = CATALOGUES.find((entry) => entry.sizes.includes(size))
-      expect([size.imperial, isStandard(catalogue?.sizes ?? [], typed ?? 0)]).toEqual([
-        size.imperial,
-        true,
-      ])
-    }
+    // catalogue rounds to the millimetre and `parseLength` does not. The
+    // feet-and-inches form means the same thing in a metric document as in an
+    // imperial one, so the setting must not decide whether it is recognised.
+    const flagged = everySize.flatMap(({ name, size, sizes }) =>
+      (['metric', 'imperial'] as const)
+        .map((units) => parseLength(size.imperial.replace(/ pair$/, '').replace('½', '.5'), units))
+        .filter((typed) => typed === null || !isStandard(sizes, typed))
+        .map(() => named(name, size)),
+    )
+    expect(flagged).toEqual([])
   })
 
   it('leaves only a tenth of a millimetre of slack in that recognition', () => {
@@ -174,10 +177,24 @@ describe('the metric round trip', () => {
     // `isStandard` forgives 0.5 mm. That 0.1 mm is the whole margin: convert
     // these to the centimetre instead and every typed size turns non-standard.
     const worst = Math.max(
-      ...allSizes().map((size) => Math.abs(size.metres - labelInches(size.imperial) * INCH)),
+      ...everySize.map(({ size }) => Math.abs(size.metres - labelInches(size.imperial) * INCH)),
     )
     expect(worst).toBeCloseTo(0.0004, 6)
     expect(worst).toBeLessThan(0.0005)
+  })
+
+  it('quotes a pair by its total, which is not twice a catalogued leaf', () => {
+    // 6'0" is 1828.8 mm rounded up to 1829; a 3'0" leaf is 914.4 rounded down
+    // to 914. Half the pair is therefore 0.5 mm off the leaf — the whole of
+    // `isStandard`'s tolerance, landing so exactly on it that which side it
+    // falls is down to the last bit of the division. Nothing may work out a
+    // leaf by halving a pair and then ask whether it is a stock size.
+    const pairOf6 = DOOR_WIDTHS.find((size) => size.imperial === `6'0" pair`)
+    const leaf = DOOR_WIDTHS.find((size) => size.imperial === `3'0"`)
+    expect(Math.abs((pairOf6?.metres ?? 0) / 2 - (leaf?.metres ?? 0))).toBeCloseTo(0.0005, 6)
+    // The nominal totals are right even so, which is what a schedule quotes.
+    expect(pairOf6?.metres).toBe(metricOf(72))
+    expect(leaf?.metres).toBe(metricOf(36))
   })
 })
 
@@ -236,7 +253,7 @@ describe('the defaults', () => {
     // every venue built afterwards is a size out.
     const entry = sizes.find((size) => size.imperial === imperial)
     expect(entry?.metres).toBe(value)
-    expect(value).toBe(Math.round(labelInches(imperial) * 25.4) / 1000)
+    expect(value).toBe(metricOf(labelInches(imperial)))
   })
 
   it('places the default door above the egress minimums', () => {
@@ -253,18 +270,10 @@ describe('the defaults', () => {
     expect(DEFAULT_DOOR_HEIGHT).toBe(CODE_MINIMUMS.egressDoorHeight)
   })
 
-  it('leave the 2\'8" leaf sitting on the number it would have to beat', () => {
-    // A 2'8" leaf is 32" *nominal* — the clear-width minimum measured before
-    // the stop and the open leaf take their share, so it cannot deliver 32" of
-    // clear. This is the arithmetic that makes 3'0" the entry door, and why the
-    // narrower sizes are labelled closet, bathroom and interior rather than
-    // offered as a way to save a foot on an exit.
-    const interior = DOOR_WIDTHS.find((size) => size.imperial === `2'8"`)
-    expect(interior?.metres).toBe(CODE_MINIMUMS.egressDoorClearWidth)
-    expect(interior?.note).toBe('Interior standard')
-  })
-
   it('offers no leaf wider than IBC 1010.1.1 allows', () => {
+    // A pair is catalogued by its total, so the leaf is half of it. The widest
+    // thing the picker can commit as one leaf has to stay inside the 48" cap,
+    // or the stock list itself hands the user a non-compliant exit.
     for (const size of DOOR_WIDTHS) {
       const leaf = isPair(size) ? size.metres / 2 : size.metres
       expect(leaf).toBeLessThanOrEqual(CODE_MINIMUMS.egressLeafMaxWidth)
@@ -284,6 +293,11 @@ describe('DOUBLE_DOOR_FROM', () => {
     }
     expect(DOOR_WIDTHS.some(isPair)).toBe(true)
     expect(DOOR_WIDTHS.some((size) => !isPair(size))).toBe(true)
+    // And the two defaults land on the side their names claim: a single door
+    // placed at the default width must not arrive as a pair, and the default
+    // pair must not arrive as one impossible leaf.
+    expect(DEFAULT_DOOR_WIDTH).toBeLessThan(DOUBLE_DOOR_FROM)
+    expect(DEFAULT_DOUBLE_DOOR_WIDTH).toBeGreaterThanOrEqual(DOUBLE_DOOR_FROM)
   })
 
   it('is itself an orderable size, and the smallest pair anybody hangs', () => {
@@ -292,19 +306,21 @@ describe('DOUBLE_DOOR_FROM', () => {
     // leaf short of the test above. Two 2'6" leaves is that pair.
     expect(DOUBLE_DOOR_FROM).toBe(1.524)
     expect(isStandard(DOOR_WIDTHS, DOUBLE_DOOR_FROM)).toBe(true)
-    expect(DOUBLE_DOOR_FROM / 2).toBeCloseTo(30 * INCH, 3)
+    expect(DOUBLE_DOOR_FROM / 2).toBe(metricOf(30))
   })
 
   it('leaves a band of widths that are drawn as one leaf and made as two', () => {
     // Anything dragged between the 48" leaf cap and the threshold commits as a
     // single leaf: 4'6" is drawn as one door, and one door that wide is neither
     // made nor allowed on an exit. The catalogue never offers a size in there —
-    // its widest single is 3'6" — so this is reachable only by a free drag, and
-    // it is why the stock list stops where it does.
+    // its widest single is 3'6" — so this is reachable only by a free drag.
     const widestSingle = DOOR_WIDTHS.filter((size) => !isPair(size)).at(-1)
     expect(widestSingle?.imperial).toBe(`3'6"`)
     expect(widestSingle?.metres).toBeLessThan(CODE_MINIMUMS.egressLeafMaxWidth)
     expect(DOUBLE_DOOR_FROM).toBeGreaterThan(CODE_MINIMUMS.egressLeafMaxWidth)
+    // Touching the stock-size picker is the way out of the band: a 4'3" drag
+    // reads as the 5'0" pair, which is what the drawing then commits.
+    expect(nearestStandard(DOOR_WIDTHS, 1.3)?.imperial).toBe(`5'0" pair`)
   })
 })
 
@@ -335,11 +351,12 @@ describe('CODE_MINIMUMS', () => {
     // 48 x 25.4 = 1219.2. These are quoted to the user beside a pass or fail,
     // so a number that is merely close is a wrong compliance answer.
     expect(CODE_MINIMUMS.egressDoorClearWidth).toBe(0.813)
-    expect(CODE_MINIMUMS.egressDoorClearWidth / INCH).toBeCloseTo(32, 1)
+    expect(CODE_MINIMUMS.egressDoorClearWidth).toBeCloseTo(32 * INCH, 3)
     expect(CODE_MINIMUMS.egressDoorHeight).toBe(2.032)
-    expect(CODE_MINIMUMS.egressDoorHeight / INCH).toBe(80)
+    expect(CODE_MINIMUMS.egressDoorHeight).toBeCloseTo(80 * INCH, 3)
     expect(CODE_MINIMUMS.egressLeafMaxWidth).toBe(1.219)
-    expect(CODE_MINIMUMS.egressLeafMaxWidth / INCH).toBeCloseTo(48, 1)
+    expect(CODE_MINIMUMS.egressLeafMaxWidth).toBeCloseTo(48 * INCH, 3)
+    expect(CODE_MINIMUMS.egressDoorClearWidth).toBeLessThan(CODE_MINIMUMS.egressLeafMaxWidth)
   })
 
   it('quotes IBC 1020.2 corridors at 44 inches over fifty people and 36 under', () => {
@@ -347,9 +364,9 @@ describe('CODE_MINIMUMS', () => {
     // step between them, and the wider figure has to be the wider number: a
     // swap would report the busiest corridors in a venue as compliant.
     expect(CODE_MINIMUMS.corridorWidthOver50).toBe(1.118)
-    expect(CODE_MINIMUMS.corridorWidthOver50 / INCH).toBeCloseTo(44, 1)
+    expect(CODE_MINIMUMS.corridorWidthOver50).toBeCloseTo(44 * INCH, 3)
     expect(CODE_MINIMUMS.corridorWidthUnder50).toBe(0.914)
-    expect(CODE_MINIMUMS.corridorWidthUnder50 / INCH).toBeCloseTo(36, 1)
+    expect(CODE_MINIMUMS.corridorWidthUnder50).toBeCloseTo(36 * INCH, 3)
     expect(CODE_MINIMUMS.corridorWidthOver50).toBeGreaterThan(CODE_MINIMUMS.corridorWidthUnder50)
   })
 
@@ -358,18 +375,28 @@ describe('CODE_MINIMUMS', () => {
     // it must clear the 80" head, and the shortest stock wall must clear it in
     // turn or every residential plan reads as non-compliant on placement.
     expect(CODE_MINIMUMS.egressCeilingHeight).toBe(2.286)
-    expect(CODE_MINIMUMS.egressCeilingHeight / INCH).toBe(90)
+    expect(CODE_MINIMUMS.egressCeilingHeight).toBeCloseTo(90 * INCH, 3)
     expect(CODE_MINIMUMS.egressCeilingHeight).toBeGreaterThan(CODE_MINIMUMS.egressDoorHeight)
     expect(WALL_HEIGHTS[0].metres).toBeGreaterThan(CODE_MINIMUMS.egressCeilingHeight)
   })
 
-  it('is a set of clear dimensions, never a nominal one', () => {
-    // Every figure here is measured through the opening, which is why none of
-    // them may be handed to the width box as a size to order: `isStandard`
-    // deliberately disagrees with 32" and 44" as door widths even though both
-    // are whole even inches.
+  it('lands three of its clear dimensions on a stock nominal, which is the trap', () => {
+    // 32" clear is also a 2'8" leaf, 36" of corridor is also a 3'0" leaf, and
+    // the 80" head is the 6'8" door exactly. A nominal leaf does not deliver
+    // its own width through the opening — the stop and the open leaf take their
+    // share — so a check that compares a nominal against these passes doors
+    // that fail. That arithmetic is why 3'0" is the entry door and why the
+    // narrower sizes are labelled closet, bathroom and interior rather than
+    // offered as a way to save a foot on an exit.
+    const interior = DOOR_WIDTHS.find((size) => size.imperial === `2'8"`)
+    expect(interior?.metres).toBe(CODE_MINIMUMS.egressDoorClearWidth)
+    expect(interior?.note).toBe('Interior standard')
+    expect(isStandard(DOOR_WIDTHS, CODE_MINIMUMS.corridorWidthUnder50)).toBe(true)
+    expect(isStandard(DOOR_HEIGHTS, CODE_MINIMUMS.egressDoorHeight)).toBe(true)
+    // The other three are not sizes anybody orders, and must never read as one.
     expect(isStandard(DOOR_WIDTHS, CODE_MINIMUMS.egressLeafMaxWidth)).toBe(false)
-    expect(isStandard(DOOR_HEIGHTS, CODE_MINIMUMS.egressCeilingHeight)).toBe(false)
+    expect(isStandard(DOOR_WIDTHS, CODE_MINIMUMS.corridorWidthOver50)).toBe(false)
+    expect(isStandard(WALL_HEIGHTS, CODE_MINIMUMS.egressCeilingHeight)).toBe(false)
   })
 })
 
@@ -384,8 +411,12 @@ describe('nearestStandard', () => {
     // The inspector re-finds the chosen size in the list by its label and
     // commits *that* entry's metres; a copy that drifted from the list would
     // show one size in the select and commit another.
-    expect(nearestStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH)).toBe(DOOR_WIDTHS[4])
-    expect(nearestStandard(WALL_HEIGHTS, DEFAULT_WALL_HEIGHT)).toBe(WALL_HEIGHTS[1])
+    expect(nearestStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH)).toBe(
+      DOOR_WIDTHS.find((size) => size.imperial === `3'0"`),
+    )
+    expect(nearestStandard(WALL_HEIGHTS, DEFAULT_WALL_HEIGHT)).toBe(
+      WALL_HEIGHTS.find((size) => size.imperial === `9'0"`),
+    )
   })
 
   it('clamps to the ends instead of giving up outside the range', () => {
@@ -411,11 +442,13 @@ describe('nearestStandard', () => {
 
   it('returns null for a measurement that is not a real length', () => {
     // Current behaviour, and the reason it is worth pinning: every gap against
-    // NaN or Infinity compares false, so the scan falls through the whole
-    // catalogue rather than snapping to an end. The inspector renders that as a
-    // blank picker, which beats silently claiming the width is 2'0".
+    // NaN or an infinity compares false against a starting gap of Infinity, so
+    // the scan falls through the whole catalogue rather than snapping to an
+    // end. The inspector renders that as a blank picker, which beats silently
+    // claiming the width is 2'0".
     expect(nearestStandard(DOOR_WIDTHS, Number.NaN)).toBeNull()
     expect(nearestStandard(DOOR_WIDTHS, Infinity)).toBeNull()
+    expect(nearestStandard(DOOR_WIDTHS, -Infinity)).toBeNull()
   })
 })
 
@@ -435,10 +468,13 @@ describe('isStandard', () => {
 
   it('is millimetre-tight rather than approximate', () => {
     // Sub-millimetre slack absorbs the float error of a metres/feet round trip;
-    // a whole millimetre is a different size and has to read as one.
+    // a whole millimetre is a different size and has to read as one. Both signs
+    // matter: without the absolute value, everything above a stock size passes.
     expect(isStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH + 0.0004)).toBe(true)
+    expect(isStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH - 0.0004)).toBe(true)
+    expect(isStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH + 0.0006)).toBe(false)
+    expect(isStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH - 0.0006)).toBe(false)
     expect(isStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH + 0.001)).toBe(false)
-    expect(isStandard(DOOR_WIDTHS, DEFAULT_DOOR_WIDTH - 0.001)).toBe(false)
   })
 
   it('does not confuse one catalogue with another', () => {
@@ -454,6 +490,7 @@ describe('isStandard', () => {
     // A half-typed or cleared width box reaches the hint before it reaches the
     // document. "Not a stock size" is the honest answer for a non-number.
     expect(isStandard(DOOR_WIDTHS, Number.NaN)).toBe(false)
+    expect(isStandard(DOOR_WIDTHS, Infinity)).toBe(false)
     expect(isStandard([], DEFAULT_DOOR_WIDTH)).toBe(false)
   })
 })
@@ -477,58 +514,88 @@ describe('the sizes against each other', () => {
     expect(DEFAULT_WINDOW_SILL + DEFAULT_WINDOW_HEIGHT).toBeLessThan(DEFAULT_WALL_HEIGHT)
   })
 
-  // SUSPECTED BUG: the 6'8" window is catalogued "Storefront, head level with
-  // the doors", but a window's head is its sill plus its height. Paired with
-  // the 1'0" sill the same table calls "Storefront", the head lands at 7'8" —
-  // a foot above the 6'8" doors beside it, which is the one thing a storefront
-  // elevation must not do. The note holds only for a window sitting on the
-  // floor. Either the storefront glass should be catalogued at 5'8" (1'0" sill
-  // + 5'8" = a 6'8" head) or the note should stop promising alignment; as it
-  // stands the picker tells the user the heads will line up and they do not.
-  // The metric values themselves are right — 6'8" is 2.032 m either way.
-  it('sets a storefront window head a foot above the doors it says it matches', () => {
-    const storefrontSill = WINDOW_SILLS[0]
-    const storefrontGlass = WINDOW_HEIGHTS.at(-1)
-    expect(storefrontSill.note).toBe('Storefront')
-    expect(storefrontGlass?.note).toBe('Storefront, head level with the doors')
-    expect(storefrontSill.metres + (storefrontGlass?.metres ?? 0)).toBeCloseTo(2.337, 9)
-    expect(DEFAULT_DOOR_HEIGHT).toBeCloseTo(2.032, 9)
-    // It does at least fit a commercial wall, so the combination is placeable.
-    expect(storefrontSill.metres + (storefrontGlass?.metres ?? 0)).toBeLessThan(DEFAULT_WALL_HEIGHT)
+  it('levels the storefront glass with the door head when it reaches the floor', () => {
+    // The 6'8" glass is catalogued "head level with the doors", and that is the
+    // window the inspector calls walkable: sill zero, glass to the floor. The
+    // two numbers are the same to the last digit, not two conversions that
+    // agree to a millimetre, so the elevation lines up rather than stepping.
+    const glass = WINDOW_HEIGHTS.find((size) => size.note?.startsWith('Storefront'))
+    expect(glass?.imperial).toBe(`6'8"`)
+    expect(glass?.metres).toBe(DEFAULT_DOOR_HEIGHT)
+    // On the 1'0" bulkhead the same table calls a storefront sill, the head
+    // goes to 7'8" instead: the two entries are alternatives, not a pair. It
+    // still fits a commercial wall, so nothing clamps and nothing warns.
+    expect(WINDOW_SILLS[0].note).toBe('Storefront')
+    expect(WINDOW_SILLS[0].metres + (glass?.metres ?? 0)).toBeCloseTo(2.337, 9)
+    expect(WINDOW_SILLS[0].metres + (glass?.metres ?? 0)).toBeLessThan(DEFAULT_WALL_HEIGHT)
   })
 
-  it('caps the sill picker at the 44 inch escape maximum', () => {
+  it('caps the sill list at the 44 inch escape maximum', () => {
     // IRC R310.2.2 will not let a bedroom's escape window sit higher, so the
-    // list must not offer one that does: a sill picked from stock is a sill
+    // list must not offer one that does: a sill taken from stock is a sill
     // somebody can climb out of.
     const highest = WINDOW_SILLS.at(-1)
     expect(highest?.metres).toBe(1.118)
     expect(highest?.metres).toBeCloseTo(44 * INCH, 3)
+    expect(highest?.note).toBe(`Egress maximum is 44"`)
   })
 })
 
 describe('the imperial readout', () => {
-  // SUSPECTED BUG: a size that is a whole number of feet is displayed one foot
-  // short plus twelve inches. `formatLength` floors the feet from a value the
-  // millimetre rounding left 0.4 mm shy of the nominal (0.914 m is 35.984"),
-  // then rounds the remainder to 12.0 instead of carrying it. The product's own
-  // default door is named `3'0"` in the picker and reads `2' 12.0"` in the
-  // inspector header next to it; the default wall reads `8' 12.0"` and the
-  // default window `3' 12.0"`. It should read 3' 0", 9' 0" and 4' 0" — either
-  // by carrying the rounded inches into the feet, or by rounding the total
-  // inches before splitting them. Nothing dimensional is wrong in the document;
-  // what it costs is every imperial length the user reads.
+  // SUSPECTED BUG: a whole number of feet is displayed one foot short plus
+  // twelve inches. `formatLength` splits the feet off with `Math.floor` and
+  // only then rounds the remaining inches to one decimal, so a total that is a
+  // hair under a whole foot prints `12.0"` instead of carrying into the feet —
+  // and totals are always a hair under, because INCHES_PER_METRE is truncated
+  // low (0.3048 x 39.37007874 = 11.999999999952, not 12). It is not the
+  // catalogue's millimetre rounding: an exact 6'0" of 1.8288 m reads `5' 12.0"`
+  // too, and the catalogue sizes that escape are the ones whose rounding
+  // pushed them *up* past the shortfall. The product's own default door is
+  // named 3'0" in the picker and reads `2' 12.0"` in the inspector header
+  // beside it; the default wall reads `8' 12.0"`, the default window
+  // `3' 12.0"`. Fifteen of the stock sizes are affected, and so is any whole
+  // foot a user drags out. It should carry: round the total inches before
+  // splitting them, or roll 12.0 into the next foot. Nothing dimensional is
+  // wrong in the document — see the round trip below — but every imperial
+  // length the user reads is one foot short plus twelve inches.
   it('names a whole number of feet as one foot short plus twelve inches', () => {
     expect(formatLength(DEFAULT_DOOR_WIDTH, 'imperial')).toBe(`2' 12.0"`)
     expect(formatLength(DEFAULT_WALL_HEIGHT, 'imperial')).toBe(`8' 12.0"`)
     expect(formatLength(DEFAULT_WINDOW_WIDTH, 'imperial')).toBe(`3' 12.0"`)
+    expect(formatLength(1.8288, 'imperial')).toBe(`5' 12.0"`)
+
+    // Which stock sizes escape is decided by the rounding direction alone:
+    // 2'0" is 609.6 mm stored as 610 and 6'0" is 1828.8 stored as 1829, and
+    // both clear the shortfall. That is what makes this a display fault rather
+    // than a wrong number in the catalogue.
+    expect(formatLength(DOOR_WIDTHS[0].metres, 'imperial')).toBe(`2' 0.0"`)
+    expect(formatLength(DEFAULT_DOUBLE_DOOR_WIDTH, 'imperial')).toBe(`6' 0.0"`)
+
+    // Every size named in feet *and* inches reads back exactly its own label,
+    // so the fault is confined to the whole feet.
+    for (const { size } of everySize) {
+      const nominal = labelInches(size.imperial)
+      if (nominal % 12 === 0) continue
+      const feet = Math.floor(nominal / 12)
+      const inches = (nominal % 12).toFixed(1)
+      expect(formatLength(size.metres, 'imperial')).toBe(
+        feet === 0 ? `${inches}"` : `${feet}' ${inches}"`,
+      )
+    }
   })
 
-  it('reads the sizes that round the other way correctly', () => {
-    // 2'8" is 812.8 mm rounded up to 813, so the same arithmetic lands just
-    // above the nominal and reads right. That is what makes the fault above a
-    // display bug rather than a wrong number in the catalogue.
-    expect(formatLength(DOOR_WIDTHS[3].metres, 'imperial')).toBe(`2' 8.0"`)
-    expect(formatLength(DEFAULT_DOOR_HEIGHT, 'imperial')).toBe(`6' 8.0"`)
+  it('still reads back as the same stock size when the user retypes it', () => {
+    // What bounds the fault above: the inspector's own readout, typed straight
+    // back into the width box, still commits the size it came from. `2' 12.0"`
+    // parses as three feet, and the 0.4 mm that separates that from the stored
+    // 0.914 stays inside `isStandard`. A misread size is never a resized one.
+    expect(parseLength(`2' 12.0"`, 'imperial')).toBeCloseTo(DEFAULT_DOOR_WIDTH, 3)
+    const lost = everySize
+      .filter(({ size, sizes }) => {
+        const typed = parseLength(formatLength(size.metres, 'imperial'), 'imperial')
+        return typed === null || !isStandard(sizes, typed)
+      })
+      .map(({ name, size }) => named(name, size))
+    expect(lost).toEqual([])
   })
 })

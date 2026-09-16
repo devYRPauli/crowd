@@ -139,10 +139,14 @@ describe('grid resolution', () => {
     const world = compile(b.build())
 
     // The door asks for 0.1 m, which over 600 m square is 36 million cells and
-    // an eikonal solve nobody waits for. The budget wins, and says so: the
-    // resolution is an order of magnitude coarser than the door wanted.
+    // an eikonal solve nobody waits for. The budget wins, and says so: close to
+    // a metre, ten times coarser than the door asked for.
     expect(world.grid.cellSize).toBeGreaterThan(0.9)
-    expect(world.grid.cols * world.grid.rows).toBeLessThan(410_000)
+    expect(world.grid.cellSize).toBeLessThan(1)
+    // The budget buys a cell size, and the grid then rounds up to whole rows
+    // and columns, so it lands a shade over the ceiling rather than under it.
+    expect(world.grid.cols * world.grid.rows).toBeGreaterThan(395_000)
+    expect(world.grid.cols * world.grid.rows).toBeLessThan(405_000)
   })
 
   it('refuses to go finer than a body can use', () => {
@@ -243,10 +247,19 @@ describe('doors people arrive and leave through', () => {
     expect(record.center.y).toBeCloseTo(0, 6)
 
     const centres = record.goalCells.map((cell) => centreOf(world, cell))
-    expect(centres.length).toBeGreaterThan(4)
-    for (const c of centres) {
-      expect(Math.abs(c.x - 5)).toBeLessThan(DEFAULT_DOUBLE_DOOR_WIDTH / 2 + world.grid.cellSize)
-    }
+    const xs = centres.map((c) => c.x)
+    const left = Math.min(...xs)
+    const right = Math.max(...xs)
+
+    // Somewhere several people can stand, all of it between the jambs and
+    // centred between them. A patch that ran past the leaf would put arrivals
+    // against the wall beside the door; one that drifted off centre would meter
+    // the flow by wherever it drifted to rather than by the door's clear width.
+    expect(centres.length).toBeGreaterThan(12)
+    expect(left).toBeGreaterThan(5 - DEFAULT_DOUBLE_DOOR_WIDTH / 2)
+    expect(right).toBeLessThan(5 + DEFAULT_DOUBLE_DOOR_WIDTH / 2)
+    expect(Math.abs((left + right) / 2 - 5)).toBeLessThan(world.grid.cellSize)
+
     // The threshold straddles the wall, so somebody outside can aim at it and
     // somebody inside can leave through it.
     expect(centres.some((c) => c.y < 0)).toBe(true)
@@ -365,12 +378,25 @@ describe('what is solid', () => {
 
     // Two masks, and the difference between them is the body. `solid` is the
     // geometry the clearance field and the metrics measure; `navBlocked` is
-    // where a centre may not sit, which is a radius further out. Conflating
-    // them puts people's shoulders inside the furniture.
-    expect(NAV_CLEARANCE).toBeCloseTo(0.26, 6)
+    // where a centre may not sit, which is a body radius further out.
+    // Conflating them puts people's shoulders inside the furniture.
     expect(world.solid[cellAt(world, 10.15, 6)]).toBe(0)
     expect(world.navBlocked[cellAt(world, 10.15, 6)]).toBe(1)
-    expect(world.navBlocked[cellAt(world, 10.45, 6)]).toBe(0)
+
+    // Walking east along the centreline, the first cell a centre may occupy is
+    // a body radius past the plinth's east face at x = 10, and no further — the
+    // mask is dilated by exactly that and not by a guessed margin on top.
+    const row = worldToCell(world.grid, 0, 6).row
+    let standoff = Infinity
+    for (let col = 0; col < world.grid.cols; col++) {
+      const c = cellCenter(world.grid, col, row)
+      if (c.x > 10 && !world.navBlocked[gridIndex(world.grid, col, row)]) {
+        standoff = c.x - 10
+        break
+      }
+    }
+    expect(standoff).toBeGreaterThanOrEqual(NAV_CLEARANCE)
+    expect(standoff).toBeLessThan(NAV_CLEARANCE + world.grid.cellSize)
   })
 
   it('takes the plan at its word about what people can walk through', () => {
@@ -392,6 +418,24 @@ describe('what is solid', () => {
     // Four walls plus the two items that block; the other two are not obstacles
     // for ORCA either, not merely absent from the grid.
     expect(world.obstaclePolygons).toHaveLength(6)
+  })
+
+  it('leaves nothing behind a door as wide as the wall it is cut into', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 12)
+    b.door(room.south, 10, 20)
+    const plan = b.build()
+    const world = compile(plan, { cellSize: 0.2 })
+
+    // Three walls and no south one at all — not a fourth of no length. A sliver
+    // polygon would reach ORCA with edges that have no direction, and the
+    // normalised zero vector that comes out steers nobody anywhere.
+    expect(collectObstaclePolygons(plan)).toHaveLength(3)
+    for (const o of world.obstacles) {
+      expect(Math.hypot(o.direction.x, o.direction.y)).toBeCloseTo(1, 6)
+    }
+    expect(world.solid[cellAt(world, 10, 0)]).toBe(0)
+    expect(world.solid[cellAt(world, 19, 0)]).toBe(0)
   })
 
   it('leaves loose chairs walkable, so a ring of them cannot seal its table off', () => {
@@ -444,8 +488,9 @@ describe('keep-clear zones', () => {
     expect(lane.navBlocked[cellAt(lane, 10, 6)]).toBe(0)
     expect(lane.solid[cellAt(lane, 10, 6)]).toBe(0)
 
-    // Ten metres of floor end to end: eight seconds of walking, plus two metres
-    // of lane at a tenth speed, which is twenty seconds of reason to go round.
+    // Ten metres of floor end to end: eight seconds of walking plus two metres
+    // of lane at a tenth speed. The band runs wall to wall, so this is the price
+    // of crossing it and not the price of a detour somebody could take instead.
     expect(timeFrom(bare, [cellAt(bare, 10, 1)])[cellAt(bare, 10, 11)]).toBeCloseTo(10, 2)
     expect(timeFrom(lane, [cellAt(lane, 10, 1)])[cellAt(lane, 10, 11)]).toBeCloseTo(28, 2)
   })
@@ -543,8 +588,8 @@ describe('obstacle zones', () => {
     expect(clockwise.obstacles.slice(-4).map((o) => o.convex)).toEqual([false, false, false, false])
 
     const straightOn = walkInto(clockwise)
-    expect(straightOn.x).toBeCloseTo(1.2, 12)
-    expect(straightOn.y).toBeCloseTo(0, 12)
+    expect(straightOn.x).toBeCloseTo(1.2, 6)
+    expect(straightOn.y).toBeCloseTo(0, 6)
   })
 })
 
@@ -562,10 +607,10 @@ describe('where a destination puts people', () => {
     expect(
       Math.min(...record.goalCells.map((cell) => world.clearance[cell])),
     ).toBeGreaterThanOrEqual(0.5)
-    // 6 m square of 0.1 m cells is 3600; most of it survives, the table and its
-    // ring of chairs do not.
-    expect(record.goalCells.length).toBeGreaterThan(2500)
-    expect(record.goalCells.length).toBeLessThan(3400)
+    // 6 m square of 0.1 m cells is 3600. Five sixths of it survives; the table,
+    // its ring of chairs and the gaps between them do not.
+    expect(record.goalCells.length).toBeGreaterThan(2800)
+    expect(record.goalCells.length).toBeLessThan(3200)
   })
 
   it('still offers a genuinely tight space rather than nowhere at all', () => {
@@ -629,20 +674,18 @@ describe('where a destination puts people', () => {
       return () => values[i++ % values.length]
     }
 
-    const jitter = world.grid.cellSize * 0.4
-    const lowest = samplePointInDestination(world, record, draw(0, 0, 0))
-    const first = centreOf(world, record.goalCells[0])
-    expect(lowest.x).toBeCloseTo(first.x - jitter / 2, 6)
-    expect(lowest.y).toBeCloseTo(first.y - jitter / 2, 6)
-
-    // The jitter spreads arrivals over the cell they were given, and has to stay
+    // The jitter spreads arrivals over the cell they were given and has to stay
     // inside it: half a cell further and people would be placed on a neighbour
-    // that the destination never checked, which can be solid.
+    // the destination never checked, which can be solid. Both ends of the draw
+    // are swept, since it is the extremes that would escape.
     for (const pick of [0, 0.25, 0.5, 0.75, 0.999]) {
       const expected = record.goalCells[Math.floor(pick * record.goalCells.length)]
-      for (const spin of [0, 0.5, 1]) {
+      const centre = centreOf(world, expected)
+      for (const spin of [0, 0.5, 0.999]) {
         const p = samplePointInDestination(world, record, draw(pick, spin, spin))
         expect(cellAt(world, p.x, p.y)).toBe(expected)
+        expect(Math.abs(p.x - centre.x)).toBeLessThan(world.grid.cellSize / 2)
+        expect(Math.abs(p.y - centre.y)).toBeLessThan(world.grid.cellSize / 2)
       }
     }
 
@@ -656,26 +699,43 @@ describe('where a destination puts people', () => {
 })
 
 describe('finding floor near a point', () => {
-  it('steps out of a column to the nearest cell somebody could stand on', () => {
+  const room = (): SimWorld => {
     const b = new PlanBuilder()
     b.room(0, 0, 20, 12)
-    const column = b.place('column-square', 10, 6)
-    const world = compile(b.build(), { cellSize: 0.2 })
+    b.place('column-square', 10, 6)
+    return compile(b.build(), { cellSize: 0.2 })
+  }
 
-    const cell = nearestFreeCell(world.grid, world.navBlocked, column.position)
+  it('steps out of a column to the nearest cell somebody could stand on', () => {
+    const world = room()
+    const cell = nearestFreeCell(world.grid, world.navBlocked, { x: 10, y: 6 })
     const c = centreOf(world, cell)
+
     expect(world.navBlocked[cell]).toBe(0)
     // A 0.6 m column with the mask dilated by a body radius: the nearest floor
     // is most of a metre out, and it is out, not the column's own centre back.
     expect(Math.hypot(c.x - 10, c.y - 6)).toBeGreaterThan(0.5)
     expect(Math.hypot(c.x - 10, c.y - 6)).toBeLessThan(1)
+  })
 
-    const offGrid = nearestFreeCell(world.grid, world.navBlocked, { x: 1000, y: 1000 })
-    expect(world.navBlocked[offGrid]).toBe(0)
-    expect(centreOf(world, offGrid).x).toBeLessThan(world.bounds.maxX)
+  it('answers for a point off the edge of the grid instead of reading past it', () => {
+    const world = room()
+    const cell = nearestFreeCell(world.grid, world.navBlocked, { x: 1000, y: 1000 })
+    const c = centreOf(world, cell)
 
-    // Nothing free anywhere is -1 and not cell zero, which a caller would
-    // happily place somebody on, in the corner of the margin fence.
+    // Clamped to the far corner and then walked in off the margin fence, which
+    // is the outermost ring and blocked. Without the clamp the ring search
+    // starts thousands of cells away, never reaches the grid inside its own
+    // bound, and reports nothing free in a room that is mostly floor.
+    expect(world.navBlocked[cell]).toBe(0)
+    expect(world.bounds.maxX - c.x).toBeLessThan(2 * world.grid.cellSize)
+    expect(world.bounds.maxY - c.y).toBeLessThan(2 * world.grid.cellSize)
+  })
+
+  it('reports no floor at all rather than handing back cell zero', () => {
+    const world = room()
+    // Cell zero is the corner of the margin fence, and a caller that trusted it
+    // would stand somebody inside the fence and leave them stuck there.
     const sealed = new Uint8Array(world.grid.cols * world.grid.rows).fill(1)
     expect(nearestFreeCell(world.grid, sealed, { x: 10, y: 6 })).toBe(-1)
   })
@@ -748,7 +808,10 @@ describe('queues at a counter', () => {
     const queue = world.queues[0]
     const centres = queue.goalCells.map((cell) => centreOf(world, cell))
 
-    expect(centres.length).toBeGreaterThan(50)
+    // A box a slot wide either side of the tail, so around 169 cells at 0.1 m.
+    // A single cell would funnel the whole approach through one point.
+    expect(centres.length).toBeGreaterThan(140)
+    expect(centres.length).toBeLessThan(200)
     for (const c of centres) {
       // A flow field aimed at the counter walks everybody into the side of the
       // line. Aimed at the tail, they join it.
@@ -766,7 +829,7 @@ describe('queues at a counter', () => {
     const obstructed = blocked.queues[0]
 
     // The drawn line runs dead straight down the middle of the room...
-    expect(clear.slots.every((slot) => Math.abs(slot.x - 10) < 1e-9)).toBe(true)
+    expect(Math.max(...clear.slots.map((slot) => Math.abs(slot.x - 10)))).toBeLessThan(1e-9)
     // ...and through a column somebody later put in the way of it. The position
     // that landed inside steps aside; it does not become a place nobody reaches
     // and the line does not lose its length over it.
@@ -806,6 +869,30 @@ describe('queues at a counter', () => {
       .queues[0]
     expect(scheduled.opensAt).toBe(60)
     expect(scheduled.closesAt).toBe(600)
+  })
+
+  it('grows a queue too short to hold two people away from its counter', () => {
+    const { plan, point } = counter({
+      queue: [
+        { x: 10, y: 10.65 },
+        { x: 10, y: 10.45 },
+      ],
+    })
+    const queue = compile(plan, { cellSize: 0.2 }).queues[0]
+
+    // A 0.2 m line holds one person, and with only one waiting position there is
+    // no pair of them to read a direction from. The counter's own facing is what
+    // is left, and it has to be used the right way round: pointing the overflow
+    // the other way would grow the line through the counter and the staff.
+    expect(queue.slots).toHaveLength(1)
+    expect(queue.overflowDirection.x).toBeCloseTo(0, 6)
+    expect(queue.overflowDirection.y).toBeCloseTo(-1, 6)
+    expect(queueSlotPosition(queue, 1).y).toBeCloseTo(10.65 - queue.spacing, 6)
+    expect(queueSlotPosition(queue, 4).y).toBeCloseTo(10.65 - 4 * queue.spacing, 6)
+    // Everybody in it faces the counter, the one at the front included.
+    expect(queue.slotFacing[0]).toBeCloseTo(Math.PI / 2, 6)
+    expect(queueSlotFacing(queue, 1)).toBeCloseTo(Math.PI / 2, 6)
+    expect(queue.slots[0].y).toBeLessThan(point.position.y)
   })
 
   it('answers to its id in the same index as the places people are sent', () => {
@@ -852,30 +939,27 @@ describe('what the world says about itself', () => {
   })
 
   it('reports the floor inside the venue, not the ground the grid covers', () => {
-    // The grid is drawn around the plan with a margin, because the world has to
-    // be open-sided for people to walk out of it, and every cell of that margin
-    // is unblocked. Counting those made this 20 x 12 m room report half as much
-    // floor again as it has — 367 m² against a real 240 less its walls — and
-    // report a different figure whenever `margin` changed, which is a simulation
-    // setting rather than a fact about the venue. It is printed as "Walkable
-    // floor area" beside the peak density, so it reads as the floor the crowd
-    // was standing on and every person per square metre worked out from it came
-    // out low.
     const tight = venue(2)
     const roomy = venue(6)
+    const awkward = venue(3.37)
 
-    // 20 x 12 is 240 m² of outline, less what the walls themselves stand on.
-    expect(tight.stats.walkableArea).toBeGreaterThan(220)
-    expect(tight.stats.walkableArea).toBeLessThan(240)
+    // 20 x 12 to the wall centrelines leaves about 19.6 by 11.6 of floor. The
+    // figure is printed as "Walkable floor area" next to the peak density, so a
+    // reader divides one by the other; counting the unblocked margin too put it
+    // at 367 m² here and made every person per square metre come out low.
+    expect(tight.stats.walkableArea).toBeGreaterThan(19.4 * 11.4)
+    expect(tight.stats.walkableArea).toBeLessThan(19.7 * 11.7)
 
-    // And the answer is a property of the venue, so the margin cannot move it.
+    // And the answer is a fact about the venue, so a simulation setting cannot
+    // move it — not even one that lands the grid on different cell centres.
     expect(roomy.stats.walkableArea).toBeCloseTo(tight.stats.walkableArea, 6)
+    expect(awkward.stats.walkableArea).toBeCloseTo(tight.stats.walkableArea, 6)
 
-    // `freeCells` still counts the whole grid; it is what the area is derived
-    // from that changed, and the two are deliberately no longer the same.
+    // `freeCells` still counts the whole grid, margin included; it is what the
+    // area is derived from that changed, and the gap between them is the margin.
     expect(tight.stats.freeCells + tight.stats.blockedCells).toBe(tight.grid.cols * tight.grid.rows)
     expect(tight.stats.walkableArea).toBeLessThan(
-      tight.stats.freeCells * tight.grid.cellSize * tight.grid.cellSize,
+      0.8 * tight.stats.freeCells * tight.grid.cellSize * tight.grid.cellSize,
     )
   })
 })

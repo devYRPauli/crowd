@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { deriveFindings } from './findings'
 import type { Finding, FindingInput } from './findings'
-import { losFor } from './los'
+import { CROWD_SAFETY, WALKWAY_LOS, losFor } from './los'
 import type { AreaSummary, RunSummary, ServiceSummary } from '../types'
 
 type Series = FindingInput['series']
 
-/** Seconds between samples in the fixtures; the worker records one per frame. */
+/**
+ * The worker records one sample per frame interval — a quarter of a simulated
+ * second at the finest — so the gap between samples describes the recording,
+ * not the crowd. Ten seconds keeps the fixtures readable; nothing here may
+ * depend on the spacing.
+ */
 const SAMPLE_S = 10
 const SAMPLES = 61
+
+/** Where the shared tables put the two bands the density detectors talk about. */
+const LOS_F_FROM = WALKWAY_LOS[4].maxDensity // 1 / 0.46 = 2.174 per m²
+const CRUSH_FROM = CROWD_SAFETY.warnDensity
 
 /** A counter nobody had to wait at, so an override turns one thing bad at a time. */
 const serviceOf = (over: Partial<ServiceSummary> = {}): ServiceSummary => ({
@@ -97,9 +106,12 @@ const idsOf = (findings: Finding[]): string[] => findings.map((finding) => findi
 
 const expectFinding = (findings: Finding[], id: string): Finding => {
   const found = findings.find((finding) => finding.id === id)
-  // Failing on the whole list says which detector fired instead of this one.
-  if (!found) expect(idsOf(findings)).toContain(id)
-  return found as Finding
+  if (!found) {
+    // Failing on the whole list says which detector fired instead of this one.
+    expect(idsOf(findings)).toContain(id)
+    throw new Error(`no finding ${id}`)
+  }
+  return found
 }
 
 describe('service point findings', () => {
@@ -149,12 +161,13 @@ describe('service point findings', () => {
     expect(note.severity).toBe('low')
     expect(note.headline).toBe('Coffee bar averaged a 5 min wait')
 
-    const problem = expectFinding(
-      run(summaryOf({ services: [serviceOf({ meanWait: 301 })] })),
-      'wait-svc-bar',
-    )
+    const worse = run(summaryOf({ services: [serviceOf({ meanWait: 301 })] }))
+    const problem = expectFinding(worse, 'wait-svc-bar')
     expect(problem.severity).toBe('medium')
     expect(problem.headline).toBe('Coffee bar kept people waiting 5 min 1 s on average')
+    // The two branches share an id, so a counter that fell through both would
+    // hand the list two rows under one React key and lose one of them.
+    expect(idsOf(worse).filter((id) => id.startsWith('wait-'))).toHaveLength(1)
   })
 
   it('escalates once the mean wait passes ten minutes', () => {
@@ -170,26 +183,17 @@ describe('service point findings', () => {
     expect(worse.headline).toContain('11 min 40 s')
   })
 
-  it('reports a two-minute wait as a note, under the same id as the serious one', () => {
-    const findings = run(
-      summaryOf({ services: [serviceOf({ meanWait: 120, maxWait: 300, maxQueue: 9 })] }),
-    )
-    const finding = expectFinding(findings, 'wait-svc-bar')
-    expect(finding.severity).toBe('low')
-    expect(finding.headline).toBe('Coffee bar averaged a 2 min wait')
-    expect(finding.detail).toContain('Longest 5 min, queue peaked at 9')
-    // One counter must never produce two wait findings: the id is a React key.
-    expect(idsOf(findings).filter((id) => id.startsWith('wait-'))).toHaveLength(1)
-  })
-
-  it('leaves a 90 s wait alone and flags 91 s', () => {
+  it('leaves a 90 s wait alone and calls 91 s a note rather than a problem', () => {
     expect(idsOf(run(summaryOf({ services: [serviceOf({ meanWait: 90 })] })))).toEqual([
       'all-clear',
     ])
-    expect(
-      expectFinding(run(summaryOf({ services: [serviceOf({ meanWait: 91 })] })), 'wait-svc-bar')
-        .headline,
-    ).toContain('1 min 31 s')
+    const note = expectFinding(
+      run(summaryOf({ services: [serviceOf({ meanWait: 91, maxWait: 300, maxQueue: 9 })] })),
+      'wait-svc-bar',
+    )
+    expect(note.severity).toBe('low')
+    expect(note.headline).toBe('Coffee bar averaged a 1 min 31 s wait')
+    expect(note.detail).toContain('Longest 5 min, queue peaked at 9')
   })
 
   it('quotes the utilisation it fired on and escalates past 95%', () => {
@@ -215,10 +219,16 @@ describe('service point findings', () => {
     expect(hotter.headline).toContain('96%')
   })
 
-  it('says nothing about a counter sitting exactly on the 85% threshold', () => {
-    expect(idsOf(run(summaryOf({ services: [serviceOf({ utilisation: 0.85 })] })))).toEqual([
-      'all-clear',
-    ])
+  it('calls a counter busy, idle, or neither — never two of those at once', () => {
+    const only = (utilisation: number): string[] =>
+      idsOf(run(summaryOf({ services: [serviceOf({ utilisation })] })))
+    expect(only(0)).toEqual(['idle-svc-bar'])
+    expect(only(0.249)).toEqual(['idle-svc-bar'])
+    expect(only(0.25)).toEqual(['all-clear'])
+    expect(only(0.5)).toEqual(['all-clear'])
+    expect(only(0.85)).toEqual(['all-clear'])
+    expect(only(0.851)).toEqual(['util-svc-bar'])
+    expect(only(1)).toEqual(['util-svc-bar'])
   })
 
   it('will not call a counter busy or idle when it served nobody', () => {
@@ -241,25 +251,6 @@ describe('service point findings', () => {
     expect(finding.headline).toBe('Coffee bar was idle 90% of the time')
     expect(finding.detail).toContain('served 8 people with 3 positions')
     expect(finding.targetId).toBe('svc-bar')
-  })
-
-  it('stops calling a counter idle once it is busy a quarter of the time', () => {
-    expect(idsOf(run(summaryOf({ services: [serviceOf({ utilisation: 0.249 })] })))).toContain(
-      'idle-svc-bar',
-    )
-    expect(idsOf(run(summaryOf({ services: [serviceOf({ utilisation: 0.25 })] })))).toEqual([
-      'all-clear',
-    ])
-  })
-
-  it('never calls one counter both busy and idle', () => {
-    for (const utilisation of [0, 0.1, 0.24, 0.25, 0.5, 0.85, 0.86, 1]) {
-      const ids = idsOf(run(summaryOf({ services: [serviceOf({ utilisation })] })))
-      expect(
-        ids.filter((id) => id.startsWith('util-') || id.startsWith('idle-')).length,
-        `utilisation ${utilisation}`,
-      ).toBeLessThan(2)
-    }
   })
 
   it('reports the wait and the utilisation of one hot counter separately', () => {
@@ -296,10 +287,26 @@ describe('density findings', () => {
     expect(finding.targetId).toBeUndefined()
   })
 
+  it('starts the crush band exactly where the safety overlay does', () => {
+    const atTheEdge = run(
+      summaryOf({ peakDensity: CRUSH_FROM }),
+      seriesOf({ peakDensity: heldFor(CRUSH_FROM, 70) }),
+    )
+    expect(idsOf(atTheEdge)).toEqual(['density-crush'])
+
+    // A hair under and the same crowd is a failing level of service instead.
+    // The two detectors have to meet at one number or a run falls between them.
+    const justUnder = run(
+      summaryOf({ peakDensity: 3.99 }),
+      seriesOf({ peakDensity: heldFor(3.99, 70) }),
+    )
+    expect(idsOf(justUnder)).toEqual(['density-fail'])
+  })
+
   it('needs more than 20 s in the crush band, and falls back to level of service F', () => {
     const peakDensity = new Float32Array(SAMPLES)
     for (let i = 1; i <= 2; i++) peakDensity[i] = 4.5 // 20 s, exactly on the threshold
-    for (let i = 3; i <= 9; i++) peakDensity[i] = 2.5 // 70 s more above 2.17
+    for (let i = 3; i <= 9; i++) peakDensity[i] = 2.5 // 70 s more above the F boundary
     const findings = run(summaryOf({ peakDensity: 4.5 }), seriesOf({ peakDensity }))
     expect(idsOf(findings)).not.toContain('density-crush')
     const finding = expectFinding(findings, 'density-fail')
@@ -327,10 +334,22 @@ describe('density findings', () => {
     ).toBe('The busiest area sat at level of service F for 1 min 10 s')
   })
 
+  it('times the crush from the recording and quotes the peak the whole run reached', () => {
+    // Two sources on purpose: the series is sampled every frame, while the
+    // summary's peak sees every step. Timing the crush against the summary, or
+    // quoting a peak the sampling happened to catch, are different lies.
+    const finding = expectFinding(
+      run(summaryOf({ peakDensity: 5.4 }), seriesOf({ peakDensity: heldFor(4.2, 40) })),
+      'density-crush',
+    )
+    expect(finding.headline).toContain('for 40 s')
+    expect(finding.detail).toContain('5.4 per m²')
+  })
+
   it('measures the time in the band by the clock, not by how many samples landed in it', () => {
-    // The worker samples once per frame, so the gap between samples moves with
-    // frame rate and playback speed. Counting samples would make the same crowd
-    // fire at 60 fps and stay silent at 15.
+    // The gap between samples moves with the frame interval and the playback
+    // speed. Counting samples would make the same crowd fire on one machine and
+    // stay silent on another.
     const sparse = seriesOf({
       time: Float32Array.from([0, 5, 60, 65]),
       peakDensity: Float32Array.from([0, 4.5, 4.5, 0]),
@@ -355,18 +374,23 @@ describe('density findings', () => {
     expect(idsOf(run(summaryOf(), seriesOf({ peakDensity })))).toEqual(['all-clear'])
   })
 
-  it('fires level of service F slightly below the Fruin walkway boundary', () => {
-    // SUSPECTED BUG: findings.ts hardcodes 2.17 while the table this claim comes
-    // from puts the E/F boundary at 1 / 0.46 = 2.1739 per m². AGENTS.md says the
-    // numbers that define a rule are shared, not copied and rounded. Densities in
-    // this sliver are called F in the findings list and coloured E by the legend
-    // beside it, on the same run.
-    expect(losFor(2.172, 'walkway').level).toBe('E')
-    const findings = run(
-      summaryOf({ peakDensity: 2.172 }),
-      seriesOf({ peakDensity: heldFor(2.172, 120) }),
+  it('calls a density F that the legend beside it colours E', () => {
+    // SUSPECTED BUG: findings.ts:120 hardcodes 2.17 as the E/F boundary, while
+    // the shared table puts it at 1 / 0.46 = 2.174 and engine.ts:1975 counts a
+    // measured area's LOS-F seconds through losIndex on that same table. One
+    // density in the sliver between the two therefore produces a venue-wide
+    // "level of service F" line, an area that reports nothing, and a heat map
+    // coloured E — from the same run. AGENTS.md: the numbers that define a rule
+    // are shared, not copied and rounded.
+    const sliver = (2.17 + LOS_F_FROM) / 2
+    expect(losFor(sliver, 'walkway').level).toBe('E')
+
+    const finding = expectFinding(
+      run(summaryOf({ peakDensity: sliver }), seriesOf({ peakDensity: heldFor(sliver, 120) })),
+      'density-fail',
     )
-    expect(expectFinding(findings, 'density-fail').headline).toContain('level of service F')
+    expect(finding.headline).toContain('level of service F')
+    expect(finding.detail).toContain('Above 2.17 per m²')
   })
 })
 
@@ -417,11 +441,12 @@ describe('measured area findings', () => {
     expect(finding.severity).toBe('high')
     expect(finding.headline).toBe('Gate line held 4 people per m² or more for 15 s')
     expect(finding.detail).toContain('peaked at 4.4 per m² with 61 people in 14 m²')
-    // SUSPECTED BUG: a measured area is a zone — world.ts builds measures from
-    // zones of kind 'measure' — but ResultsPanel selects every targetId as
-    // { kind: 'service' }. Finding carries an id with no kind, so clicking the
-    // worst finding in a run selects nothing at all. Either Finding names the
-    // kind or the panel has to infer it.
+    // SUSPECTED BUG: a measured area is a zone — world.ts:360 builds the
+    // measures from zones of kind 'measure' — but ResultsPanel.tsx:339 selects
+    // every targetId as { kind: 'service' }, and findObject switches on the
+    // kind. Finding carries an id with no kind, so clicking the worst finding
+    // of a jammed run selects nothing at all. Either Finding names the kind or
+    // the panel has to infer it.
     expect(finding.targetId).toBe('zone-gate')
   })
 
@@ -556,18 +581,21 @@ describe('journey spread', () => {
 describe('engine warnings', () => {
   it('passes a warning through as a medium finding with no detail', () => {
     const findings = run(summaryOf({ warnings: ['The plan has no walkable floor.'] }))
-    const finding = expectFinding(findings, 'warning-The plan has no walkable')
-    expect(finding.severity).toBe('medium')
-    expect(finding.headline).toBe('The plan has no walkable floor.')
-    expect(finding.detail).toBe('')
-    expect(finding.targetId).toBeUndefined()
+    // A warning is a finding, so a run carrying one is not a clean run.
+    expect(idsOf(findings)).toEqual(['warning-The plan has no walkable'])
+    expect(findings[0].severity).toBe('medium')
+    expect(findings[0].headline).toBe('The plan has no walkable floor.')
+    expect(findings[0].detail).toBe('')
+    expect(findings[0].targetId).toBeUndefined()
   })
 
-  it('gives two warnings that agree for 24 characters the same id', () => {
-    // SUSPECTED BUG: the id is a 24-character slice of the warning text and
-    // ResultsPanel uses finding.id as the React key. The engine emits
-    // "<name> still had N people waiting at the end.", so two counters whose
-    // names differ only late in the string collide and React renders one.
+  it('gives two counters whose names agree at the front the same finding id', () => {
+    // SUSPECTED BUG: findings.ts:215 makes the id a 24-character slice of the
+    // warning text, and ResultsPanel.tsx:335 uses finding.id as the React key.
+    // The engine emits "<name> still had N people waiting at the end.", so two
+    // counters whose names differ only after the 24th character collide and the
+    // list renders one of them. The counter that vanishes is the one nobody
+    // then fixes.
     const findings = run(
       summaryOf({
         warnings: [
@@ -585,7 +613,9 @@ describe('engine warnings', () => {
     // SUSPECTED BUG: every fact the engine warns about is also detected here, so
     // a real run reports each of these twice — once at the severity the detector
     // chose and again as a medium warning, in two different places in the list.
-    // The warning strings below are the ones engine.ts emits verbatim.
+    // The panel shows the first ten findings, so a duplicate costs a real one.
+    // The warning strings below are the ones engine.ts:2204-2211 and
+    // engine.ts:444 emit verbatim.
     const findings = run(
       summaryOf({
         totalPeople: 600,
@@ -600,7 +630,7 @@ describe('engine warnings', () => {
       seriesOf(),
       1500,
     )
-    const saying = (text: string) => findings.filter((f) => f.headline.includes(text))
+    const saying = (text: string): Finding[] => findings.filter((f) => f.headline.includes(text))
     expect(saying('Registration')).toHaveLength(2)
     expect(saying('had not left')).toHaveLength(2)
     expect(saying('capped')).toHaveLength(2)
@@ -646,6 +676,22 @@ describe('a clean run', () => {
     )
     expect(idsOf(findings)).toEqual(['incomplete'])
     expect(findings[0].headline).toBe('50 of 50 people had not left when the run ended')
+  })
+
+  it('calls a run that briefly hit the crush band clean, because nothing lasted', () => {
+    // SUSPECTED BUG: every density detector is a duration test and the all-clear
+    // only asks whether some other detector fired, so a run whose peak touched
+    // 5.2 per m² for ten seconds says "Nothing worth flagging" and then quotes
+    // 5.2 in the same sentence. That is above CROWD_SAFETY.criticalDensity, and
+    // the legend next to the sentence colours it deep red. The all-clear should
+    // at least refuse to fire above the density the safety overlay warns on.
+    const peak = CROWD_SAFETY.criticalDensity + 0.2
+    const findings = run(
+      summaryOf({ peakDensity: peak }),
+      seriesOf({ peakDensity: heldFor(peak, 10) }),
+    )
+    expect(idsOf(findings)).toEqual(['all-clear'])
+    expect(findings[0].detail).toContain('peak density 5.2 per m²')
   })
 
   it('judges the run by the summary when no samples were recorded', () => {

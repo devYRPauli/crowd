@@ -8,6 +8,10 @@ const draws = (rng: Rng, count: number): number[] => {
   return values
 }
 
+/** How many draws two streams agree on position for position. */
+const sharedDraws = (a: readonly number[], b: readonly number[]): number =>
+  a.filter((value, i) => value === b[i]).length
+
 interface Summary {
   mean: number
   sd: number
@@ -51,6 +55,15 @@ const sample = (seed: string, draw: (rng: Rng) => number, count = BATCH): Summar
   return summarise(values)
 }
 
+const tally = <T>(count: number, draw: () => T): Map<T, number> => {
+  const counts = new Map<T, number>()
+  for (let i = 0; i < count; i++) {
+    const value = draw()
+    counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return counts
+}
+
 /** A generator whose draw lands exactly on the bottom of the unit interval. */
 class LowestDraw extends Rng {
   override next(): number {
@@ -68,8 +81,7 @@ describe('a seeded generator', () => {
   it('sends a run with the next seed along a completely different sequence', () => {
     const first = draws(new Rng(20240401), 500)
     const second = draws(new Rng(20240402), 500)
-    const shared = first.filter((value, i) => value === second[i]).length
-    expect(shared).toBe(0)
+    expect(sharedDraws(first, second)).toBe(0)
     // Adjacent seeds must not merely lag each other by a draw or two.
     expect(second.slice(0, 20)).not.toEqual(first.slice(1, 21))
   })
@@ -88,8 +100,44 @@ describe('a seeded generator', () => {
     expect(draws(new Rng(0), 5)).toEqual(draws(new Rng(0x9e3779b9), 5))
   })
 
-  it('reads a fractional seed as the whole number below it', () => {
+  it('folds any number it is handed into a 32-bit seed', () => {
     expect(draws(new Rng(7.9), 5)).toEqual(draws(new Rng(7), 5))
+    expect(draws(new Rng(-1), 5)).toEqual(draws(new Rng(4294967295), 5))
+    // The seed box in the scenario panel has no upper bound, so a user who
+    // types a big number gets a run they have already seen: 2^32 + 5 is 5.
+    expect(draws(new Rng(2 ** 32 + 5), 5)).toEqual(draws(new Rng(5), 5))
+    expect(draws(new Rng(Number.NaN), 5)).toEqual(draws(new Rng(0), 5))
+  })
+})
+
+describe('the label a stream is named with', () => {
+  it('gives every person in a full venue a stream of their own', () => {
+    const root = new Rng(2024)
+    const hashes = new Set<number>()
+    const openings = new Set<number>()
+    for (let i = 0; i < 5000; i++) {
+      hashes.add(hashString(`agent:${i}`))
+      openings.add(root.branch(`agent:${i}`).next())
+    }
+    // Two people sharing a hash share every decision they ever make, and the
+    // pair is invisible in the results: they simply behave like one person.
+    expect(hashes.size).toBe(5000)
+    expect(openings.size).toBe(5000)
+  })
+
+  it('reads a label as an ordered run of characters, and always as a u32', () => {
+    expect(hashString('ab')).not.toBe(hashString('ba'))
+    expect(hashString('atrium')).not.toBe(hashString('Atrium'))
+    expect(hashString('')).toBe(2166136261)
+    // The constructor treats a falsy hash as "no seed" and a negative one would
+    // wrap; the hash has to stay a non-negative 32-bit integer for either to be
+    // the whole story.
+    for (const label of ['', 'a', 'population:0', 'service:3:41:agent-7']) {
+      const hash = hashString(label)
+      expect(Number.isInteger(hash)).toBe(true)
+      expect(hash).toBeGreaterThanOrEqual(0)
+      expect(hash).toBeLessThan(2 ** 32)
+    }
   })
 })
 
@@ -103,8 +151,10 @@ describe('named streams', () => {
     const root = new Rng(4242)
     const groups = draws(root.branch('population:0').branch('groups'), 50)
     const arrivals = draws(root.branch('population:0').branch('arrivals'), 50)
-    expect(arrivals.filter((value, i) => value === groups[i]).length).toBe(0)
-    expect(draws(root.branch('agent:0'), 20)).not.toEqual(draws(root.branch('agent:1'), 20))
+    expect(sharedDraws(groups, arrivals)).toBe(0)
+    expect(sharedDraws(draws(root.branch('agent:0'), 50), draws(root.branch('agent:1'), 50))).toBe(
+      0,
+    )
   })
 
   it('leaves a stream untouched however much its siblings draw', () => {
@@ -124,7 +174,7 @@ describe('named streams', () => {
     expect(draws(groups, 5)).toEqual(draws(population().branch('groups'), 5))
   })
 
-  it('does not care in what order the streams were named', () => {
+  it('names a stream without spending a draw, so the order of the names is free', () => {
     const early = new Rng(4242).branch('population:0')
     const first = early.branch('arrivals')
     early.branch('groups')
@@ -132,19 +182,27 @@ describe('named streams', () => {
     const late = new Rng(4242).branch('population:0')
     late.branch('groups')
     const second = late.branch('arrivals')
-
     expect(draws(second, 50)).toEqual(draws(first, 50))
+
+    // `buildSchedule` names its sub-streams and then draws entrances and
+    // profiles from the same generator (engine.ts:414-424). If naming spent a
+    // draw, adding a stream would move every person to a different door.
+    const bare = new Rng(4242).branch('population:0')
+    const named = new Rng(4242).branch('population:0')
+    named.branch('groups')
+    named.branch('arrivals')
+    expect(draws(named, 20)).toEqual(draws(bare, 20))
   })
 
   // SUSPECTED BUG: `branch` mixes the label into the generator's *current*
   // state, not into its seed as the doc comment claims. A generator therefore
   // renames all of its streams the moment it draws once itself, and
-  // `buildSchedule` does draw from the population generator it also branches.
-  // Moving a `rng.branch(...)` below the loop that calls `rng.int(...)` — a
-  // refactor that changes no behaviour — would silently change every arrival
-  // time in the run, so a comparison against a baseline would measure the edit
-  // rather than the layout. Deriving from the seed would make a name mean one
-  // stream for the generator's whole life.
+  // `buildSchedule` (engine.ts:414-424) both branches from the population
+  // generator and calls `rng.int` / `rng.weightedIndex` on it. Moving a
+  // `rng.branch(...)` below that loop — a refactor that changes no behaviour —
+  // would silently change every arrival time in the run, so a comparison
+  // against a baseline would measure the edit rather than the layout. Deriving
+  // from the seed would make a name mean one stream for the generator's life.
   it('renames every stream under a generator as soon as that generator draws', () => {
     const untouched = new Rng(4242).branch('population:0')
     const drawnFrom = new Rng(4242).branch('population:0')
@@ -155,18 +213,21 @@ describe('named streams', () => {
     )
   })
 
-  // SUSPECTED BUG: the label is XORed into the state and XOR is commutative, so
-  // a stream is named by the unordered set of labels on the way to it rather
-  // than by the path. Two different structural positions therefore share one
-  // stream and draw identical numbers, which is the correlation between
-  // unrelated decisions that naming streams after position exists to prevent.
-  // Folding the parent's state through the hash (or hashing the joined path)
-  // would give each position its own stream.
-  it('gives two positions the same stream when their names are swapped', () => {
+  // SUSPECTED BUG: the label is XORed into the state and XOR is commutative and
+  // self-inverse, so a stream is named by the unordered multiset of labels on
+  // the way to it rather than by the path. Two different structural positions
+  // therefore share one stream and draw identical numbers, and a name used
+  // twice down a path hands back the parent's own stream — the correlation
+  // between unrelated decisions that naming streams after position exists to
+  // prevent. Folding the parent's state through the hash (or hashing the joined
+  // path) would give each position its own stream.
+  it('gives unrelated positions one stream when their names are a rearrangement', () => {
     const root = new Rng(7)
     expect(draws(root.branch('population:0').branch('groups'), 20)).toEqual(
       draws(root.branch('groups').branch('population:0'), 20),
     )
+    // A label spent twice cancels itself out and lands back on the parent.
+    expect(draws(root.branch('groups').branch('groups'), 20)).toEqual(draws(new Rng(7), 20))
   })
 })
 
@@ -188,6 +249,9 @@ describe('uniform draws', () => {
       expect(count).toBeGreaterThan(4500)
       expect(count).toBeLessThan(5500)
     }
+    // An unargued `uniform()` is the raw draw, not a second transformation of it.
+    const bare = new Rng('uniform')
+    expect(Array.from({ length: 5 }, () => bare.uniform())).toEqual(draws(new Rng('uniform'), 5))
   })
 
   it('spreads a ranged draw across the whole range', () => {
@@ -203,12 +267,7 @@ describe('uniform draws', () => {
 
   it('reaches both ends of an integer range and no further', () => {
     const rng = new Rng('dice')
-    const counts = new Map<number, number>()
-    for (let i = 0; i < 12000; i++) {
-      const value = rng.int(1, 6)
-      expect(Number.isInteger(value)).toBe(true)
-      counts.set(value, (counts.get(value) ?? 0) + 1)
-    }
+    const counts = tally(12000, () => rng.int(1, 6))
     expect([...counts.keys()].sort()).toEqual([1, 2, 3, 4, 5, 6])
     for (const count of counts.values()) {
       expect(count).toBeGreaterThan(1800)
@@ -224,6 +283,11 @@ describe('uniform draws', () => {
     for (let i = 0; i < 12000; i++) if (rng.bool(0.3)) yes += 1
     expect(yes / 12000).toBeCloseTo(0.3, 1)
 
+    let heads = 0
+    for (let i = 0; i < 12000; i++) if (rng.bool()) heads += 1
+    expect(heads / 12000).toBeCloseTo(0.5, 1)
+
+    // A step set to "never" or "always" must not be a 1-in-4-billion coin flip.
     for (let i = 0; i < 100; i++) {
       expect(rng.bool(0)).toBe(false)
       expect(rng.bool(1)).toBe(true)
@@ -266,10 +330,13 @@ describe('normal draws', () => {
     expect(summary.sd).toBeLessThan(0.6)
   })
 
-  it('falls back to the nearest allowed value when the mean is outside the limits', () => {
+  it('falls back to the nearest allowed value when no draw can satisfy the limits', () => {
     expect(new Rng('backstop').truncatedNormal(5, 0.5, 0, 1)).toBe(1)
     expect(new Rng('backstop').truncatedNormal(-5, 0.5, 0, 1)).toBe(0)
-    // A profile with no spread gives everybody exactly the mean.
+    // A profile pinned to one speed: no draw lands on a point, so the sixteen
+    // attempts are spent and the clamp answers. Everybody walks at 1.2 m/s.
+    expect(new Rng('backstop').truncatedNormal(1.3, 0.2, 1.2, 1.2)).toBe(1.2)
+    // A profile with no spread gives everybody exactly the mean, first try.
     expect(new Rng('backstop').truncatedNormal(1.3, 0, 0.5, 2)).toBe(1.3)
   })
 })
@@ -282,6 +349,9 @@ describe('the sampling shapes', () => {
     // An exponential's spread equals its mean; a gap is never negative.
     expect(summary.sd).toBeCloseTo(2, 1)
     expect(summary.min).toBeGreaterThanOrEqual(0)
+    // A rate of zero divides by zero. `sampleDistribution` guards `mean > 0`
+    // for exactly this, and an arrival gap of Infinity is nobody arriving.
+    expect(new Rng('poisson').exponential(0)).toBe(Infinity)
   })
 
   it('keeps a log-normal service time positive and on the mean it was given', () => {
@@ -292,6 +362,7 @@ describe('the sampling shapes', () => {
     expect(summary.min).toBeGreaterThan(0)
     // A counter with no service time at all must not throw a log of zero.
     expect(new Rng('service').logNormal(0, 5)).toBe(0)
+    expect(new Rng('service').logNormal(-1, 5)).toBe(0)
     expect(new Rng('service').logNormal(20, 0)).toBeCloseTo(20, 9)
   })
 
@@ -300,18 +371,27 @@ describe('the sampling shapes', () => {
     expect(summary.mean).toBeCloseTo((0 + 1 + 4) / 3, 1)
     expect(summary.min).toBeGreaterThanOrEqual(0)
     expect(summary.max).toBeLessThanOrEqual(4)
+    // A mode sitting on either end is the degenerate case of the same formula,
+    // and both halves of the branch have to agree about which end that is.
+    expect(sample('mode-low', (rng) => rng.triangular(0, 0, 4)).mean).toBeCloseTo(4 / 3, 1)
+    expect(sample('mode-high', (rng) => rng.triangular(0, 4, 4)).mean).toBeCloseTo(8 / 3, 1)
     // A collapsed range must give the value, not a division by zero.
     expect(new Rng('triangular').triangular(5, 5, 5)).toBe(5)
   })
 
   it('chooses from a profile mix in proportion to its weights', () => {
     const rng = new Rng('mix')
-    const counts = [0, 0, 0]
-    for (let i = 0; i < 12000; i++) counts[rng.weightedIndex([3, 1, 0])] += 1
-    expect(counts[0] / 12000).toBeCloseTo(0.75, 1)
-    expect(counts[1] / 12000).toBeCloseTo(0.25, 1)
-    expect(counts[2]).toBe(0)
-    expect(rng.weightedIndex([2, -5, 2])).not.toBe(1)
+    const counts = tally(12000, () => rng.weightedIndex([3, 1, 0]))
+    expect((counts.get(0) ?? 0) / 12000).toBeCloseTo(0.75, 1)
+    expect((counts.get(1) ?? 0) / 12000).toBeCloseTo(0.25, 1)
+    expect(counts.get(2) ?? 0).toBe(0)
+
+    // A negative weight is a zero, in the total as well as in the walk, so the
+    // two real profiles split the crowd evenly rather than 2:-5:2.
+    const negatives = tally(12000, () => rng.weightedIndex([2, -5, 2]))
+    expect(negatives.get(1) ?? 0).toBe(0)
+    expect((negatives.get(0) ?? 0) / 12000).toBeCloseTo(0.5, 1)
+
     // A mix the user emptied still has to name somebody.
     expect(rng.weightedIndex([0, 0, 0])).toBe(0)
     expect(rng.weightedIndex([])).toBe(0)
@@ -320,9 +400,9 @@ describe('the sampling shapes', () => {
   // SUSPECTED BUG: the running total is compared with `target <= 0` before the
   // weight at that index is known to be non-zero, so a draw that lands exactly
   // on zero returns index 0 even when index 0 was given no weight at all — a
-  // profile the user set to 0% of the crowd then appears in it. The draw has to
-  // be exactly 0 (or rounding has to leave the last subtraction just above it),
-  // so this is rare rather than harmless; skipping zero-weight entries fixes it.
+  // profile the user set to 0% of the crowd then appears in it. Only index 0
+  // can be reached this way and only on an exact-zero draw, so it is rare
+  // rather than harmless; skipping zero-weight entries fixes it.
   it('can choose a profile that was given no share of the crowd', () => {
     expect(new LowestDraw(1).weightedIndex([0, 1])).toBe(0)
   })
@@ -341,16 +421,28 @@ describe('the sampling shapes', () => {
     expect(new Rng('shuffle').shuffle([])).toEqual([])
   })
 
+  it('deals every ordering of a queue about equally often', () => {
+    const rng = new Rng('fisher-yates')
+    const orders = tally(6000, () => rng.shuffle([0, 1, 2]).join(''))
+    // The classic Fisher-Yates slip — drawing j from [0, i) rather than [0, i]
+    // — still returns a permutation and still looks shuffled, but reaches some
+    // orderings far more often than others. Only the whole spread catches it.
+    expect([...orders.keys()].sort()).toEqual(['012', '021', '102', '120', '201', '210'])
+    for (const count of orders.values()) {
+      expect(count).toBeGreaterThan(850)
+      expect(count).toBeLessThan(1150)
+    }
+  })
+
   it('picks every entry of a list and never runs off its end', () => {
     const rng = new Rng('pick')
     const doors = ['north', 'south', 'east'] as const
-    const counts = new Map<string, number>()
-    for (let i = 0; i < 9000; i++) {
-      const door = rng.pick(doors)
-      counts.set(door, (counts.get(door) ?? 0) + 1)
-    }
+    const counts = tally(9000, () => rng.pick(doors))
     expect([...counts.keys()].sort()).toEqual(['east', 'north', 'south'])
-    for (const count of counts.values()) expect(count).toBeGreaterThan(2700)
+    for (const count of counts.values()) {
+      expect(count).toBeGreaterThan(2800)
+      expect(count).toBeLessThan(3200)
+    }
   })
 
   // SUSPECTED BUG: `pick` is typed as returning T but hands back undefined for
@@ -371,8 +463,11 @@ describe('the sampling shapes', () => {
     expect(radii.mean).toBeCloseTo(2 / 3, 1)
     const inner = points.filter((p) => Math.hypot(p.x, p.y) <= Math.SQRT1_2).length
     expect(inner / BATCH).toBeCloseTo(0.5, 1)
-    expect(summarise(points.map((p) => p.x)).mean).toBeCloseTo(0, 1)
-    expect(summarise(points.map((p) => p.y)).mean).toBeCloseTo(0, 1)
+    // The angle has to cover the circle too: a spawn ring biased to one side
+    // pushes an entering group into the wall beside the door.
+    const quadrants = [0, 0, 0, 0]
+    for (const p of points) quadrants[(p.x < 0 ? 1 : 0) + (p.y < 0 ? 2 : 0)] += 1
+    for (const count of quadrants) expect(count / BATCH).toBeCloseTo(0.25, 1)
   })
 })
 
@@ -426,6 +521,33 @@ describe('durations from a distribution', () => {
     expect(summary.mean).toBeCloseTo(360, -1)
   })
 
+  it('reads the spread as a half-range when a uniform or triangular has no bounds', () => {
+    const rng = new Rng('half-range')
+    const over = (dist: Distribution) =>
+      summarise(Array.from({ length: BATCH }, () => sampleDistribution(rng, dist)))
+
+    const banded = over({ kind: 'uniform', mean: 30, sd: 10 })
+    expect(banded.min).toBeGreaterThanOrEqual(20)
+    expect(banded.max).toBeLessThanOrEqual(40)
+    expect(banded.mean).toBeCloseTo(30, 0)
+
+    // A half-range wider than the mean would put the bottom of the band below
+    // zero. The floor is taken before the draw rather than clamped after it, so
+    // the band really is [0, 25]: clamping [-15, 25] afterwards would pile a
+    // third of the crowd on exactly zero and pull the average down to 7.8 s.
+    const wide = over({ kind: 'uniform', mean: 5, sd: 20 })
+    expect(wide.min).toBeGreaterThanOrEqual(0)
+    expect(wide.max).toBeLessThanOrEqual(25)
+    expect(wide.mean).toBeCloseTo(12.5, 0)
+    expect(wide.min).toBeLessThan(0.1)
+
+    // An unbounded triangular leans on the mean as its mode, between 0 and 2x.
+    const peaked = over({ kind: 'triangular', mean: 30 })
+    expect(peaked.min).toBeGreaterThanOrEqual(0)
+    expect(peaked.max).toBeLessThanOrEqual(60)
+    expect(peaked.mean).toBeCloseTo(30, 0)
+  })
+
   it('gives a lognormal with no stated spread a spread of its own', () => {
     const rng = new Rng('lognormal')
     const dist: Distribution = { kind: 'lognormal', mean: 20 }
@@ -434,14 +556,16 @@ describe('durations from a distribution', () => {
     expect(summary.sd).toBeCloseTo(7, 0)
   })
 
-  // SUSPECTED BUG: `distributionMean` reports the `mean` field, but for a
-  // uniform or triangular duration given explicit bounds the sampler never
-  // looks at that field: {mean: 300, min: 120, max: 600} averages 360, and
-  // {mean: 30, min: 10, max: 90} averages (10+30+90)/3 = 43.3. The engine uses
-  // this number as the service time when it estimates how long each queue will
-  // take (engine.ts, `serviceMean`), so a templated counter sends people to the
-  // wrong desk on a wait it has under-read by a fifth. The mean of a bounded
-  // uniform is (min+max)/2 and of a triangular (min+mode+max)/3.
+  // SUSPECTED BUG: `distributionMean` returns the `mean` *field*, but whenever a
+  // duration carries explicit bounds the sampler never reads that field:
+  // {mean: 300, min: 120, max: 600} draws an average of 360, and
+  // {mean: 30, min: 10, max: 90} draws (10 + 30 + 90) / 3 = 43.3. The engine
+  // reads this number as the seconds each person costs when it picks the
+  // shortest queue (engine.ts:912, `serviceMean`), and a bounded serviceTime
+  // reaches it: the serialiser keeps min and max for all six kinds, and
+  // `planBuilder.service` takes any Distribution. The desk is then chosen on a
+  // wait under-read by a fifth. The mean of a bounded uniform is (min+max)/2
+  // and of a triangular (min+mode+max)/3.
   it('reports a mean for a bounded duration that its own samples do not have', () => {
     const uniform: Distribution = { kind: 'uniform', mean: 300, min: 120, max: 600 }
     const triangular: Distribution = { kind: 'triangular', mean: 30, min: 10, max: 90 }

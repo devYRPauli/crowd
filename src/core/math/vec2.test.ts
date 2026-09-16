@@ -28,7 +28,7 @@ import {
 const v = (x: number, y: number): Vec2 => ({ x, y })
 
 describe('vector arithmetic', () => {
-  it('reaches an origin from a corner and back again', () => {
+  it('moves a point by an offset and back off it again', () => {
     const a = v(3, -4)
     const b = v(-1, 2)
     expect(add(a, b)).toEqual({ x: 2, y: -2 })
@@ -75,7 +75,7 @@ describe('vector arithmetic', () => {
     expect(vec2(1.5)).toEqual({ x: 1.5, y: 0 })
   })
 
-  it('reads a projection through the dot product and a turn through the cross', () => {
+  it('decides which side of a wall a point is on and how much of a push lands along it', () => {
     expect(dot(v(3, 4), v(3, 4))).toBe(25)
     expect(dot(v(1, 0), v(0, 1))).toBe(0)
     expect(dot(v(1, 0), v(-2, 0))).toBe(-2)
@@ -88,7 +88,7 @@ describe('vector arithmetic', () => {
 })
 
 describe('length and direction', () => {
-  it('measures the same length squared or not', () => {
+  it('agrees with itself whether you ask for a distance or its square', () => {
     expect(length(v(3, 4))).toBe(5)
     expect(lengthSq(v(3, 4))).toBe(25)
     expect(distance(v(1, 1), v(4, 5))).toBe(5)
@@ -96,12 +96,18 @@ describe('length and direction', () => {
     expect(distanceSq(v(7, 7), v(7, 7))).toBe(0)
   })
 
-  it('normalises a vector far too long to square', () => {
-    // `length` and `distance` go through Math.hypot for this reason; swapping
-    // in a sqrt of the squared length would hand back NaN here instead.
+  it('measures a vector that squaring would saturate at either end', () => {
+    // `length` and `distance` go through Math.hypot rather than squaring first.
+    // A squared length saturates to Infinity going up and to zero going down,
+    // and either answer survives into whatever goes on to divide by it — here
+    // that would be a direction of exactly nothing for a vector that has one.
     expect(lengthSq(v(1e200, 0))).toBe(Infinity)
     expect(length(v(1e200, 0))).toBe(1e200)
     expect(normalize(v(1e200, 0))).toEqual({ x: 1, y: 0 })
+    expect(distanceSq(v(1e200, 0), v(-1e200, 0))).toBe(Infinity)
+    expect(distance(v(1e200, 0), v(-1e200, 0))).toBe(2e200)
+    expect(lengthSq(v(1e-200, 0))).toBe(0)
+    expect(length(v(1e-200, 0))).toBe(1e-200)
   })
 
   it('hands back no direction at all rather than NaN for a vector of no length', () => {
@@ -128,14 +134,20 @@ describe('length and direction', () => {
     // A stopped walker must survive a zero cap without picking up a direction.
     expect(clampLength(v(3, 4), 0)).toEqual({ x: 0, y: 0 })
     expect(clampLength(v(0, 0), 5)).toEqual({ x: 0, y: 0 })
+    // Under a picometre the division is skipped outright, so even a zero cap
+    // hands the vector back untouched rather than dividing by almost nothing.
+    expect(clampLength(v(1e-13, 0), 0)).toEqual({ x: 1e-13, y: 0 })
   })
 
-  // SUSPECTED BUG: `clampLength` documents that it preserves direction, but a
-  // negative cap reverses it — a walker handed a negative speed limit turns
-  // round and walks backwards at that speed instead of stopping. A negative
-  // `max` should clamp to zero, as `max === 0` already does.
+  // SUSPECTED BUG: `clampLength` documents that it shortens a vector
+  // "preserving direction", but `max` only ever reaches the arithmetic as
+  // `max * max` and as a divisor, so a negative cap reverses the vector. No
+  // caller exists yet — the contract is what is wrong. The obvious caller is a
+  // speed limit, where a negative limit would send a walker backwards at that
+  // speed instead of stopping them. A negative `max` should clamp to zero, as
+  // `max === 0` already does.
   it('turns a vector round when the cap is negative', () => {
-    expect(clampLength(v(3, 0), -2).x).toBe(-2)
+    expect(clampLength(v(3, 0), -2).x).toBeCloseTo(-2, 12)
     expect(dot(clampLength(v(3, 0), -2), v(3, 0))).toBeLessThan(0)
     // Anything already shorter than the magnitude of the cap slips through whole.
     expect(clampLength(v(1, 0), -2)).toEqual({ x: 1, y: 0 })
@@ -219,6 +231,10 @@ describe('interpolation and equality', () => {
     expect(equals(v(1, 1), v(1.0005, 1), 1e-3)).toBe(true)
     expect(equals(v(1, 1), v(1 + 1e-12, 1), 0)).toBe(false)
     expect(equals(v(1, 1), v(1, 1), 0)).toBe(true)
+    // The tolerance is a square, not a circle: two points can be further apart
+    // than epsilon and still compare equal, as long as neither axis is.
+    expect(equals(v(0, 0), v(1e-9, 1e-9))).toBe(true)
+    expect(distance(v(0, 0), v(1e-9, 1e-9))).toBeGreaterThan(1e-9)
   })
 
   it('copies a point instead of sharing it', () => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDocument } from '../model/defaults'
+import { parseDocument } from './serialize'
 import { PlanBuilder } from '../../library/planBuilder'
 import type { CrowdDocument } from '../model/types'
 import type * as StorageModule from './storage'
@@ -20,11 +21,16 @@ interface StoredRow {
   payload: string
 }
 
-/** What the browser is refusing to do at this moment in the test. */
+/**
+ * What the browser is refusing to do at this moment. `'silent'` is the browser
+ * that fails without filling in `request.error`, which several do.
+ */
+type Fault = Error | 'silent' | null
+
 interface Faults {
-  open: Error | null
-  read: Error | null
-  write: Error | null
+  open: Fault
+  read: Fault
+  write: Fault
 }
 
 class FakeRequest<T> {
@@ -39,6 +45,7 @@ const installIndexedDb = () => {
   const rows = new Map<string, StoredRow>()
   const faults: Faults = { open: null, read: null, write: null }
   const storeNames = new Set<string>()
+  const modes: IDBTransactionMode[] = []
   let opens = 0
 
   // Requests settle on a later microtask, as real ones do: the module attaches
@@ -50,20 +57,14 @@ const installIndexedDb = () => {
         request.result = compute()
         request.onsuccess?.()
       } catch (thrown) {
-        request.error = thrown as Error
+        request.error = thrown instanceof Error ? thrown : null
         request.onerror?.()
       }
     })
     return request
   }
 
-  const objectStore = {
-    put: (row: StoredRow) =>
-      settle(() => {
-        if (faults.write) throw faults.write
-        rows.set(row.id, { ...row })
-        return row.id
-      }),
+  const reads = {
     get: (id: string) =>
       settle(() => {
         if (faults.read) throw faults.read
@@ -75,26 +76,42 @@ const installIndexedDb = () => {
         if (faults.read) throw faults.read
         return [...rows.values()].map((row) => ({ ...row }))
       }),
+  }
+
+  const writes = {
+    put: (row: StoredRow) =>
+      settle(() => {
+        if (faults.write) throw faults.write
+        rows.set(row.id, { ...row })
+        return row.id
+      }),
     delete: (id: string) =>
       settle(() => {
         if (faults.write) throw faults.write
         rows.delete(id)
         return undefined
       }),
-    createIndex: () => undefined,
+  }
+
+  const refuse = () => {
+    throw new Error('ReadOnlyError: the transaction is read-only.')
   }
 
   const db = {
     objectStoreNames: { contains: (name: string) => storeNames.has(name) },
     createObjectStore: (name: string) => {
       storeNames.add(name)
-      return objectStore
+      return { ...reads, ...writes, createIndex: () => undefined }
     },
     // A store the upgrade never created is not there to be opened, which is what
-    // keeps the `onupgradeneeded` path load-bearing rather than decorative.
-    transaction: (name: string) => {
+    // keeps the `onupgradeneeded` path load-bearing rather than decorative. Real
+    // IndexedDB also refuses a write through a read-only transaction.
+    transaction: (name: string, mode: IDBTransactionMode) => {
       if (!storeNames.has(name)) throw new Error(`No object store named ${name}.`)
-      return { objectStore: () => objectStore }
+      modes.push(mode)
+      const store =
+        mode === 'readwrite' ? { ...reads, ...writes } : { ...reads, put: refuse, delete: refuse }
+      return { objectStore: () => store }
     },
   }
 
@@ -104,7 +121,7 @@ const installIndexedDb = () => {
       const request = new FakeRequest<typeof db>()
       queueMicrotask(() => {
         if (faults.open) {
-          request.error = faults.open
+          request.error = faults.open instanceof Error ? faults.open : null
           request.onerror?.()
           return
         }
@@ -126,6 +143,8 @@ const installIndexedDb = () => {
     rows,
     faults,
     opens: () => opens,
+    /** The lock each call took, in the order the calls took them. */
+    modes: () => [...modes],
     /** Take the database away, as a private window or an embedded webview does. */
     uninstall: () => Reflect.deleteProperty(globalThis, 'indexedDB'),
   }
@@ -208,6 +227,7 @@ const trackObjectUrls = () => {
 }
 
 const installFileReader = (outcome: { result?: string | null; error?: Error | null }) => {
+  const calls: Array<'text' | 'data-url'> = []
   class FakeFileReader {
     result: string | null = outcome.result ?? null
     error: Error | null = outcome.error ?? null
@@ -220,9 +240,11 @@ const installFileReader = (outcome: { result?: string | null; error?: Error | nu
       })
     }
     readAsText() {
+      calls.push('text')
       this.finish()
     }
     readAsDataURL() {
+      calls.push('data-url')
       this.finish()
     }
   }
@@ -231,6 +253,7 @@ const installFileReader = (outcome: { result?: string | null; error?: Error | nu
     configurable: true,
     writable: true,
   })
+  return calls
 }
 
 /** A small but real venue: four walls and a door hung on one of them. */
@@ -277,6 +300,12 @@ describe('keeping a venue on this machine', () => {
     expect(restored?.settings).toEqual(original.settings)
     // The only durable record of when somebody started this venue.
     expect(restored?.createdAt).toBe('2023-11-02T08:00:00.000Z')
+    // Opening restamps the document, the way opening a file does; the time the
+    // project list shows is the row's, written when the venue was last saved.
+    expect(Date.parse(restored?.updatedAt ?? '')).toBeGreaterThan(
+      Date.parse('2024-05-01T10:00:00.000Z'),
+    )
+    expect((await storage.listProjects())[0].updatedAt).toBe('2024-05-01T10:00:00.000Z')
   })
 
   it('lists the venue somebody touched most recently at the top', async () => {
@@ -289,9 +318,30 @@ describe('keeping a venue on this machine', () => {
     expect(listed.map((project) => project.name)).toEqual(['Main hall', 'Foyer', 'Warehouse'])
     expect(listed.map((project) => project.id)).toEqual([fresh.id, middling.id, stale.id])
     expect(listed[0].updatedAt).toBe('2025-02-20T07:15:00.000Z')
-    // The size shown beside each project is the serialised venue, so a plan that
-    // grew a traced backdrop reads as bigger rather than staying flat.
-    expect(listed[0].bytes).toBe(JSON.stringify(fresh).length)
+  })
+
+  it('sizes each row by what that venue actually costs to keep', async () => {
+    const plain = venue('Main hall', '2024-03-01T10:00:00.000Z')
+    const traced = venue('Traced hall', '2024-03-02T10:00:00.000Z')
+    traced.plan = {
+      ...traced.plan,
+      backdrop: {
+        src: `data:image/png;base64,${'A'.repeat(4096)}`,
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        width: 20,
+        depth: 14,
+        opacity: 0.6,
+        visible: true,
+      },
+    }
+    for (const doc of [plain, traced]) await storage.saveProject(doc)
+
+    const bytes = new Map((await storage.listProjects()).map((p) => [p.name, p.bytes]))
+    expect(bytes.get('Main hall')).toBe(JSON.stringify(plain).length)
+    // A traced floor plan is the one thing that makes a project big enough to
+    // matter, so the figure on the card has to move when somebody adds one.
+    expect(bytes.get('Traced hall')).toBeGreaterThan((bytes.get('Main hall') ?? 0) + 4096)
   })
 
   it('saving a renamed venue replaces it instead of leaving two of it', async () => {
@@ -329,6 +379,8 @@ describe('keeping a venue on this machine', () => {
   })
 
   it('shrugs off deleting or opening a venue that was never there', async () => {
+    expect(await storage.listProjects()).toEqual([])
+
     const hall = venue('Main hall', '2025-02-20T07:15:00.000Z')
     await storage.saveProject(hall)
 
@@ -350,6 +402,9 @@ describe('keeping a venue on this machine', () => {
     // the tab holding dozens of them, and any one of them blocks a future
     // schema upgrade for every other tab.
     expect(db.opens()).toBe(1)
+    // Opening the projects panel must not take a write lock: reading the list
+    // would then queue behind autosave, and hold every other tab up with it.
+    expect(db.modes()).toEqual(['readwrite', 'readwrite', 'readonly', 'readonly', 'readwrite'])
   })
 })
 
@@ -376,11 +431,12 @@ describe('a stored venue that cannot be read back', () => {
   })
 
   it('turns an entry that is not a venue at all into a blank one under a new id', async () => {
+    const payload = '[1,2,3]'
     db.rows.set('doc_notavenue', {
       id: 'doc_notavenue',
       name: 'Shopping list',
       updatedAt: '2024-04-01T10:00:00.000Z',
-      payload: '[1,2,3]',
+      payload,
     })
 
     const restored = await storage.loadProject('doc_notavenue')
@@ -389,44 +445,62 @@ describe('a stored venue that cannot be read back', () => {
     // `JSON.parse`. Anything that parses goes to `parseDocument`, which is
     // deliberately unfailing and mints a brand-new document id, so a row whose
     // contents are junk comes back as an empty venue that claims to be a
-    // different project. Both callers read `null` as "that project could not be
-    // read"; neither ever sees it here, so the user is shown an empty grid with
-    // no warning, `rememberLastProject` is pointed at an id that has never been
-    // saved, and the next autosave writes a second row rather than repairing the
-    // first. I believe `loadProject` should return null when the parsed payload
-    // is not an object, or when the parsed id does not match the row it came out
-    // of, so the existing "That project could not be read." path actually fires.
-    expect(restored).not.toBeNull()
-    expect(restored?.id).not.toBe('doc_notavenue')
+    // different project. `parseDocument` knows — it says so in the warning
+    // asserted below — but `loadProject` cannot pass that on through a
+    // `CrowdDocument | null`. ProjectsModal reads null as "that project could
+    // not be read" and never sees it here, so the user is shown an empty grid
+    // with no warning, `rememberLastProject` is pointed at an id that has never
+    // been saved, and the next autosave writes a second row instead of
+    // repairing the first. I believe `loadProject` should return null when the
+    // parsed payload is not an object, or when the parsed id does not match the
+    // row it came out of, so the existing "That project could not be read."
+    // path actually fires.
+    expect(parseDocument(JSON.parse(payload)).warnings).toContain(
+      'The file did not contain a CROWD document; started empty.',
+    )
     expect(restored?.name).toBe('Untitled venue')
     expect(restored?.plan.walls).toEqual([])
+    expect(restored?.id).not.toBe('doc_notavenue')
+    // The id the editor is about to remember is not one this store has ever had.
+    expect(await storage.loadProject(restored?.id ?? '')).toBeNull()
 
     await storage.saveProject(restored as CrowdDocument)
-    expect(await storage.listProjects()).toHaveLength(2)
+    expect((await storage.listProjects()).map((project) => project.name)).toEqual([
+      'Untitled venue',
+      'Shopping list',
+    ])
   })
 
-  it('loads a partly damaged venue without saying what went missing', async () => {
+  it('loads a venue with its only door missing without saying so', async () => {
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
-    const damaged = JSON.parse(JSON.stringify(hall)) as { plan: { walls: unknown[] } }
-    damaged.plan.walls[1] = 'not a wall'
-    db.rows.set(hall.id, {
-      id: hall.id,
-      name: hall.name,
-      updatedAt: hall.updatedAt,
-      payload: JSON.stringify(damaged),
-    })
+    const doorWall = hall.plan.openings[0].wallId
+    const damaged = {
+      ...hall,
+      plan: {
+        ...hall.plan,
+        walls: hall.plan.walls.map((wall) => (wall.id === doorWall ? 'not a wall' : wall)),
+      },
+    }
+    const payload = JSON.stringify(damaged)
+    db.rows.set(hall.id, { id: hall.id, name: hall.name, updatedAt: hall.updatedAt, payload })
 
     const restored = await storage.loadProject(hall.id)
 
-    // SUSPECTED BUG: `parseDocument` returns `{ document, warnings }` and goes to
-    // real trouble counting what it had to drop — "1 wall(s) had no length or
-    // could not be read and were dropped." `loadProject` keeps `.document` and
-    // throws the warnings away, so a venue that came back with a wall missing
-    // looks intact, and the next autosave writes the shortened plan over the
-    // only copy that still had it. I believe `loadProject` should surface the
-    // warnings the way file import does, so the user is told before they save.
+    // SUSPECTED BUG: `parseDocument` returns `{ document, warnings }` and goes
+    // to real trouble counting what it had to drop. `loadProject` keeps
+    // `.document` and throws the warnings away, so this venue comes back sealed
+    // shut — the wall went, and the only way in or out went with it — and looks
+    // intact. Nobody can leave a room with no doors, so the next evacuation run
+    // reports a failure with no cause, and the next autosave writes the sealed
+    // plan over the only copy that still had the door. I believe `loadProject`
+    // should surface the warnings the way file import does (TopBar toasts every
+    // one), so the user is told before they save.
+    expect(parseDocument(JSON.parse(payload)).warnings).toEqual([
+      '1 wall(s) had no length or could not be read and were dropped.',
+      '1 opening(s) referenced a missing wall or could not be read and were dropped.',
+    ])
     expect(restored?.plan.walls).toHaveLength(3)
-    expect(restored?.plan.openings).toHaveLength(1)
+    expect(restored?.plan.openings).toEqual([])
     expect(restored?.name).toBe('Main hall')
   })
 })
@@ -449,17 +523,39 @@ describe('when the browser will not store anything', () => {
     // while the only copy on disk was still the old one.
     expect((await storage.loadProject(hall.id))?.name).toBe('Main hall')
     expect(await storage.listProjects()).toHaveLength(1)
+
+    // One refused write must not cost the connection: the editor stays dirty
+    // and tries again a couple of seconds later, and that attempt has to land.
+    db.faults.write = null
+    await expect(storage.saveProject(expanded)).resolves.toBeUndefined()
+    expect((await storage.loadProject(hall.id))?.name).toBe('Main hall + mezzanine')
+    expect(db.opens()).toBe(1)
   })
 
   it('reports a store it cannot read instead of calling it empty', async () => {
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
     await storage.saveProject(hall)
-    db.faults.read = new Error('UnknownError: internal error')
+    expect(await storage.listProjects()).toHaveLength(1)
 
-    // An empty array would be indistinguishable from a first visit, and the
-    // projects panel would tell somebody with saved venues that they have none.
+    db.faults.read = new Error('UnknownError: internal error')
+    // An empty array is what a first visit looks like, and the projects panel
+    // would tell somebody with saved venues that they have none.
     await expect(storage.listProjects()).rejects.toThrow('internal error')
     await expect(storage.loadProject(hall.id)).rejects.toThrow('internal error')
+  })
+
+  it('still gives a reason when the browser refuses without giving one', async () => {
+    const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
+    db.faults.write = 'silent'
+
+    await expect(storage.saveProject(hall)).rejects.toThrow('Local storage request failed.')
+
+    // A rejection carrying a null reason reaches the console, and any caller
+    // that reports `err.message` shows the word "null" as the explanation.
+    db.faults.open = 'silent'
+    vi.resetModules()
+    const coldStart = await import('./storage')
+    await expect(coldStart.listProjects()).rejects.toThrow('Could not open local storage.')
   })
 
   it('says every way in is shut when there is no local database at all', async () => {
@@ -473,7 +569,7 @@ describe('when the browser will not store anything', () => {
     await expect(storage.deleteProject(hall.id)).rejects.toThrow(reason)
   })
 
-  it('never reaches for the database again once opening it has failed', async () => {
+  it('stays shut for the rest of the session after one blocked open', async () => {
     db.faults.open = new Error('Storage is blocked for this site.')
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
     await expect(storage.saveProject(hall)).rejects.toThrow('Storage is blocked for this site.')
@@ -496,12 +592,17 @@ describe('when the browser will not store anything', () => {
 describe('the project the editor had open last', () => {
   it('is there again on the next visit', () => {
     const entries = installLocalStorage()
+    // A first visit remembers nothing, and the editor opens the starter venue.
+    expect(storage.recallLastProject()).toBeNull()
 
     storage.rememberLastProject('doc_9fk20aq1zc')
     expect(storage.recallLastProject()).toBe('doc_9fk20aq1zc')
     // The key is a compatibility surface: change it and everyone's next visit
     // opens the starter venue instead of what they were working on.
     expect(entries.get('crowd:last-project')).toBe('doc_9fk20aq1zc')
+
+    storage.rememberLastProject('doc_0ba7712z9k')
+    expect(storage.recallLastProject()).toBe('doc_0ba7712z9k')
   })
 
   it('is forgotten quietly when the browser has blocked storage', () => {
@@ -521,8 +622,13 @@ describe('the project the editor had open last', () => {
 })
 
 describe('handing the venue over as a file', () => {
-  it('offers the venue under its own name and lets go of it afterwards', async () => {
+  beforeEach(() => {
+    // The blob is released on a timer; without control of it the revocation
+    // lands after the test, against a mock that has already been restored.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+
+  it('offers the venue under its own name and lets go of it afterwards', async () => {
     const anchors = installDocument()
     const urls = trackObjectUrls()
 
@@ -537,9 +643,12 @@ describe('handing the venue over as a file', () => {
     expect(await urls.created[0].text()).toBe('{"name":"Main hall"}')
     expect(urls.created[0].type).toBe('application/json')
 
-    // The blob is alive until it is revoked, and it holds the whole venue.
+    // The blob has to outlive the click: revoke it early and a browser that
+    // starts the download asynchronously saves an empty file.
     expect(urls.revoked).toEqual([])
-    vi.advanceTimersByTime(1000)
+    vi.advanceTimersByTime(999)
+    expect(urls.revoked).toEqual([])
+    vi.advanceTimersByTime(1)
     expect(urls.revoked).toEqual(['blob:crowd/1'])
   })
 
@@ -549,6 +658,8 @@ describe('handing the venue over as a file', () => {
 
     storage.downloadText('main-hall.csv', 'name,count\nMain hall,240\n', 'text/csv')
 
+    // A CSV handed over as application/json opens in the wrong app, or as a
+    // download the browser warns about.
     expect(urls.created[0].type).toBe('text/csv')
     expect(await urls.created[0].text()).toBe('name,count\nMain hall,240\n')
   })
@@ -565,17 +676,34 @@ describe('handing the venue over as a file', () => {
     expect(urls.created[0]).toBe(png)
     expect(anchors[0].download).toBe('main-hall.png')
     expect(anchors[0].clicks).toBe(1)
+    expect(anchors[0].attached).toBe(false)
   })
 
   it('never hands the import dialog the word "null" to work with', async () => {
-    installFileReader({ result: null })
+    const reads = installFileReader({ result: null })
     await expect(storage.readFileAsText(new File([], 'venue.crowd.json'))).resolves.toBe('')
+    expect(reads).toEqual(['text'])
 
     // Some browsers fire onerror with `reader.error` still unset; without the
     // fallback the import dialog would show "null" as the reason.
     installFileReader({ error: null })
     await expect(storage.readFileAsText(new File([], 'venue.crowd.json'))).rejects.toThrow(
       'Could not read that file.',
+    )
+  })
+
+  it('reads a traced floor plan as a data URL, not as text', async () => {
+    const src = 'data:image/png;base64,iVBORw0KGgo='
+    const reads = installFileReader({ result: src })
+
+    // The backdrop is stored in the document as its own `src`, so a bitmap read
+    // as text would be saved into the plan as mojibake and never render.
+    await expect(storage.readFileAsDataUrl(new File([], 'floor.png'))).resolves.toBe(src)
+    expect(reads).toEqual(['data-url'])
+
+    installFileReader({ error: null })
+    await expect(storage.readFileAsDataUrl(new File([], 'floor.png'))).rejects.toThrow(
+      'Could not read that image.',
     )
   })
 })

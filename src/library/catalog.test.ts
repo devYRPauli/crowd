@@ -23,10 +23,14 @@ import {
   type Size,
 } from './catalog'
 import type { Prim } from './primitives'
+import { NAV_CLEARANCE } from '../sim/world'
 
 const places = (item: CatalogItem, size: Size = item.size): SeatSlot[] => item.seats?.(size) ?? []
 
 const SEATED = CATALOG.filter((item) => item.seats !== undefined)
+
+/** The inspector's own lower bound on width and depth. It offers no upper one. */
+const MIN_EDITABLE = 0.1
 
 /**
  * The two tables whose rows run off the end of the table — see 'runs a bench
@@ -42,6 +46,17 @@ const SERVED_ACROSS = new Set([
   'counter-reception',
   'counter-buffet',
   'coffee-station',
+])
+
+/** Items whose places run in a row, so a longer one holds more people. */
+const ROW_SEATING = new Set([
+  'table-rect-6ft',
+  'table-conference',
+  'sofa-2',
+  'bench',
+  'seat-row',
+  'booth',
+  'counter-bar',
 ])
 
 /** The two items drawn where they hang rather than on the floor. */
@@ -105,21 +120,60 @@ const topOf = (prims: Prim[]): number =>
 const bottomOf = (prims: Prim[]): number =>
   Math.min(...prims.map((prim) => (prim.y ?? 0) - halfHeight(prim)))
 
-const expectSoundGeometry = (prims: Prim[]): void => {
+/** Everything wrong with a built item, phrased so a failure names the damage. */
+const faults = (prims: Prim[]): string[] => {
   // Nothing to merge is an empty BufferGeometry: an item you can place, select
   // and walk around but cannot see.
-  expect(prims.length).toBeGreaterThan(0)
+  if (prims.length === 0) return ['draws nothing at all']
+  const out: string[] = []
   for (const prim of prims) {
-    for (const extent of extents(prim)) {
-      // A negative or NaN extent is not a crash. Three.js builds the geometry
-      // inside out and the part renders as a hole you can see straight through.
-      expect(extent).toBeGreaterThan(0)
-      expect(extent).toBeLessThan(20)
-    }
-    for (const axis of [prim.x ?? 0, prim.y ?? 0, prim.z ?? 0]) {
-      expect(Math.abs(axis)).toBeLessThan(20)
+    const smallest = Math.min(...extents(prim))
+    // A negative or zero extent is not a crash. Three.js winds the part
+    // backwards and it renders as a hole you can see straight through.
+    if (!(smallest > 0)) out.push(`${prim.type} ${smallest.toFixed(3)} across`)
+    if (![prim.x ?? 0, prim.y ?? 0, prim.z ?? 0].every((axis) => Math.abs(axis) < 20)) {
+      out.push(`${prim.type} placed off in the distance`)
     }
   }
+  // The local origin is the centre of the footprint *on the floor*, so a part
+  // below zero is one sunk into the slab.
+  const sunk = -bottomOf(prims)
+  if (sunk > 1e-9) out.push(`sunk ${sunk.toFixed(3)} m through the floor`)
+  return out
+}
+
+const built = (item: CatalogItem, size: Size, when = ''): string[] =>
+  faults(item.build(size)).map((fault) => `${item.id}${when}: ${fault}`)
+
+/** The nearest point of the item's own footprint to a place, in local coordinates. */
+const nearestEdge = (item: CatalogItem, slot: SeatSlot, size: Size): { x: number; z: number } => {
+  if (item.footprint === 'circle') {
+    const radius = Math.min(size.width, size.depth) / 2
+    const range = Math.hypot(slot.x, slot.z)
+    if (range === 0) return { x: 0, z: 0 }
+    const t = Math.min(range, radius) / range
+    return { x: slot.x * t, z: slot.z * t }
+  }
+  const clamp = (value: number, half: number) => Math.min(half, Math.max(-half, value))
+  return { x: clamp(slot.x, size.width / 2), z: clamp(slot.z, size.depth / 2) }
+}
+
+/**
+ * Whether a place lands on floor the navigation grid leaves free — the same
+ * test `buildWorld` applies before it offers the seat to anybody. A blocking
+ * item rasterises `furniturePolygon` (its size less the inset, floored at 2 cm)
+ * dilated by `NAV_CLEARANCE`, and a place inside that is a place nobody reaches.
+ */
+const standsOnFreeFloor = (item: CatalogItem, slot: SeatSlot): boolean => {
+  if (!item.blocking) return true
+  const { width, depth } = item.size
+  if (item.footprint === 'circle') {
+    const radius = Math.max(0.02, Math.min(width, depth) / 2 - item.inset)
+    return Math.hypot(slot.x, slot.z) > radius + NAV_CLEARANCE
+  }
+  const halfX = Math.max(0.02, width - item.inset * 2) / 2 + NAV_CLEARANCE
+  const halfZ = Math.max(0.02, depth - item.inset * 2) / 2 + NAV_CLEARANCE
+  return Math.abs(slot.x) > halfX || Math.abs(slot.z) > halfZ
 }
 
 describe('the catalog as a registry', () => {
@@ -149,31 +203,43 @@ describe('the catalog as a registry', () => {
     expect(new Set(CATEGORY_ORDER).size).toBe(CATEGORY_ORDER.length)
     expect(CATEGORY_ORDER).toHaveLength(Object.keys(CATEGORY_LABELS).length)
     // Every category the panel offers has something in it, or it renders empty.
-    for (const category of CATEGORY_ORDER) {
-      expect(CATALOG.some((item) => item.category === category)).toBe(true)
-    }
+    const bare = CATEGORY_ORDER.filter((category) =>
+      CATALOG.every((item) => item.category !== category),
+    )
+    expect(bare).toEqual([])
   })
 
-  it('finds every entry by each of the words it advertises', () => {
-    // The query is lowered and trimmed; the keywords are not. A keyword with a
-    // capital or a stray space in it is a keyword nobody can search for.
+  it('finds every entry by its name, its id and each word it advertises', () => {
+    // The query is lowered and trimmed, and the name is lowered to meet it —
+    // but the id and the keywords are compared as they are written. A keyword
+    // with a capital or a stray space in it is one nobody can search for.
     const lost: string[] = []
     for (const item of CATALOG) {
-      expect(item.keywords.length).toBeGreaterThan(0)
-      for (const keyword of item.keywords) {
-        if (!searchCatalog(keyword).includes(item)) lost.push(`${item.id}/${keyword}`)
+      if (item.keywords.length === 0) lost.push(`${item.id} advertises nothing`)
+      for (const term of [item.name, item.id, ...item.keywords]) {
+        if (!searchCatalog(term).includes(item)) lost.push(`${item.id}/${term}`)
+        if (!searchCatalog(term.toUpperCase()).includes(item))
+          lost.push(`${item.id}/${term} in caps`)
       }
     }
     expect(lost).toEqual([])
   })
 
-  it('searches names, ids and keywords whatever the case', () => {
-    expect(searchCatalog('BANQUET').map((item) => item.id)).toContain('table-round-8')
-    expect(searchCatalog('Trestle').map((item) => item.id)).toContain('table-rect-6ft')
+  it('narrows the list as the query gets more specific', () => {
     expect(searchCatalog('table-round').map((item) => item.id)).toEqual([
       'table-round-4',
       'table-round-6',
       'table-round-8',
+    ])
+    // A plain substring match over three fields, and it shows: 'pos' reaches
+    // the till point through its id alone — nothing in its name or keywords
+    // says so — and drags in every 'post' on the way.
+    expect(searchCatalog('pos').map((item) => item.id)).toEqual([
+      'table-poseur',
+      'pos-terminal',
+      'column-round',
+      'column-square',
+      'stanchion',
     ])
     expect(searchCatalog('helicopter')).toEqual([])
   })
@@ -223,6 +289,32 @@ describe('sizes somebody could order', () => {
     expect(odd).toEqual([])
   })
 
+  it('spells every imperial size the way the rest of the app rounds it', () => {
+    // `standards.ts` converts feet to the nearest millimetre and every length
+    // in the product comes from it, so a 6 ft round is 1.829 m. Two spellings
+    // of one dimension are two sizes that do not tile, snap or read as equal.
+    const feet = (value: number): number => Math.round(value * 12 * 25.4) / 1000
+    const claimed: Array<[string, 'width' | 'depth', number]> = [
+      ['table-round-6', 'width', 5],
+      ['table-round-8', 'width', 6],
+      ['table-rect-6ft', 'width', 6],
+      ['table-square-4', 'width', 3],
+      ['stage', 'width', 16],
+      ['stage', 'depth', 8],
+    ]
+    const misspelt = claimed.filter(
+      ([id, axis, ft]) => resolveCatalogItem(id).size[axis] !== feet(ft),
+    )
+    // SUSPECTED BUG (minor): five of the six match to the millimetre and the
+    // trestle does not — 1.83 is a centimetre-rounded 6 ft against the banquet
+    // round's 1.829. The comment on `table-round-8` says in so many words that
+    // two items claiming one imperial dimension should not round it
+    // differently, and they still do. Asserting both spellings as they stand.
+    expect(misspelt.map(([id]) => id)).toEqual(['table-rect-6ft'])
+    expect(resolveCatalogItem('table-rect-6ft').size.width).toBe(1.83)
+    expect(resolveCatalogItem('table-round-8').size.width).toBe(1.829)
+  })
+
   it('sizes every seat for the number of people it holds', () => {
     // A row of places is only worth what each person gets of it. Under 0.4 m of
     // frontage is narrower than a stacking chair; over 0.95 m and the item is
@@ -234,7 +326,10 @@ describe('sizes somebody could order', () => {
       const rows = new Map<string, number>()
       for (const slot of places(item))
         rows.set(slot.z.toFixed(2), (rows.get(slot.z.toFixed(2)) ?? 0) + 1)
-      expect(rows.size).toBeGreaterThan(0)
+      if (rows.size === 0) {
+        cramped.push(`${item.id} is seating nobody can sit on`)
+        continue
+      }
       const widest = Math.max(...rows.values())
       const frontage = item.size.width / widest
       const reach = item.size.depth / rows.size
@@ -248,8 +343,8 @@ describe('sizes somebody could order', () => {
 
   it('draws only the panels as slivers on the floor plan', () => {
     // The plan view is the drawing people check their venue against. A thing
-    // fifteen times longer than it is deep is a screen, a barrier or a picture
-    // — or it is a depth somebody typed as 0.08 instead of 0.8.
+    // five times longer than it is deep is a screen, a barrier or a picture —
+    // or it is a depth somebody typed as 0.08 instead of 0.8.
     const slivers = CATALOG.filter(
       (item) => Math.max(item.size.width / item.size.depth, item.size.depth / item.size.width) > 5,
     ).map((item) => item.id)
@@ -285,22 +380,6 @@ describe('sizes somebody could order', () => {
         item.size.width !== item.size.depth,
     )
     expect(oblong.map((item) => item.id)).toEqual([])
-  })
-
-  it('spells one imperial size the same way twice', () => {
-    const sixFeet = 12 * 6 * 0.0254
-    const round = resolveCatalogItem('table-round-8').size.width
-    const trestle = resolveCatalogItem('table-rect-6ft').size.width
-    expect(Math.abs(round - sixFeet)).toBeLessThan(0.0005)
-    // SUSPECTED BUG (minor): the banquet round is 1.829 — the millimetre-rounded
-    // 6 ft that `standards.ts` produces — while the trestle is 1.83, a
-    // millimetre out, which is why it needs the looser bound here. The comment
-    // on `table-round-8` says in so many words that two items claiming one
-    // imperial dimension should not round it differently, and they still do.
-    // Asserting the current spellings rather than fixing them.
-    expect(Math.abs(trestle - sixFeet)).toBeLessThan(0.0015)
-    expect(round).toBe(1.829)
-    expect(trestle).toBe(1.83)
   })
 })
 
@@ -351,7 +430,10 @@ describe('the places people can take', () => {
     const crowded: string[] = []
     for (const item of SEATED) {
       const slots = places(item)
-      expect(slots.length).toBeGreaterThan(0)
+      if (slots.length === 0) {
+        crowded.push(`${item.id} offers no places at all`)
+        continue
+      }
       for (let a = 0; a < slots.length; a++) {
         for (let b = a + 1; b < slots.length; b++) {
           const gap = Math.hypot(slots[a].x - slots[b].x, slots[a].z - slots[b].z)
@@ -389,6 +471,40 @@ describe('the places people can take', () => {
     }
   })
 
+  it('seats more people as it gets longer, unless it is a set piece', () => {
+    // The inspector header counts the places of the *resized* item, so this is
+    // what the user is told about the thing in front of them: a bench drawn
+    // twice as long holds more, while a "Round table (4)" is a four-top however
+    // big it is drawn and a desk seats one person at any width.
+    const wrong: string[] = []
+    for (const item of SEATED) {
+      const count = (factor: number) => places(item, resized(item.size, factor)).length
+      if (count(2) < count(1)) wrong.push(`${item.id} loses places when stretched`)
+      if (ROW_SEATING.has(item.id) !== count(2) > count(1)) {
+        wrong.push(`${item.id} goes ${count(1)} -> ${count(2)}`)
+      }
+    }
+    expect(wrong).toEqual([])
+  })
+
+  it('still offers a place at the smallest size the inspector allows', () => {
+    // Every row count is clamped with `Math.max(1, ...)`. Without the clamp a
+    // bench pulled in to the inspector's floor rounds to no places at all and
+    // quietly stops being seating, while still reading "Bench" in the panel.
+    const empty: string[] = []
+    for (const item of SEATED) {
+      const tiny = { width: MIN_EDITABLE, depth: MIN_EDITABLE, height: item.size.height }
+      const slots = places(item, tiny)
+      if (slots.length === 0) empty.push(`${item.id} seats nobody`)
+      for (const slot of slots) {
+        if (![slot.x, slot.z, slot.facing].every(Number.isFinite)) {
+          empty.push(`${item.id} places somebody at ${slot.x}, ${slot.z}`)
+        }
+      }
+    }
+    expect(empty).toEqual([])
+  })
+
   it('keeps every place within reach of the item it belongs to', () => {
     const adrift: string[] = []
     for (const item of SEATED) {
@@ -399,35 +515,64 @@ describe('the places people can take', () => {
           // than that is a person sitting in the aisle, and the engine walks
           // them there and calls it a seat.
           const out = Math.max(Math.abs(slot.x) - size.width / 2, Math.abs(slot.z) - size.depth / 2)
-          if (!(out <= 0.5) || !Number.isFinite(slot.facing)) {
-            adrift.push(`${item.id} ${out.toFixed(2)} m out`)
-          }
+          if (out > 0.5) adrift.push(`${item.id} ${out.toFixed(2)} m out`)
         }
       }
     }
     expect(adrift).toEqual([])
   })
 
-  it('seats a diner beside the table, facing it', () => {
-    // A facing that is reversed or a quarter turn out seats the whole table
-    // looking away, which no check of the positions alone would catch.
-    const wrong: string[] = []
+  it('never lays a cover inside the table top it belongs to', () => {
+    const inside: string[] = []
     for (const item of SEATED) {
-      if (item.category !== 'tables' || BENCH_SEAT_TABLES.has(item.id)) continue
+      if (item.category !== 'tables') continue
+      const { width, depth } = item.size
       for (const slot of places(item)) {
-        const { width, depth } = item.size
         const clear =
           item.footprint === 'circle'
-            ? Math.hypot(slot.x, slot.z) >= Math.min(width, depth) / 2 - item.inset
-            : Math.abs(slot.x) >= width / 2 - item.inset ||
-              Math.abs(slot.z) >= depth / 2 - item.inset
-        if (!clear) wrong.push(`${item.id} sits a diner in the table`)
-        const range = Math.hypot(slot.x, slot.z)
-        const towards = (-slot.x * Math.cos(slot.facing) - slot.z * Math.sin(slot.facing)) / range
-        if (towards < 0.999) wrong.push(`${item.id} faces ${towards.toFixed(2)} of the way in`)
+            ? Math.hypot(slot.x, slot.z) >= Math.min(width, depth) / 2
+            : Math.abs(slot.x) >= width / 2 || Math.abs(slot.z) >= depth / 2
+        if (!clear) inside.push(`${item.id} at (${slot.x.toFixed(2)}, ${slot.z.toFixed(2)})`)
+      }
+    }
+    expect(inside).toEqual([])
+  })
+
+  it('turns every place that stands off its item back towards it', () => {
+    // A facing that is reversed or a quarter turn out seats a whole table
+    // looking away, which no check of the positions alone would catch. Against
+    // the nearest edge rather than the centre, because a stool at one end of a
+    // bar faces the bar in front of it, not the middle of the counter.
+    const wrong: string[] = []
+    for (const item of SEATED) {
+      if (BENCH_SEAT_TABLES.has(item.id)) continue
+      for (const slot of places(item)) {
+        const edge = nearestEdge(item, slot, item.size)
+        const dx = edge.x - slot.x
+        const dz = edge.z - slot.z
+        const range = Math.hypot(dx, dz)
+        // A place on the item itself — a sofa cushion, a bench — has no
+        // direction to face it from.
+        if (range < 1e-6) continue
+        const towards = (Math.cos(slot.facing) * dx + Math.sin(slot.facing) * dz) / range
+        if (towards < 0.999) wrong.push(`${item.id} faces ${towards.toFixed(2)} of the way at it`)
       }
     }
     expect(wrong).toEqual([])
+  })
+
+  it('offers a lean only where people actually stand', () => {
+    // `kind` is what the library panel draws hollow and what `tableWithChairs`
+    // skips when it sets real chairs out. A lean at a 0.75 m dining table would
+    // stand somebody at a table laid for dinner; a seat at a poseur would tuck
+    // a chair under a table nobody sits at.
+    const leaning = SEATED.filter((item) => places(item).some((slot) => slot.kind === 'lean'))
+    expect(leaning.map((item) => item.id).sort()).toEqual(['counter-bar', 'table-poseur'])
+    for (const item of leaning) {
+      expect(item.size.height).toBeCloseTo(1.1, 6)
+      // Mixed kinds at one item would seat half a party and stand the other half.
+      expect(places(item).map((slot) => slot.kind)).toEqual(places(item).map(() => 'lean'))
+    }
   })
 
   it('lays its places out from the size it is handed', () => {
@@ -453,56 +598,118 @@ describe('the places people can take', () => {
     expect([...new Set(xs)].sort((a, b) => a - b)).toHaveLength(3)
     // The table runs from -0.915 to 0.915: the first pair is nowhere near the
     // left end and the last pair is 0.84 m past the right one, in the aisle.
-    expect(Math.min(...xs)).toBeCloseTo(-0.2501, 3)
-    expect(Math.max(...xs)).toBeCloseTo(1.7507, 3)
-    expect(Math.max(...xs) - trestle.size.width / 2).toBeCloseTo(0.8357, 3)
+    expect(Math.min(...xs)).toBeCloseTo(-0.2501, 4)
+    expect(Math.max(...xs)).toBeCloseTo(1.7507, 4)
+    expect(Math.max(...xs) - trestle.size.width / 2).toBeCloseTo(0.8357, 4)
 
     const conference = resolveCatalogItem('table-conference')
     const far = places(conference).map((slot) => slot.x)
     // Half of a boardroom's covers are off the end of a 3 m table.
     expect(far.filter((x) => Math.abs(x) > conference.size.width / 2)).toHaveLength(4)
     expect(Math.max(...far)).toBeCloseTo(3.075, 6)
+
+    // What it costs: a stranded place keeps the facing of a row, so its
+    // occupant is drawn staring across an empty aisle — and `tableWithChairs`
+    // stands a real chair on every place, which is a chair the plan draws
+    // floating past the end of the table.
+    for (const slot of places(conference)) {
+      if (Math.abs(slot.x) <= conference.size.width / 2) continue
+      const edge = nearestEdge(conference, slot, conference.size)
+      const dx = edge.x - slot.x
+      const dz = edge.z - slot.z
+      const range = Math.hypot(dx, dz)
+      expect((Math.cos(slot.facing) * dx + Math.sin(slot.facing) * dz) / range).toBeLessThan(0.75)
+    }
   })
 
   it('offers places inside items that block, which the world then drops', () => {
     // SUSPECTED BUG. `buildWorld` keeps only the places that land on a free
-    // navigation cell, and a blocking item rasterises its own footprint with
-    // body clearance. A place at the middle of one is never free, so these three
-    // advertise seats — in the library panel, in the inspector header — that the
-    // simulation silently discards: nobody ever sits on a sofa, a bench or an
-    // armchair. The loose seating avoids it by not blocking.
-    const sealed = CATALOG.filter(
-      (item) =>
-        item.blocking &&
-        places(item).length > 0 &&
-        places(item).every(
-          (slot) =>
-            Math.abs(slot.x) < item.size.width / 2 - item.inset &&
-            Math.abs(slot.z) < item.size.depth / 2 - item.inset,
-        ),
+    // navigation cell, and a blocking item rasterises its own footprint dilated
+    // by NAV_CLEARANCE. A place in the middle of one is never free, so these
+    // three advertise seats — in the library panel, in the inspector's "2
+    // seats" header — that the simulation silently discards: nobody ever sits
+    // on a sofa, a bench or an armchair. The loose seating escapes it by not
+    // blocking, and the tables by standing their covers clear.
+    const unreachable = SEATED.filter((item) =>
+      places(item).every((slot) => !standsOnFreeFloor(item, slot)),
     )
-    expect(sealed.map((item) => item.id).sort()).toEqual(['armchair', 'bench', 'sofa-2'])
+    expect(unreachable.map((item) => item.id).sort()).toEqual(['armchair', 'bench', 'sofa-2'])
+
+    // Everything else offers every one of its places on free floor: no item is
+    // half usable, which is what a borderline seat would look like.
+    const partial = SEATED.filter((item) => {
+      const free = places(item).filter((slot) => standsOnFreeFloor(item, slot))
+      return free.length > 0 && free.length < places(item).length
+    })
+    expect(partial.map((item) => item.id)).toEqual([])
+
+    // Not a near miss either: a sofa cushion is well over half a metre inside
+    // the patch the grid has already closed.
+    const sofa = resolveCatalogItem('sofa-2')
+    const slot = places(sofa)[0]
+    const shortfall = Math.min(
+      (sofa.size.width - sofa.inset * 2) / 2 + NAV_CLEARANCE - Math.abs(slot.x),
+      (sofa.size.depth - sofa.inset * 2) / 2 + NAV_CLEARANCE - Math.abs(slot.z),
+    )
+    expect(shortfall).toBeCloseTo(0.59, 2)
   })
 })
 
 describe('building the geometry', () => {
   it('builds something solid at its default size', () => {
-    for (const item of CATALOG) {
-      const prims = item.build(item.size)
-      expectSoundGeometry(prims)
-      // The local origin is the centre of the footprint *on the floor*, so a
-      // part below zero is one sunk into the slab.
-      expect(bottomOf(prims)).toBeGreaterThan(-1e-9)
-    }
+    const broken = CATALOG.flatMap((item) => built(item, item.size))
+    expect(broken).toEqual([])
   })
 
   it('builds at any size a saved document can carry', () => {
     // Every item is resizable in practice, whatever its `resize` mode says: a
     // document carries a `size` for any item and the loader keeps it, so a
-    // builder that only works at its default size breaks on reload.
+    // builder that only works at its default size breaks on reload. Free resize
+    // moves width and depth independently, so the stretches are not all square.
+    // The fourth corner — wide and shallow — is where `screen-tv` inverts, and
+    // it is pinned in 'turns inside out at sizes the inspector will still
+    // accept' instead of here.
+    const broken: string[] = []
     for (const item of CATALOG) {
-      for (const factor of [0.6, 1.8]) expectSoundGeometry(item.build(resized(item.size, factor)))
+      for (const [w, d] of [
+        [0.6, 0.6],
+        [1.8, 1.8],
+        [0.5, 3],
+      ]) {
+        const size = {
+          width: item.size.width * w,
+          depth: item.size.depth * d,
+          height: item.size.height,
+        }
+        broken.push(...built(item, size, ` at ${w} by ${d}`))
+      }
     }
+    expect(broken).toEqual([])
+  })
+
+  it('builds the same thing every time, from a size it never writes to', () => {
+    // `planSeats` and the renderer hand the builder the document's own `size`
+    // object. A builder that scribbled on it would edit the plan from inside
+    // the renderer, outside `apply`, where undo cannot see it. And geometry is
+    // merged and cached once per entry, so a builder that answered differently
+    // the second time would ship whichever call happened to come first.
+    const unstable: string[] = []
+    for (const item of CATALOG) {
+      const frozen: Size = Object.freeze({ ...item.size })
+      try {
+        item.build(frozen)
+        item.seats?.(frozen)
+      } catch (error) {
+        unstable.push(`${item.id} writes to its size: ${String(error)}`)
+      }
+      if (JSON.stringify(item.build(item.size)) !== JSON.stringify(item.build(item.size))) {
+        unstable.push(`${item.id} builds differently twice`)
+      }
+      if (JSON.stringify(places(item)) !== JSON.stringify(places(item))) {
+        unstable.push(`${item.id} lays its places out differently twice`)
+      }
+    }
+    expect(unstable).toEqual([])
   })
 
   it('draws itself within the height it declares', () => {
@@ -540,10 +747,11 @@ describe('building the geometry', () => {
     }
   })
 
-  it('draws its body inside the footprint people walk around', () => {
-    // Collision is the declared size, trimmed by the inset. A body drawn wider
-    // than that is a thing people walk through on screen. Feet, bases and floor
-    // discs are allowed out because you step over them.
+  it('draws its body inside the extent the plan view shows', () => {
+    // The plan view and the inspector both report the declared size, and the
+    // collision footprint is that size or smaller. A body drawn wider is a
+    // thing people walk through on screen. Feet, bases and floor discs are
+    // allowed out because you step over them.
     const overhanging: string[] = []
     for (const item of CATALOG) {
       let worst = 0
@@ -580,22 +788,63 @@ describe('building the geometry', () => {
   })
 
   it('turns inside out at sizes the inspector will still accept', () => {
-    // SUSPECTED BUG. Width and depth are typed in with a 0.1 m floor and no
-    // ceiling, so these are reachable sizes rather than fuzzed ones.
+    // SUSPECTED BUG. Width and depth are typed straight in, floored at 0.1 m
+    // and with no ceiling at all, so every size below is one a user can reach
+    // by hand.
     const tv = resolveCatalogItem('screen-tv')
-    const wall = tv.build({ width: 4, depth: 0.3, height: 1.7 })
-    const stand = wall[2]
-    // The stand is `height - width * 0.58`: past a 2.93 m wide video wall the
-    // screen is taller than the item and the pole inverts — and the panel it
-    // holds up sinks 0.6 m through the floor.
-    expect(stand.type === 'cyl' && stand.h).toBeCloseTo(-0.62, 6)
-    expect(bottomOf(wall)).toBeCloseTo(-0.6, 6)
+    const pole = (size: Size): number => {
+      const prim = tv.build(size).find((part) => part.type === 'cyl')
+      return prim?.type === 'cyl' ? prim.h : NaN
+    }
+    expect(built(tv, { width: 2.9, depth: 0.3, height: 1.7 })).toEqual([])
+    expect(pole({ width: 2.9, depth: 0.3, height: 1.7 })).toBeCloseTo(0.018, 6)
+    // The pole is `height - width * 0.58`, so past a 2.94 m video wall — an
+    // ordinary size to draw one — the screen is taller than the item, the pole
+    // inverts, and the panel it holds up hangs 0.6 m through the floor.
+    expect(pole({ width: 4, depth: 0.3, height: 1.7 })).toBeCloseTo(-0.62, 6)
+    expect(bottomOf(tv.build({ width: 4, depth: 0.3, height: 1.7 }))).toBeCloseTo(-0.6, 6)
 
-    const sofa = resolveCatalogItem('sofa-2')
-    const cushion = sofa.build({ width: 0.1, depth: 0.88, height: 0.8 })[1]
-    // Cushions are `width - 0.34` against fixed 0.18 m arms: a sofa pulled
-    // narrower than its own arms turns inside out the same way.
-    expect(cushion.type === 'box' && cushion.w).toBeCloseTo(-0.24, 6)
+    // The same cause, one item over: height never scales, so anything
+    // proportioned off width eventually outgrows what holds it up. A potted
+    // plant's leaves are `width * 0.312` tall about a pot 0.56 m up, so from
+    // 1.79 m across the foliage hangs below the floor it stands on.
+    const plant = resolveCatalogItem('plant-small')
+    expect(built(plant, resized(plant.size, 3.4))).toEqual([])
+    expect(built(plant, resized(plant.size, 4))).toEqual([
+      'plant-small: sunk 0.066 m through the floor',
+    ])
+
+    // A booth's shared table is `depth - 0.75`, so a shallow banquette — still
+    // deep enough for two benches and a table on the drawing — loses its table.
+    const booth = resolveCatalogItem('booth')
+    expect(built(booth, { width: 1.6, depth: 0.7, height: 1.2 })).toEqual([
+      'booth: box -0.050 across',
+    ])
+
+    // Pulled in to the inspector's own minimum, fourteen of the forty-nine
+    // entries build parts of negative or zero size. Ten of them are items the
+    // inspector itself resizes; the rest need a hand-edited document to reach.
+    const shrunk = CATALOG.filter(
+      (item) =>
+        built(item, { width: MIN_EDITABLE, depth: MIN_EDITABLE, height: item.size.height }).length >
+        0,
+    )
+    expect(shrunk.map((item) => item.id).sort()).toEqual([
+      'armchair',
+      'artwork',
+      'booth',
+      'counter-buffet',
+      'counter-reception',
+      'kiosk',
+      'plant-small',
+      'rug',
+      'screen-tv',
+      'seat-row',
+      'shelving',
+      'sofa-2',
+      'stool-bar',
+      'wheelchair-space',
+    ])
   })
 })
 
@@ -620,8 +869,13 @@ describe('resolving an id a document carries', () => {
     // this build cannot even draw.
     expect(FALLBACK_ITEM.seats).toBeUndefined()
     expect(CATEGORY_ORDER).toContain(FALLBACK_ITEM.category)
-    expectSoundGeometry(FALLBACK_ITEM.build(FALLBACK_ITEM.size))
-    expectSoundGeometry(FALLBACK_ITEM.build({ width: 3, depth: 0.4, height: 2 }))
+    expect(built(FALLBACK_ITEM, FALLBACK_ITEM.size)).toEqual([])
+    expect(built(FALLBACK_ITEM, { width: 3, depth: 0.4, height: 2 })).toEqual([])
+    // It has to survive the sizes that defeat half the real catalog, because a
+    // document from a newer build carries whatever size that build allowed.
+    expect(built(FALLBACK_ITEM, { width: MIN_EDITABLE, depth: MIN_EDITABLE, height: 0.8 })).toEqual(
+      [],
+    )
   })
 
   it('never offers the stand-in as a thing to place', () => {

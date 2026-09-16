@@ -76,14 +76,19 @@ describe('bounds', () => {
   it('reports an empty plan as having no extent at all', () => {
     expect(boundsOf([])).toEqual(EMPTY_BOUNDS)
     expect(boundsValid(boundsOf([]))).toBe(false)
-    // EMPTY_BOUNDS is a shared object; accumulating into it rather than a copy
-    // would poison the extent of every plan opened afterwards.
+    // EMPTY_BOUNDS is a shared object that `boundsOf` starts from a copy of.
+    // Accumulating into it rather than into the copy would poison the extent of
+    // every plan opened afterwards, so measure a real one and check it survived.
+    expect(boundsOf([p(-9, -2), p(9, 2)])).toEqual({ minX: -9, minY: -2, maxX: 9, maxY: 2 })
     expect(EMPTY_BOUNDS).toEqual({
       minX: Infinity,
       minY: Infinity,
       maxX: -Infinity,
       maxY: -Infinity,
     })
+    // Nothing overlaps an empty extent, which is what stops a broad-phase pass
+    // over a plan with no geometry in it reporting a hit on everything.
+    expect(boundsOverlap(EMPTY_BOUNDS, { minX: 0, minY: 0, maxX: 1, maxY: 1 })).toBe(false)
   })
 
   it('unions the empty box as if it were not there', () => {
@@ -144,11 +149,12 @@ describe('polygon area and winding', () => {
     // This is the whole content of the sign convention: anything that derives a
     // direction from winding — an outward normal, a wall face, an offset — reads
     // it this way, so the sign and the geometry must not drift apart.
+    const inside = polygonCentroid(L_ROOM)
     for (const edge of polygonEdges(L_ROOM)) {
-      expect(cross(sub(edge.b, edge.a), sub(polygonCentroid(L_ROOM), edge.a))).toBeGreaterThan(0)
+      expect(cross(sub(edge.b, edge.a), sub(inside, edge.a))).toBeGreaterThan(0)
     }
     for (const edge of polygonEdges([...L_ROOM].reverse())) {
-      expect(cross(sub(edge.b, edge.a), sub(polygonCentroid(L_ROOM), edge.a))).toBeLessThan(0)
+      expect(cross(sub(edge.b, edge.a), sub(inside, edge.a))).toBeLessThan(0)
     }
   })
 
@@ -182,14 +188,25 @@ describe('polygon area and winding', () => {
       [4, 4],
       [0, 4],
     ])
+    // Reversing in place would rewind the polygon the caller still holds — for a
+    // plan that is a document array the renderer and the engine both read.
+    expectPolygon(ROOM_CW, [
+      [0, 4],
+      [4, 4],
+      [4, 0],
+      [0, 0],
+    ])
   })
 
-  // SUSPECTED BUG: a zero-area polygon is never counter-clockwise by
-  // `signedArea(poly) > 0`, so asking for counter-clockwise reverses it every
-  // single time and never converges. A collapsed room therefore hands the
-  // renderer a brand-new array on every frame it is recomputed, defeating the
-  // identity diff the document's structural sharing exists to feed. Degenerate
-  // input should come back untouched.
+  // SUSPECTED BUG: `isCounterClockwise` is `signedArea(poly) > 0`, so a
+  // zero-area polygon is never counter-clockwise: asking for that winding
+  // reverses it every single time and never settles on an answer. Nothing calls
+  // `ensureWinding` today, but sim/world.test.ts already argues that
+  // `collectObstaclePolygons` should put zone polygons through it, and a zone
+  // drawn as three collinear clicks is exactly this case — it would come back
+  // as a new array on every rebuild, defeating the identity diff the document's
+  // structural sharing exists to feed. Degenerate input should come back
+  // untouched.
   it('flips a collapsed polygon back and forth forever', () => {
     const flat = poly([0, 0], [1, 0], [2, 0])
     const once = ensureWinding(flat, true)
@@ -225,8 +242,11 @@ describe('polygon centroid', () => {
   // SUSPECTED BUG: the zero-area fallback goes through the bounding box, and
   // the bounding box of nothing is (Infinity, -Infinity) — so the centre comes
   // back NaN rather than a point. Every other function here survives an empty
-  // polygon (zero area, infinite distance, no edges); this one leaks a NaN into
-  // whatever aimed at it, and an agent given a NaN target never arrives.
+  // polygon (zero area, infinite distance, no edges). The live callers are safe
+  // by luck rather than by contract: the zone tool refuses to commit under
+  // three points and rooms.ts skips a face under three, so nothing reaches it
+  // today. A NaN centre is a NaN destination, and an agent sent to one never
+  // arrives.
   it('has no centre at all for a polygon with no points', () => {
     const centre = polygonCentroid([])
     expect(Number.isNaN(centre.x)).toBe(true)
@@ -243,19 +263,24 @@ describe('point in polygon', () => {
     expect(pointInPolygon(p(-1, 2), ROOM)).toBe(false)
   })
 
-  it('claims a point on a shared edge exactly once', () => {
-    // Bottom and left edges belong to the polygon, top and right do not. Two
-    // rooms that share a wall therefore claim a person on it once between them
-    // — the alternative is a walker inside both rooms, or inside neither.
+  it('claims somebody standing on a shared wall for exactly one of the rooms', () => {
+    // The source says a point exactly on an edge may come back either way, so
+    // the half-open rule below — bottom and left in, top and right out — is
+    // characterisation. What a plan depends on is the consequence: two rooms
+    // sharing a wall claim a person on it once between them, never twice and
+    // never neither, in whichever direction the wall runs.
     expect(pointInPolygon(p(2, 0), ROOM)).toBe(true)
     expect(pointInPolygon(p(0, 2), ROOM)).toBe(true)
     expect(pointInPolygon(p(2, 4), ROOM)).toBe(false)
     expect(pointInPolygon(p(4, 2), ROOM)).toBe(false)
 
     const above = poly([0, 4], [4, 4], [4, 8], [0, 8])
-    for (const x of [0.5, 2, 3.5]) {
-      const claims = [pointInPolygon(p(x, 4), ROOM), pointInPolygon(p(x, 4), above)]
-      expect(claims.filter(Boolean)).toHaveLength(1)
+    const beside = poly([4, 0], [8, 0], [8, 4], [4, 4])
+    for (const t of [0.5, 2, 3.5]) {
+      const onTheHorizontalWall = [pointInPolygon(p(t, 4), ROOM), pointInPolygon(p(t, 4), above)]
+      expect(onTheHorizontalWall.filter(Boolean)).toHaveLength(1)
+      const onTheVerticalWall = [pointInPolygon(p(4, t), ROOM), pointInPolygon(p(4, t), beside)]
+      expect(onTheVerticalWall.filter(Boolean)).toHaveLength(1)
     }
   })
 
@@ -375,10 +400,12 @@ describe('ray casting', () => {
     // would silently change what that comparison means.
     const unit = raySegmentIntersection(p(0, 0), p(1, 0), p(3, -1), p(3, 1))
     expect(unit?.t).toBeCloseTo(3, 12)
-    expectPoint(unit?.point as Vec2, 3, 0)
+    expect(unit?.point.x).toBeCloseTo(3, 12)
+    expect(unit?.point.y).toBeCloseTo(0, 12)
     const doubled = raySegmentIntersection(p(0, 0), p(2, 0), p(3, -1), p(3, 1))
     expect(doubled?.t).toBeCloseTo(1.5, 12)
-    expectPoint(doubled?.point as Vec2, 3, 0)
+    expect(doubled?.point.x).toBeCloseTo(3, 12)
+    expect(doubled?.point.y).toBeCloseTo(0, 12)
   })
 
   it('ignores what is behind the origin and stops at the far end of the wall', () => {
@@ -430,13 +457,16 @@ describe('rectangles and circles', () => {
   })
 
   // SUSPECTED BUG: `rectPolygon` promises a counter-clockwise polygon, but a
-  // negative width or depth silently winds it clockwise. `servicePolygon` in
-  // core/model/planGeometry.ts passes `width + inflate * 2` straight through
-  // with no floor under it (unlike the furniture path, which clamps to 0.02 m),
-  // so a negative inflate on a narrow counter produces one. The footprint then
-  // lies to `isCounterClockwise`, and anything that derives an outward
-  // direction from the winding faces into the object instead of away from it.
-  // Either clamp the size to zero or take its absolute value.
+  // negative width or depth silently winds it clockwise while still looking
+  // like a well-formed rectangle, so the footprint lies to `isCounterClockwise`
+  // and anything deriving an outward direction from the winding faces into the
+  // object instead of away from it. No live call reaches it: every size comes
+  // from the catalogue or standards.ts. The one path with no floor under it is
+  // `servicePolygon` in core/model/planGeometry.ts, which passes
+  // `point.width + inflate * 2` straight through where the furniture path
+  // clamps to 0.02 m, and whose callers all inflate by 0 or 0.03 today.
+  // Clamping the size to zero here would make the promise true for every input
+  // rather than for most of them.
   it('winds a rectangle backwards when its width is negative', () => {
     expect(signedArea(rectPolygon(p(0, 0), -2, 4))).toBe(-8)
     expect(isCounterClockwise(rectPolygon(p(0, 0), -2, 4))).toBe(false)
@@ -476,10 +506,16 @@ describe('rectangles and circles', () => {
   })
 
   it('walks the edges of a polygon in order and closes the loop', () => {
-    const edges = polygonEdges(poly([0, 0], [1, 0], [0, 1]))
+    const triangle = poly([0, 0], [1, 0], [0, 1])
+    const edges = polygonEdges(triangle)
     expect(edges).toHaveLength(3)
     expect(edges[2].a).toEqual({ x: 0, y: 1 })
     expect(edges[2].b).toEqual({ x: 0, y: 0 })
+    // Edges point at the polygon's own vertices instead of copying them, which
+    // is what keeps this cheap enough for the simulation's inner loop — and
+    // means nothing may write through an edge endpoint.
+    expect(edges[0].a).toBe(triangle[0])
+    expect(edges[2].b).toBe(triangle[0])
     expect(polygonEdges([])).toEqual([])
   })
 })
@@ -537,11 +573,18 @@ describe('polylines', () => {
   })
 
   // SUSPECTED BUG: with no `count`, the sample count is `floor(total / spacing)
-  // + 1`, which is Infinity for a spacing of zero — the loop never ends and the
-  // tab locks up. A negative spacing is handled (no samples at all), so zero is
-  // the one input that hangs rather than returning something. It should clamp.
-  it('takes an explicit count over the spacing', () => {
+  // + 1`, which is Infinity for a spacing of zero on a path with any length at
+  // all — the loop never ends and the tab locks up. A negative spacing returns
+  // no samples and a zero-length path divides 0 by 0 and falls straight out, so
+  // a zero spacing on a real path is the single input that hangs rather than
+  // returning something. Running it would hang this suite too, which is why the
+  // cases below stop at the forms that terminate. The one live caller clamps
+  // first (`Math.max(0.35, sp.queueSpacing)` in sim/world.ts) and passes a count
+  // besides, so nothing reaches it today. `spacing` should be clamped here.
+  it('lays out the number of slots it was given whatever the spacing says', () => {
     expect(samplePolyline(poly([0, 0], [6, 0]), -2)).toEqual([])
+    // A path with no length divides zero by zero, so this one returns instead.
+    expect(samplePolyline(poly([2, 2], [2, 2]), 0)).toEqual([])
     expectPolygon(samplePolyline(poly([0, 0], [6, 0]), 0, 3), [
       [0, 0],
       [0, 0],
@@ -655,6 +698,16 @@ describe('convex hull', () => {
     expect(convexHull(few)[0]).not.toBe(few[0])
     const many = [p(0, 0), p(4, 0), p(0, 4)]
     expect(convexHull(many).every((v) => many.includes(v))).toBe(true)
+    // It sorts a copy: sorting the caller's array in place would reorder the
+    // vertices of the very polygon the hull was taken from.
+    const unsorted = [p(4, 4), p(0, 0), p(4, 0), p(0, 4)]
+    convexHull(unsorted)
+    expectPolygon(unsorted, [
+      [4, 4],
+      [0, 0],
+      [4, 0],
+      [0, 4],
+    ])
   })
 })
 
@@ -726,13 +779,14 @@ describe('outward offset', () => {
 
   // SUSPECTED BUG: shrinking a polygon by more than half its narrowest span
   // turns it inside out instead of collapsing it — a 2 m × 2 m square inset by
-  // 3 m comes back as a 4 m × 4 m square reflected through its own centre. It
-  // is still wound counter-clockwise and still reports a sensible positive
-  // area, so nothing about the result says it is nonsense. Anything asking
-  // "what floor is left once everyone is held a metre off the walls?" is told
-  // there is four times more of it than the room ever had, which overstates a
-  // cupboard's capacity instead of reporting none. An inset that consumes the
-  // polygon should yield an empty one.
+  // 3 m comes back as a 4 m × 4 m square reflected through its own centre. The
+  // doc comment hedges that this is not a straight-skeleton offset, but a
+  // caller has no way to notice this particular failure: the result is still
+  // wound counter-clockwise and still reports a plausible positive area. Ask
+  // "what floor is left once everyone is held clear of the walls?" of a
+  // cupboard and the answer is four times the floor the room ever had rather
+  // than none. Nothing calls `offsetPolygon` today. An inset that consumes the
+  // polygon should yield an empty one, or one the caller can tell apart.
   it('turns a small polygon inside out when the inset eats it', () => {
     const small = poly([0, 0], [2, 0], [2, 2], [0, 2])
     const inverted = offsetPolygon(small, -3)
@@ -774,14 +828,26 @@ describe('convex overlap', () => {
     // L-shaped counter reads as solid, so a chair tucked into it is refused.
     const lCounter = poly([0, 0], [4, 0], [4, 4], [2, 4], [2, 1], [0, 1])
     const inTheNotch = poly([0.5, 2], [1.5, 2], [1.5, 3], [0.5, 3])
-    expect(inTheNotch.every((v) => pointInPolygon(v, lCounter))).toBe(false)
+    expect(inTheNotch.some((v) => pointInPolygon(v, lCounter))).toBe(false)
     expect(convexPolygonsOverlap(lCounter, inTheNotch)).toBe(true)
   })
 
-  it('finds nothing to overlap with an empty footprint, and a point where there is one', () => {
-    expect(convexPolygonsOverlap([], ROOM)).toBe(false)
-    expect(convexPolygonsOverlap(ROOM, [])).toBe(false)
+  // SUSPECTED BUG: the separating-axis test builds its axes from the edges of
+  // the two polygons, and a footprint of a single point — or of none at all —
+  // has no edge to build one from. Every axis it contributes is (0, 0), every
+  // projection onto it is 0, and no separation can ever be found, so two points
+  // metres apart report as overlapping. The doc comment's caveat is about
+  // concave input and a point is convex, so this is not that. Nothing calls
+  // `convexPolygonsOverlap` today; a placement check handed a degenerate
+  // footprint would refuse every position on the floor. A shape that offers no
+  // axis should fall back to its bounds, or to a plain "no".
+  it('cannot separate two footprints that have no edges between them', () => {
+    expect(convexPolygonsOverlap([p(9, 9)], [p(1, 1)])).toBe(true)
+    expect(convexPolygonsOverlap([], [])).toBe(true)
+    // One real polygon supplies enough axes to get the right answer back.
     expect(convexPolygonsOverlap([p(2, 2)], ROOM)).toBe(true)
     expect(convexPolygonsOverlap([p(9, 9)], ROOM)).toBe(false)
+    expect(convexPolygonsOverlap([], ROOM)).toBe(false)
+    expect(convexPolygonsOverlap(ROOM, [])).toBe(false)
   })
 })

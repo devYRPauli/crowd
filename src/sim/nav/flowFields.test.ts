@@ -3,6 +3,7 @@ import type { NavGrid } from './eikonal'
 import { cellCenter, createNavGrid, gridIndex, sampleField, worldToCell } from './eikonal'
 import type { RouteDirection } from './flowFields'
 import {
+  DEFAULT_FLOW_OPTIONS,
   DensityField,
   FlowFieldCache,
   NOMINAL_BODY_RADIUS,
@@ -10,7 +11,7 @@ import {
   hardCoreCorrection,
   speedFromDensity,
 } from './flowFields'
-import { crowdSafetyLevel } from '../metrics/los'
+import { crowdSafetyLevel, losFor, weidmannFactor } from '../metrics/los'
 
 /** The kernel width the estimator is calibrated on, and the one the engine builds with. */
 const BANDWIDTH = 0.7
@@ -114,7 +115,6 @@ describe('hardCoreCorrection', () => {
   it('puts back the fifth a kernel loses to bodies that cannot overlap', () => {
     const correction = hardCoreCorrection(NOMINAL_BODY_RADIUS, BANDWIDTH)
     expect(correction).toBeCloseTo(1.241, 3)
-    expect(correction).toBeGreaterThan(1)
     // The Gaussian expects to find people inside the two-radius disc around
     // everybody, where nobody's centre can be. That share of its mass — 19% for
     // this body and this bandwidth — is what it comes back light by.
@@ -192,41 +192,66 @@ describe('DensityField', () => {
 
     // The field is right to read this: somebody standing there does occupy floor.
     const here = sampleField(grid, field.values, x, y, 0)
-    expect(here).toBeGreaterThan(0.5)
+    expect(here).toBeCloseTo(0.596, 3)
     // Which is most of a level-of-service band, and used raw it slows the only
     // person in the corridor down to 94% of their free speed.
     expect(speedFromDensity(here)).toBeLessThan(0.96)
 
-    expect(field.othersAt(x, y, here, 0)).toBeLessThan(0.02)
+    // Nobody else is in the corridor, so nothing survives the subtraction.
+    expect(field.othersAt(x, y, here, 0)).toBe(0)
     const ahead = sampleField(grid, field.values, x + PACE_LOOKAHEAD, y, 0)
-    expect(field.othersAt(x + PACE_LOOKAHEAD, y, ahead, PACE_LOOKAHEAD)).toBeLessThan(0.05)
-    expect(speedFromDensity(field.othersAt(x + PACE_LOOKAHEAD, y, ahead, PACE_LOOKAHEAD))).toBe(1)
+    const aheadOthers = field.othersAt(x + PACE_LOOKAHEAD, y, ahead, PACE_LOOKAHEAD)
+    expect(aheadOthers).toBeLessThan(0.01)
+    expect(speedFromDensity(aheadOthers)).toBe(1)
     // A sparse sample cannot drive the answer negative.
     expect(field.othersAt(x, y, 0.05, 0)).toBe(0)
   })
 
-  it('leaves the crowd in, but currently shaves a neighbour with the walker', () => {
+  it('leaves a neighbour in the reading, but shaves part of them off with the walker', () => {
     const grid = hallGrid()
-    const field = new DensityField(grid, BANDWIDTH, corridorMask(grid, 4.5, 7.5))
-    const x = 6
-    const y = 4.75
-    field.update(Float32Array.from([x, y, x + 0.6, y]), 2, 0)
-    const sampled = sampleField(grid, field.values, x, y, 0)
+    const mask = corridorMask(grid, 4.5, 7.5)
+    /** What a walker standing at (x, y) makes of a companion 0.6 m to their east. */
+    const companion = (x: number, y: number): { alone: number; asRead: number } => {
+      const pair = new DensityField(grid, BANDWIDTH, mask)
+      pair.update(Float32Array.from([x, y, x + 0.6, y]), 2, 0)
+      const solo = new DensityField(grid, BANDWIDTH, mask)
+      solo.update(Float32Array.from([x + 0.6, y]), 1, 0)
+      return {
+        alone: sampleField(grid, solo.values, x, y, 0),
+        asRead: pair.othersAt(x, y, sampleField(grid, pair.values, x, y, 0), 0),
+      }
+    }
 
-    const alone = new DensityField(grid, BANDWIDTH, corridorMask(grid, 4.5, 7.5))
-    alone.update(Float32Array.from([x + 0.6, y]), 1, 0)
-    const companionOnly = sampleField(grid, alone.values, x, y, 0)
+    // Standing on a cell centre the walker's own body comes off exactly, and
+    // the companion — half a person per square metre of real crowd — is left
+    // whole.
+    const onCentre = companion(6.15, 4.65)
+    expect(onCentre.alone).toBeCloseTo(0.476, 3)
+    expect(onCentre.asRead / onCentre.alone).toBeCloseTo(1, 6)
 
-    const others = field.othersAt(x, y, sampled, 0)
-    expect(others).toBeGreaterThan(0.3)
-    expect(others).toBeLessThan(sampled)
-    // SUSPECTED BUG, pinned as it behaves today: `othersAt` subtracts the walker's
-    // kernel *peak* for the cell they are in, while `sampled` is a bilinear read
-    // at their exact sub-cell position, which is lower. The difference comes off
-    // the neighbour — here the companion alone contributes 0.50 persons/m2 and
-    // only 0.41 of it survives. Never fabricated crowd, but ~18% of a real one.
-    expect(others).toBeLessThan(companionOnly * 0.9)
-    expect(others).toBeGreaterThan(companionOnly * 0.75)
+    // SUSPECTED BUG, pinned as it behaves today. Step half a cell — 15 cm, with
+    // the walker no further from their companion than they were — and part of
+    // the companion disappears from the reading. `othersAt` subtracts the
+    // walker's kernel *peak*, which is what they deposited at their own cell
+    // centre, while `sampled` is a bilinear read at their true sub-cell
+    // position, where their own kernel is lower; the excess comes off whoever
+    // else is near. It should take their own contribution off interpolated at
+    // the sample point, the way the sample itself was taken.
+    const halfACellEast = companion(6, 4.65)
+    expect(halfACellEast.asRead / halfACellEast.alone).toBeCloseTo(0.9453, 4)
+    // Worst against a wall, where the two rows the sample interpolates between
+    // carry different coverage corrections and the shortfall reaches 18%. What
+    // it costs is a bias of up to 0.09 persons/m² on every per-person density
+    // the engine asks for, and because it tracks where somebody stands inside a
+    // cell it sawtooths at the 0.3 m cell pitch as they walk — here the same
+    // pair of people, unmoved with respect to each other, are reported a whole
+    // Fruin band apart on where the walker's feet fell.
+    const offBothAxes = companion(6, 4.75)
+    expect(offBothAxes.alone).toBeCloseTo(0.5, 2)
+    expect(offBothAxes.asRead).toBeCloseTo(0.408, 3)
+    expect(offBothAxes.asRead / offBothAxes.alone).toBeCloseTo(0.8167, 4)
+    expect(losFor(offBothAxes.alone).level).toBe('C')
+    expect(losFor(offBothAxes.asRead).level).toBe('B')
   })
 
   it('subtracts less of the walker the further ahead the sample sits', () => {
@@ -242,15 +267,14 @@ describe('DensityField', () => {
     expect(aStrideOut).toBeLessThan(wellAhead)
     expect(wellAhead).toBeLessThan(sampled)
 
-    // How much of the walker comes off is the kernel evaluated at the sample
-    // distance — the same curve the field deposited them with, so a walker
-    // reading one stride ahead takes 81% of themselves off rather than all or
-    // none of it.
-    const share = (sampled - aStrideOut) / (sampled - atFeet)
-    expect(share).toBeCloseTo(
-      Math.exp(-(PACE_LOOKAHEAD * PACE_LOOKAHEAD) / (2 * BANDWIDTH * BANDWIDTH)),
-      6,
-    )
+    // How much of the walker comes off is their own kernel at the sample
+    // distance, so reading one stride ahead takes 81% of themselves off rather
+    // than all of it or none. All of it and a lone walker reads negative floor
+    // ahead of them; none of it and they slow down for themselves.
+    expect((sampled - aStrideOut) / (sampled - atFeet)).toBeCloseTo(0.8133, 4)
+    // Two bandwidths out is somebody else's space, and almost none of the
+    // walker follows them there.
+    expect((sampled - wellAhead) / (sampled - atFeet)).toBeCloseTo(0.1007, 4)
   })
 
   it('normalises by walkable floor, so a corridor does not read thinner than a hall', () => {
@@ -344,26 +368,49 @@ describe('DensityField', () => {
     // themselves. The floor on the division holds them to three and a bit times
     // their open-floor peak instead.
     expect(field.values[pocket]).toBeCloseTo(openPeak / 0.3, 5)
-    expect(field.values[pocket]).toBeLessThan(1.4)
     expect(crowdSafetyLevel(field.values[pocket])).toBe('safe')
   })
 
-  it('leaves the reading as it stands for a walker who is off the grid', () => {
+  it('leaves out anybody outside the venue, and never wraps a kernel to the far wall', () => {
     const grid = hallGrid()
-    const field = new DensityField(grid, BANDWIDTH)
-    field.update(Float32Array.from([6, 6]), 1, 0)
+    const alone = new DensityField(grid, BANDWIDTH)
+    alone.update(Float32Array.from([6.15, 6.15]), 1, 0)
 
-    // Somebody outside the nav grid has no coverage cell to scale their own
-    // body by, so the sample survives untouched instead of coming back NaN and
+    // People shoved off the west edge and past the north-east corner are not in
+    // the venue, so they are not in the field — cell for cell it is the one
+    // person who is.
+    const withStrays = new DensityField(grid, BANDWIDTH)
+    withStrays.update(Float32Array.from([-1, 6.15, 6.15, 6.15, 14, 20]), 3, 0)
+    expect([...withStrays.values]).toEqual([...alone.values])
+
+    // The stamp is a flat list of index offsets, so a kernel deposited against
+    // the west wall would land its western half on the east wall of the row
+    // below if the column were not checked — a phantom crowd 12 m away from
+    // anybody, in the one place a venue has its doors.
+    const atWall = new DensityField(grid, BANDWIDTH)
+    atWall.update(Float32Array.from([0.15, 6.15]), 1, 0)
+    let eastEdge = 0
+    for (let row = 0; row < grid.rows; row++) {
+      eastEdge += atWall.values[gridIndex(grid, grid.cols - 1, row)]
+    }
+    expect(eastEdge).toBe(0)
+    // The price of that is a border cell whose kernel hangs off the grid: it
+    // counts as unwalkable, so the same lone person reads 71% denser there than
+    // in the middle of the floor. `buildWorld` rings the plan with a 2 m margin,
+    // which is wider than the kernel reaches, so this sits where nobody walks.
+    const openFloor = alone.values[gridIndex(grid, 20, 20)]
+    expect(atWall.values[gridIndex(grid, 0, 20)] / openFloor).toBeCloseTo(1.706, 3)
+
+    // Somebody outside the grid has no coverage cell to scale their own body
+    // by, so the sample survives untouched instead of coming back NaN and
     // poisoning the speed they are given.
-    expect(field.othersAt(-3, 6, 2.5, 0)).toBe(2.5)
-    expect(field.othersAt(6, 40, 2.5, PACE_LOOKAHEAD)).toBe(2.5)
+    expect(alone.othersAt(-3, 6, 2.5, 0)).toBe(2.5)
+    expect(alone.othersAt(6, 40, 2.5, PACE_LOOKAHEAD)).toBe(2.5)
   })
 })
 
 describe('PACE_LOOKAHEAD', () => {
   it('reads one body ahead, from inside the kernel that does the reading', () => {
-    expect(PACE_LOOKAHEAD).toBeGreaterThan(0)
     expect(PACE_LOOKAHEAD).toBeCloseTo(2 * NOMINAL_BODY_RADIUS, 1)
     // Reaching past the bandwidth is what breaks doorways: people in the opening
     // see the clear floor beyond it, walk through at nearly free speed, and the
@@ -492,6 +539,63 @@ describe('FlowFieldCache', () => {
     expect(half).toBeLessThan(cache.cost('east', from, 1))
     // The shortest-path field is not touched by any of this.
     expect(cache.cost('east', from, 0)).toBe(staticCost)
+    // Nor is somebody paying a token half a percent of attention: below the
+    // threshold the second gradient is not sampled at all, so the cheap path
+    // stays cheap for the many people who walk it. A couple of percent is
+    // enough to start bending.
+    expect(requireRoute(cache.direction('east', from, 0.005)).dy).toBe(shortest.dy)
+    expect(requireRoute(cache.direction('east', from, 0.02)).dy).toBeGreaterThan(shortest.dy)
+
+    // SUSPECTED BUG, pinned as it behaves today: `direction` reports the
+    // empty-venue cost however congestion-aware it was asked to be, while
+    // `cost` on the same cache, point and awareness reports the blended one —
+    // and `direction` itself does return the congested value in the one branch
+    // where the shortest-path sample is unreachable, so it contradicts itself.
+    // It should blend the way `cost` does. A walker's `route.cost` in the run
+    // snapshot is the seconds they have left to walk: for the congestion-aware
+    // people — the ones who took the long way round precisely because it is
+    // quicker through this crowd — it under-reports the walk they are on and
+    // disagrees with the number their own door choice was made on.
+    expect(aware.cost).toBe(cache.cost('east', from, 0))
+    expect(aware.cost).toBeLessThan(cache.cost('east', from, 1))
+  })
+
+  it('prices a jam on the curve people walk it at, and still finds a way out', () => {
+    const { grid, cache } = room()
+    cache.ensure('east', [cellAt(grid, 11.5, 3)])
+    const from = { x: 1, y: 3 }
+    const empty = cache.cost('east', from, 0)
+    const clear = requireRoute(cache.direction('east', from, 0))
+    const crush = congestionAt(grid, 6, () => true)
+    cache.update(10, crush)
+
+    // What a route costs is what walking it costs: the scenario's share of the
+    // walk repriced on the same Weidmann curve the engine sets pace from, the
+    // rest left at free speed. Six persons per square metre is past jam
+    // density, and at the default weight the whole venue is still only 1.94
+    // times the walk across an empty one.
+    const weight = DEFAULT_FLOW_OPTIONS.congestionWeight
+    expect(cache.cost('east', from, 1) / empty).toBeCloseTo(
+      1 / (1 - weight + weight * weidmannFactor(6)),
+      3,
+    )
+
+    // Price the whole walk on the crowd and the speed law's own floor is all
+    // that holds the door open: past jam density Weidmann proper returns zero,
+    // a cell nobody can move through costs an infinity to cross, and a door
+    // that costs Infinity is one the whole venue gives up on and reports as
+    // unreachable. Even a jammed crowd shuffles, so the walk comes out eight
+    // times as long and finite.
+    expect(weidmannFactor(6)).toBe(0.12)
+    cache.setOptions({ congestionWeight: 1 })
+    cache.update(20, crush)
+    expect(cache.cost('east', from, 1) / empty).toBeCloseTo(1 / 0.12, 3)
+
+    // And a crowd that is everywhere is no reason to walk anywhere else: the
+    // gradient scales, it does not turn, so only a *local* crowd splits a route.
+    const through = requireRoute(cache.direction('east', from, 1))
+    const turn = Math.atan2(through.dy, through.dx) - Math.atan2(clear.dy, clear.dx)
+    expect(Math.abs(turn)).toBeLessThan(0.001)
   })
 
   it('refreshes the most overdue fields first, a budget at a time', () => {
@@ -519,6 +623,15 @@ describe('FlowFieldCache', () => {
     expect(refreshedAt(cache, 'a')).toBe(12)
     expect(refreshedAt(cache, 'b')).toBe(12)
     expect(refreshedAt(cache, 'c')).toBe(10.5)
+
+    // The budget is the only thing holding a tick back. Raised, everything
+    // overdue goes at once — which is what a venue does on its first tick, and
+    // why the default is two.
+    cache.setOptions({ budgetPerTick: 3 })
+    cache.update(14, jam)
+    expect(refreshedAt(cache, 'a')).toBe(14)
+    expect(refreshedAt(cache, 'b')).toBe(14)
+    expect(refreshedAt(cache, 'c')).toBe(14)
 
     cache.retain(new Set(['a']))
     expect(cache.size).toBe(1)
@@ -594,13 +707,15 @@ describe('FlowFieldCache', () => {
     // never clobber the shortest path everybody else is following.
     expect(field.congestedPotential).not.toBe(potential)
 
-    // Registering the destination again is what a venue with a dozen of them
-    // does on every setup pass: it gets the field back, not another solve.
+    // Registering a destination that is already known is a lookup, not a second
+    // eikonal solve: the same field comes back, still holding the goal it was
+    // solved for rather than the cells just handed to it. Nothing in the engine
+    // registers one id twice — seats sharing a field all go through a `has`
+    // guard first — so a caller who moved a destination under an id and expected
+    // a new route would be the first to find out.
     const again = cache.ensure('east', [cellAt(grid, 0.5, 3)])
     expect(again).toBe(field)
     expect(again.staticPotential).toBe(potential)
-    // Including the goal it was solved for — a re-registration is a lookup, and
-    // the new cells are ignored.
     expect(again.goalCells).toEqual([cellAt(grid, 11.5, 3)])
 
     cache.cost('east', { x: 3, y: 3 }, 1)
@@ -640,5 +755,35 @@ describe('FlowFieldCache', () => {
     // Congestion-aware people get the empty-venue answer, because that is the
     // only one this run has — never a stale one dressed up as current.
     expect(cache.cost('east', { x: 6, y: 3 }, 1)).toBe(cache.cost('east', { x: 6, y: 3 }, 0))
+  })
+
+  it('still gives a walker a heading when the two routes cancel each other out', () => {
+    const { grid, cache } = room()
+    const field = cache.ensure('east', [cellAt(grid, 11.5, 3)])
+    const from = { x: 6, y: 3 }
+    const shortest = requireRoute(cache.direction('east', from, 0))
+
+    // A congested field that runs uphill exactly where the static one runs
+    // down. No crowd makes a perfect mirror, and that is the point: the blend
+    // has to survive the one pair of headings it cannot average, because what
+    // it would otherwise hand back is a zero vector normalised into noise — a
+    // walker shoved in a random direction, or stopped dead in an open room.
+    let span = 0
+    for (const value of field.staticPotential) {
+      if (Number.isFinite(value) && value > span) span = value
+    }
+    field.congestedPotential = Float32Array.from(field.staticPotential, (value) =>
+      Number.isFinite(value) ? span - value : value,
+    )
+    field.refreshedAt = 0
+    expect(requireRoute(cache.direction('east', from, 1)).dx).toBeCloseTo(-shortest.dx, 12)
+
+    const halfAware = requireRoute(cache.direction('east', from, 0.5))
+    expect(halfAware.dx).toBe(shortest.dx)
+    expect(halfAware.dy).toBe(shortest.dy)
+    expect(Math.hypot(halfAware.dx, halfAware.dy)).toBeCloseTo(1, 9)
+    // The cost is a straight average of the two and needs no such rescue: half
+    // of a walk and half of its mirror is half the span of the field.
+    expect(cache.cost('east', from, 0.5)).toBeCloseTo(span / 2, 5)
   })
 })
