@@ -236,12 +236,17 @@ describe('openingThreshold', () => {
   })
 
   it('still spans the full leaf for a door at the wall end, though half of it is solid', () => {
-    // SUSPECTED BUG (asserting current behaviour): `solidSpans` clamps a gap to
-    // the wall but `openingThreshold` does not, so a door centred on the end of
-    // a wall gets a destination twice as wide as the hole it stands in. Half of
-    // it is floor beside the wall, and people sent there walk round the door
-    // rather than through it — which is exactly the metering this polygon
-    // exists to preserve.
+    // Recorded decision. `solidSpans` clamps a gap to the wall it is cut in;
+    // this does not, so a door hung on the very end of a wall describes a
+    // doorway twice as wide as the hole, half of it open floor beside the wall,
+    // and people sent there walk round the door rather than through it.
+    // Clamping here would hide the real fault rather than fix it: an opening
+    // that does not fit its wall. `fitToWall` in core/document/mutations.ts is
+    // what keeps every opening the inspector and the tools produce on its wall
+    // with a jamb either side, and the paths that still skip it — the plan
+    // builder, and a plan arriving from a file — are where the fit belongs. A
+    // threshold that quietly shrank instead would leave the drawing, the
+    // document and the simulation each with a different door.
     const w = wall(0, 0, 6, 0, 0.2)
     const o = door(w, 6)
     expect(solidSpans(w, [o])).toEqual([{ start: 0, end: 6 - LEAF / 2 }])
@@ -389,10 +394,17 @@ describe('service points', () => {
   })
 
   it('stacks two stations on top of each other on a counter 0.6 m wide', () => {
-    // SUSPECTED BUG (asserting current behaviour): the spread is
-    // `(width - 0.6)`, so at 0.6 m every station collapses onto the counter
-    // centre and below it the order reverses. Two staff and two customers then
-    // occupy one point, which the rest of the engine forbids.
+    // Recorded decision. The 0.6 m is elbow room: the end station stands that
+    // much in from the counter's corner instead of on it, which is what makes
+    // a normal bar read right. A 0.6 m counter is barely one person wide, so
+    // two staffed positions on it is a plan that could not be built, and the
+    // spread has nothing left to give — both stations land on the centre, and
+    // narrower still the spread goes negative and the two mirror. Nobody ends
+    // up inside anybody: a station is the mark a customer is sent to, not where
+    // a body is placed, and contact resolution keeps the pair apart when they
+    // arrive. Spreading over a fixed fraction of the width instead would move
+    // every station on every counter under 1.2 m wide to tidy up one no venue
+    // has.
     const [a, b] = servicePositions(counterAt(0, { width: 0.6 }))
     expect(a).toEqual(b)
     const narrow = servicePositions(counterAt(0, { width: 0.4 }))

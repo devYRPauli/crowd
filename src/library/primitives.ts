@@ -144,8 +144,13 @@ export const legs = (
   thickness = 0.06,
   inset = 0.06,
 ): Prim[] => {
-  const hx = w / 2 - inset - thickness / 2
-  const hz = d / 2 - inset - thickness / 2
+  // Pulled in to the centre line rather than past each other on a top narrower
+  // than its own insets. Unclamped, the near pair crosses behind the far one
+  // and then walks outside the footprint entirely — and the navigation grid
+  // takes its footprint from the item's declared size, so that is steel the
+  // renderer draws and people walk straight through.
+  const hx = Math.max(0, w / 2 - inset - thickness / 2)
+  const hz = Math.max(0, d / 2 - inset - thickness / 2)
   return [
     [-hx, -hz],
     [hx, -hz],
@@ -169,14 +174,23 @@ export const pedestal = (
 export const translated = (prims: Prim[], dx: number, dy: number, dz: number): Prim[] =>
   prims.map((p) => ({ ...p, x: (p.x ?? 0) + dx, y: (p.y ?? 0) + dy, z: (p.z ?? 0) + dz }))
 
-/** Rotate a group of primitives about the local Y axis. */
+/**
+ * Rotate a group of primitives about the local Y axis.
+ *
+ * The angle is measured the way the rest of the product measures one — +X
+ * toward +Z, as the catalog's rings and `planBuilder` do — but `rot` goes
+ * straight to a Three.js Euler, where a positive Y rotation runs the other way.
+ * So the part's own turn takes the angle negated: adding it to both mirrors
+ * every copy about its own radius, and a ring of chairs comes out facing back
+ * across the hub.
+ */
 export const rotated = (prims: Prim[], angle: number): Prim[] => {
   const c = Math.cos(angle)
   const s = Math.sin(angle)
   return prims.map((p) => {
     const x = p.x ?? 0
     const z = p.z ?? 0
-    return { ...p, x: x * c - z * s, z: x * s + z * c, rot: (p.rot ?? 0) + angle }
+    return { ...p, x: x * c - z * s, z: x * s + z * c, rot: (p.rot ?? 0) - angle }
   })
 }
 

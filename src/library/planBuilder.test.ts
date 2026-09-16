@@ -254,18 +254,18 @@ describe('doors and windows', () => {
   })
 
   it('hangs a door wherever it is told, including where there is no wall', () => {
-    // SUSPECTED BUG: `door()` never checks the offset against the wall it
-    // names, and it is the only way into a plan that does not. Twenty-five
-    // metres along a twenty-metre wall is accepted, kept in the plan and saved
-    // without a murmur; `solidSpans` clamps it to nothing, so the wall stays
-    // solid, and `buildWorld` still takes it as a way in — standing five metres
-    // outside the building. A population told to arrive through that door is
-    // spawned in the car park with no way into a sealed room, and the run
-    // reports people who could not reach anything rather than the typo.
-    // `fitToWall` in core/document/mutations.ts is what the inspector, the
-    // tools and a plan arriving from a file all go through already, and it is
-    // what `door()` should do: keep the leaf on the wall with OPENING_JAMB of
-    // wall either side of it.
+    // Decided: the builder hangs an opening exactly where the code asked for
+    // it and fits nothing. It is a code-level API — the templates, the engine's
+    // fixtures, the validation harness — so an offset past the end of a wall is
+    // a typo in a venue under test, and a silent clamp would move the door
+    // somewhere nobody wrote and leave the plan looking deliberate. What the
+    // *user* does goes through `fitToWall` in core/document/mutations.ts, which
+    // is asserted below; a plan arriving from a file does not, so this is not
+    // the one way in that skips it. Fitting here would mean exporting
+    // `fitToWall` or spelling the rule out a second time in this file.
+    //
+    // So this test pins what the rest of the system makes of a door that misses
+    // its wall, which is the part that has to stay survivable.
     const b = new PlanBuilder()
     const room = b.room(0, 0, 20, 12)
     const stray = b.door(room.south, 25, DEFAULT_DOOR_WIDTH, 'door', 'entry')
@@ -281,7 +281,6 @@ describe('doors and windows', () => {
 
     // The same offset through the document's own edit path — where the
     // inspector and every tool put it — comes back on the wall, jamb and all.
-    // That is the behaviour this test is waiting for.
     const fitted = updateOpening(document, stray.id, { offset: 25 }).plan.openings[0]
     expect(fitted.offset).toBeCloseTo(20 - DEFAULT_DOOR_WIDTH / 2 - OPENING_JAMB, 9)
 
@@ -302,13 +301,15 @@ describe('doors and windows', () => {
   })
 
   it('lets one door swallow the wall it is cut into', () => {
-    // SUSPECTED BUG: the same unchecked opening geometry in the other
-    // dimension, and this one costs more. A 30 m leaf in a 20 m wall leaves no
-    // solid stretch at all, so the wall hands the engine no collision edges:
-    // the plan still lists four walls and the editor still draws four, while
-    // the room stands open along its whole south side and everybody walks out
-    // through the wall. `fitToWall` caps a leaf at the wall it is cut into
-    // less a jamb either side, which is the cap `door()` is missing.
+    // Decided: the same unfitted geometry in the other dimension, and the
+    // survivable outcome is the point. A 30 m leaf in a 20 m wall leaves no
+    // solid stretch, so the wall hands the engine no collision edges at all —
+    // which is what src/sim/world.test.ts pins, three obstacle polygons rather
+    // than a fourth built from slivers, because a sliver reaches ORCA with
+    // edges that have no direction and steers nobody anywhere. Capping the leaf
+    // in `door()` would put two 51 mm stubs back on that wall and rewrite that
+    // fixture. The cap belongs where the user edits, and `fitToWall` applies it
+    // there — the last line here.
     const b = new PlanBuilder()
     const room = b.room(0, 0, 20, 12)
     const swallow = b.door(room.south, 10, 30)
@@ -400,15 +401,7 @@ describe('the plan it emits', () => {
     expect(isCounterClockwise(arrivals.polygon)).toBe(true)
   })
 
-  it('hands out the arrays it goes on writing to', () => {
-    // SUSPECTED BUG: `build()` returns the builder's own arrays rather than
-    // copies of them. A document is meant to be a snapshot — plain, immutable,
-    // and diffed by array identity by the renderer — but anything added to the
-    // builder afterwards appears inside a document that was handed over long
-    // before, behind undo's back and without the array identity changing to
-    // say anything happened. A fixture that builds a venue and then goes on to
-    // build a variant of it ends up with two references to one growing plan.
-    // `build()` should copy.
+  it('hands out the plan as it stands, not the arrays it goes on writing to', () => {
     const b = new PlanBuilder()
     b.room(0, 0, 4, 4)
     const plan = b.build()
@@ -417,8 +410,16 @@ describe('the plan it emits', () => {
 
     b.wall({ x: 10, y: 0 }, { x: 14, y: 0 })
 
-    expect(document.plan.walls).toHaveLength(5)
-    expect(b.build().walls).toBe(plan.walls)
+    // The document was finished before that wall was drawn. Sharing the
+    // builder's arrays grew it a fifth wall with no edit, no undo step and no
+    // change of array identity for the renderer to notice — and a fixture that
+    // builds a venue and then a variant of it held two views of one plan.
+    expect(document.plan.walls).toHaveLength(4)
+    expect(b.build().walls).toHaveLength(5)
+    expect(b.build().walls).not.toBe(plan.walls)
+    // The walls themselves are still shared: it is the list that is a snapshot,
+    // not a deep copy of everything in it.
+    expect(b.build().walls[0]).toBe(plan.walls[0])
   })
 })
 
@@ -495,14 +496,10 @@ describe('furniture', () => {
     expect(seats).toHaveLength(21)
     expect(new Set(seats.map((seat) => seat.furnitureId)).size).toBe(3)
 
-    // SUSPECTED BUG: the JSDoc says these rows face +Y, and they face -Y. The
-    // geometry is the self-consistent reading — rows recede in +Y, so the
-    // audience looks back down the block at a stage in front of row one — which
-    // makes the comment the thing that is wrong. No template uses
-    // `seatingBlock` yet, so nothing ships facing backwards today; the cost is
-    // to the next author, who believes the comment, puts the stage behind the
-    // audience, and seats a whole venue facing away from what they came to
-    // watch.
+    // Which way the house looks is the difference between a stage and the back
+    // of everybody's head, and a plan view of a seating block shows neither.
+    // Rows recede in +Y from the front row, so the audience faces -Y, at a
+    // stage in front of row one.
     for (const seat of seats) {
       expect(Math.sin(seat.facing)).toBeCloseTo(-1, 9)
       expect(Math.cos(seat.facing)).toBeCloseTo(0, 9)

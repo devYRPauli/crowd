@@ -161,7 +161,12 @@ export class PlanBuilder {
     }
   }
 
-  /** Rows of theatre seating facing +Y. */
+  /**
+   * Rows of theatre seating: the front row at `y`, the rest stacked behind it
+   * in +Y, everybody facing -Y. The stage goes in front of row one, not behind
+   * it — a block read the other way round seats a whole house looking away
+   * from what they came to watch.
+   */
   seatingBlock(x: number, y: number, rowCount: number, width: number, rowSpacing = 0.95): void {
     for (let row = 0; row < rowCount; row++) {
       this.place('seat-row', x, y + row * rowSpacing, Math.PI, {
@@ -222,12 +227,17 @@ export class PlanBuilder {
   }
 
   build(): Plan {
+    // Copies, because what comes out is a snapshot: a document is plain and
+    // immutable, and the renderer diffs it by array identity. Handing over the
+    // builder's own arrays let a venue built afterwards grow inside a document
+    // finished long before, behind undo and without any identity changing to
+    // say it had.
     return {
-      walls: this.walls,
-      openings: this.openings,
-      furniture: this.furniture,
-      zones: this.zones,
-      servicePoints: this.servicePoints,
+      walls: [...this.walls],
+      openings: [...this.openings],
+      furniture: [...this.furniture],
+      zones: [...this.zones],
+      servicePoints: [...this.servicePoints],
     }
   }
 }

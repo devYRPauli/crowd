@@ -59,9 +59,9 @@ const topside = (prim: BoxPrim | CylinderPrim): number => py(prim) + prim.h / 2
  * A Y rotation of θ carries +Z to (sin θ, cos θ) and +X to (cos θ, -sin θ), so
  * `rot` runs the opposite way round from every angle the plan itself measures —
  * the catalog's rings step +X toward +Z, and `PlanRenderer` negates a plan angle
- * on its way into Three (`makeRotationY(-item.rotation)`). Nothing negates
- * anything inside an item, which is the trap the last test in this file is
- * about.
+ * on its way into Three (`makeRotationY(-item.rotation)`). `rotated` negates it
+ * too, which is what keeps the parts of a group pointing where its positions
+ * went.
  */
 const heading = (prim: Prim): { x: number; z: number } => {
   const rot = prim.rot ?? 0
@@ -186,29 +186,26 @@ describe('legs under a top', () => {
     }
   })
 
-  it('crosses its legs over once the top is narrower than the inset it is given', () => {
-    // SUSPECTED BUG. `hz = d / 2 - inset - thickness / 2` is never clamped, so
-    // it goes negative below `2 * inset + thickness` and the near pair of legs
-    // is emitted behind the far pair; below `inset + thickness` the pairs are
-    // outside the top altogether. Both thresholds — 0.25 m and 0.15 m on the
-    // trestle table's own leg settings, and it resizes freely — are above the
-    // 0.1 m the inspector's Depth field accepts, so this is a size a user can
-    // type rather than a fuzzed one. At that depth 50 mm of steel stands proud
-    // of each long edge, outside the footprint the navigation grid takes from
-    // the item's declared size, so people are routed straight through it. I
-    // would expect the corners to be pulled in to meet at the centre line
-    // instead. Asserting what it does now.
-    const crossed = legs(1.83, 0.24, 0.71, 'metal', 0.05, 0.1).map(asBox)
-    expect(pz(crossed[0])).toBeCloseTo(0.005, 12)
-    expect(pz(crossed[2])).toBeCloseTo(-0.005, 12)
-    // Crossed but still hidden under a 0.24 m top, which is why nothing shows
-    // until the top is narrower still.
-    expect(Math.abs(pz(crossed[0])) + crossed[0].d / 2).toBeLessThan(0.24 / 2)
+  it('folds its legs onto the centre line rather than past each other on a narrow top', () => {
+    // The trestle table's own leg settings, and it resizes freely. Unclamped,
+    // the pairs cross below a 0.25 m top and stand outside it below 0.15 m —
+    // both above the 0.1 m the inspector's Depth field accepts, so a user can
+    // type their way there. Steel proud of the long edge is outside the
+    // footprint the navigation grid takes from the item's declared size, and
+    // people are then routed straight through it.
+    const narrow = legs(1.83, 0.24, 0.71, 'metal', 0.05, 0.1).map(asBox)
+    for (const leg of narrow) {
+      expect(pz(leg)).toBeCloseTo(0, 12)
+      expect(leg.d / 2).toBeLessThan(0.24 / 2)
+    }
+    // Two legs a side rather than four corners, which is what a top this narrow
+    // has room for.
+    expect(new Set(narrow.map(px)).size).toBe(2)
 
     const pinched = legs(1.83, MIN_EDITABLE, 0.71, 'metal', 0.05, 0.1).map(asBox)
     for (const leg of pinched) {
-      expect(Math.abs(pz(leg)) + leg.d / 2 - MIN_EDITABLE / 2).toBeCloseTo(0.05, 12)
-      // The long axis is untouched: only the pinched one folds through itself.
+      expect(Math.abs(pz(leg)) + leg.d / 2).toBeLessThanOrEqual(MIN_EDITABLE / 2)
+      // The long axis is untouched: only the pinched one folds in.
       expect(Math.abs(px(leg)) + leg.w / 2).toBeCloseTo(1.83 / 2 - 0.1, 12)
     }
   })
@@ -243,14 +240,15 @@ describe('a pedestal base', () => {
   })
 
   it('stands a small top on a foot narrower than its own column', () => {
-    // SUSPECTED BUG. The column is `0.12 r + 0.025` and the foot a plain
-    // `0.45 r`, so the foot loses the race below a top radius of 76 mm and the
-    // base comes out wider where it meets the table than where it meets the
-    // floor. A round table resizes uniformly, so the 0.1 m width the inspector
-    // accepts is a 0.05 m radius: a 31 mm column balanced on a 22.5 mm disc,
-    // rather than the "column and foot disc" the helper documents. I would
-    // expect the foot to have a floor of its own, as the column has. Asserting
-    // what it does.
+    // Decided: the column has a floor (`0.12 r + 0.025`) and the foot does not
+    // (`0.45 r`), so below a 76 mm top radius the base comes out wider where it
+    // meets the table than where it meets the floor. That is a 0.15 m wide
+    // table — a size only a hand-typed width reaches, and no catalog entry is
+    // near it — and the whole base still sits inside the footprint the engine
+    // takes from the declared size, so nothing but the picture changes. Giving
+    // the foot a floor of its own would mean inventing a second proportion for
+    // a case nobody draws. Pinned here so that if an item ever does get that
+    // small, this says what it will look like.
     const [column, foot] = pedestal(0.71, MIN_EDITABLE / 2, 'metalDark').map(asCyl)
     expect(column.r).toBeCloseTo(0.031, 12)
     expect(foot.r).toBeCloseTo(0.0225, 12)
@@ -315,8 +313,9 @@ describe('repeating a sub-assembly around the axis', () => {
     expect(px(twice)).toBeCloseTo(px(once), 12)
     expect(pz(twice)).toBeCloseTo(pz(once), 12)
     // The part's own turn is added to, not replaced: a pre-rotated part in a
-    // group would otherwise snap square the moment the group was repeated.
-    expect(twice.rot).toBeCloseTo(1.3, 12)
+    // group would otherwise snap square the moment the group was repeated. It
+    // goes the other way round from the positions — see the next test.
+    expect(twice.rot).toBeCloseTo(-1.3, 12)
 
     // A hub part authored without coordinates stays on the axis rather than
     // being swung to NaN.
@@ -324,33 +323,29 @@ describe('repeating a sub-assembly around the axis', () => {
     expect([px(hub), py(hub), pz(hub)]).toEqual([0, 0.35, 0])
   })
 
-  it('turns each part against the arc it swings it along', () => {
-    // SUSPECTED BUG. The positions turn one way and the parts turn the other.
-    // `rotated` swings x,z from +X toward +Z — the convention the catalog's
-    // rings and `planBuilder` use — but adds the same angle to `rot`, which the
-    // renderer hands to a Three.js Euler, where a positive Y rotation takes +X
-    // toward -Z. Every copy therefore comes out mirrored about its own radius,
-    // twisted by twice the step. Negating the angle added to `rot` would make
-    // this a rigid turn. Nothing in the catalog calls `rotated` or `radial`
-    // today, which is why no item shows it. Asserting what it does now.
+  it('carries each part round facing the way the arc took it', () => {
+    // The positions turn +X toward +Z, the way the catalog's rings and
+    // `planBuilder` measure an angle, and `rot` turns by the same amount the
+    // other way, because the renderer hands it to a Three.js Euler where a
+    // positive Y rotation runs +X toward -Z. Added to both, every copy comes
+    // out mirrored about its own radius and twisted by twice the step: a
+    // quarter of the way round a ring, a part that faced away from the hub
+    // faces straight back across it, and only the half turn looks right.
     const step = 0.4
     const outward = box(0, 0.5, 1.0, 0.4, 0.5, 0.06, 'fabric')
     expect(outwardness(outward)).toBeCloseTo(1, 12)
 
     const [swung] = rotated([outward], step)
     expect(radius(swung)).toBeCloseTo(1, 12)
-    expect(outwardness(swung)).toBeCloseTo(Math.cos(2 * step), 12)
+    expect(swung.rot).toBeCloseTo(-step, 12)
+    expect(outwardness(swung)).toBeCloseTo(1, 12)
 
-    // `radial` inherits it, so the one helper meant for rings of chairs, spokes
-    // and hub fittings cannot draw one: a quarter of the way round, a part that
-    // faced away from the axis faces straight back across it. Half a turn puts
-    // it right again, which is how a ring of four hides the fault in two of its
-    // copies.
+    // Which is what lets `radial` draw the rings of chairs, spokes and hub
+    // fittings it is there for.
     const ring = radial([outward], 4)
     expect(px(ring[1])).toBeCloseTo(-1, 12)
     expect(pz(ring[1])).toBeCloseTo(0, 12)
-    expect(outwardness(ring[1])).toBeCloseTo(-1, 12)
-    expect(outwardness(ring[2])).toBeCloseTo(1, 12)
+    for (const copy of ring) expect(outwardness(copy)).toBeCloseTo(1, 12)
   })
 
   it('repeats a group evenly around the axis from the angle it is given', () => {

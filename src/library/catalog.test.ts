@@ -32,14 +32,6 @@ const SEATED = CATALOG.filter((item) => item.seats !== undefined)
 /** The inspector's own lower bound on width and depth. It offers no upper one. */
 const MIN_EDITABLE = 0.1
 
-/**
- * The two tables whose rows run off the end of the table — see 'runs a bench
- * row off the end of the table'. Until that is fixed they break the general
- * rules about where a place may sit, so those rules are asserted without them
- * and their real positions are pinned in that test instead.
- */
-const BENCH_SEAT_TABLES = new Set(['table-rect-6ft', 'table-conference'])
-
 /** Counters people are served across, which stand at counter rather than table height. */
 const SERVED_ACROSS = new Set([
   'counter-bar',
@@ -305,14 +297,13 @@ describe('sizes somebody could order', () => {
     const misspelt = claimed.filter(
       ([id, axis, ft]) => resolveCatalogItem(id).size[axis] !== feet(ft),
     )
-    // SUSPECTED BUG (minor): five of the six match to the millimetre and the
-    // trestle does not — 1.83 is a centimetre-rounded 6 ft against the banquet
-    // round's 1.829. The comment on `table-round-8` says in so many words that
-    // two items claiming one imperial dimension should not round it
-    // differently, and they still do. Asserting both spellings as they stand.
-    expect(misspelt.map(([id]) => id)).toEqual(['table-rect-6ft'])
-    expect(resolveCatalogItem('table-rect-6ft').size.width).toBe(1.83)
-    expect(resolveCatalogItem('table-round-8').size.width).toBe(1.829)
+    expect(misspelt.map(([id]) => id)).toEqual([])
+    // The trestle and the banquet round are both 6 ft and both say so the same
+    // way, to the millimetre: a centimetre-rounded 1.83 beside a 1.829 is two
+    // sizes that never line up when they are laid end to end.
+    expect(resolveCatalogItem('table-rect-6ft').size.width).toBe(
+      resolveCatalogItem('table-round-8').size.width,
+    )
   })
 
   it('sizes every seat for the number of people it holds', () => {
@@ -508,7 +499,6 @@ describe('the places people can take', () => {
   it('keeps every place within reach of the item it belongs to', () => {
     const adrift: string[] = []
     for (const item of SEATED) {
-      if (BENCH_SEAT_TABLES.has(item.id)) continue
       for (const size of [item.size, resized(item.size, 1.6), resized(item.size, 0.6)]) {
         for (const slot of places(item, size)) {
           // Half a metre past the edge is a chair pulled out from a table. More
@@ -545,7 +535,6 @@ describe('the places people can take', () => {
     // bar faces the bar in front of it, not the middle of the counter.
     const wrong: string[] = []
     for (const item of SEATED) {
-      if (BENCH_SEAT_TABLES.has(item.id)) continue
       for (const slot of places(item)) {
         const edge = nearestEdge(item, slot, item.size)
         const dx = edge.x - slot.x
@@ -588,48 +577,47 @@ describe('the places people can take', () => {
     expect(fixed).toEqual([])
   })
 
-  it('runs a bench row off the end of the table', () => {
-    // SUSPECTED BUG. `benchSeats` steps across `width * 0.82 * 2` from a start
-    // of `-width / 2 * 0.82`, so the row spans twice the table and hangs off
-    // the +X end; dropping the `* 2` would centre it. Asserting what it does
-    // now, not what it should do.
+  it('lays a bench row down the length of the table it belongs to', () => {
+    // A cover laid past the end of the table is one the engine walks somebody
+    // out to and seats facing the gangway, with `tableWithChairs` standing a
+    // real chair out there for the plan to draw floating in the aisle.
     const trestle = resolveCatalogItem('table-rect-6ft')
     const xs = places(trestle).map((slot) => slot.x)
     expect([...new Set(xs)].sort((a, b) => a - b)).toHaveLength(3)
-    // The table runs from -0.915 to 0.915: the first pair is nowhere near the
-    // left end and the last pair is 0.84 m past the right one, in the aisle.
-    expect(Math.min(...xs)).toBeCloseTo(-0.2501, 4)
-    expect(Math.max(...xs)).toBeCloseTo(1.7507, 4)
-    expect(Math.max(...xs) - trestle.size.width / 2).toBeCloseTo(0.8357, 4)
+    // Three a side on a 6 ft trestle, each with 0.61 m of it, and the end pair
+    // half a cover in from the ends of a top that runs -0.915 to 0.915.
+    expect(places(trestle)).toHaveLength(6)
+    expect(Math.min(...xs)).toBeCloseTo(-0.6097, 4)
+    expect(Math.max(...xs)).toBeCloseTo(0.6097, 4)
+    expect(trestle.size.width / 2 - Math.max(...xs)).toBeCloseTo(0.3048, 4)
 
     const conference = resolveCatalogItem('table-conference')
     const far = places(conference).map((slot) => slot.x)
-    // Half of a boardroom's covers are off the end of a 3 m table.
-    expect(far.filter((x) => Math.abs(x) > conference.size.width / 2)).toHaveLength(4)
-    expect(Math.max(...far)).toBeCloseTo(3.075, 6)
+    expect(far.filter((x) => Math.abs(x) > conference.size.width / 2)).toEqual([])
+    expect(Math.max(...far)).toBeCloseTo(1.125, 6)
 
-    // What it costs: a stranded place keeps the facing of a row, so its
-    // occupant is drawn staring across an empty aisle — and `tableWithChairs`
-    // stands a real chair on every place, which is a chair the plan draws
-    // floating past the end of the table.
+    // And every one of a boardroom's covers looks across the table rather than
+    // over its shoulder at the wall.
     for (const slot of places(conference)) {
-      if (Math.abs(slot.x) <= conference.size.width / 2) continue
       const edge = nearestEdge(conference, slot, conference.size)
       const dx = edge.x - slot.x
       const dz = edge.z - slot.z
       const range = Math.hypot(dx, dz)
-      expect((Math.cos(slot.facing) * dx + Math.sin(slot.facing) * dz) / range).toBeLessThan(0.75)
+      expect((Math.cos(slot.facing) * dx + Math.sin(slot.facing) * dz) / range).toBeCloseTo(1, 12)
     }
   })
 
   it('offers places inside items that block, which the world then drops', () => {
-    // SUSPECTED BUG. `buildWorld` keeps only the places that land on a free
-    // navigation cell, and a blocking item rasterises its own footprint dilated
-    // by NAV_CLEARANCE. A place in the middle of one is never free, so these
-    // three advertise seats — in the library panel, in the inspector's "2
-    // seats" header — that the simulation silently discards: nobody ever sits
-    // on a sofa, a bench or an armchair. The loose seating escapes it by not
-    // blocking, and the tables by standing their covers clear.
+    // Decided: a place on a sofa, a bench or an armchair is on the cushion,
+    // where a person actually sits, and those three block — so `buildWorld`,
+    // which keeps only places on a free navigation cell, drops every one of
+    // them. The catalog side of this is right: moving the cushion off the
+    // furniture to satisfy the grid would draw people sitting in mid-air beside
+    // it, and dropping `blocking` would let the crowd walk through a sofa. The
+    // fix belongs in src/sim/world.ts, where the filter would have to ignore
+    // the seat's own item — its footprint is not an obstacle to the person
+    // sitting on it. Until then the count in the library panel and the
+    // inspector's header is a count the simulation will not honour.
     const unreachable = SEATED.filter((item) =>
       places(item).every((slot) => !standsOnFreeFloor(item, slot)),
     )
@@ -788,9 +776,18 @@ describe('building the geometry', () => {
   })
 
   it('turns inside out at sizes the inspector will still accept', () => {
-    // SUSPECTED BUG. Width and depth are typed straight in, floored at 0.1 m
-    // and with no ceiling at all, so every size below is one a user can reach
-    // by hand.
+    // Decided: a builder is plain arithmetic over the size it is handed, and
+    // nothing clamps the result. Width and depth are typed straight into the
+    // inspector, floored at 0.1 m with no ceiling (src/app/panels/
+    // InspectorPanel.tsx), so every size below is one a user can reach by hand
+    // and every item here draws something turned inside out at it.
+    //
+    // Left alone because the alternative is a clamp in each of forty-nine
+    // builders — arithmetic nobody could read afterwards — for a fault that is
+    // visible the moment it is drawn and that the engine never sees: the
+    // footprint people walk around comes from the declared size, not from the
+    // geometry. The inventory is pinned instead, so a new item that folds up at
+    // an ordinary size shows here rather than in a venue.
     const tv = resolveCatalogItem('screen-tv')
     const pole = (size: Size): number => {
       const prim = tv.build(size).find((part) => part.type === 'cyl')

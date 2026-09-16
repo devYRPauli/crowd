@@ -92,7 +92,11 @@ const benchSeats = (width: number, depth: number, perSide: number): SeatSlot[] =
   const out: SeatSlot[] = []
   const z = depth / 2 + 0.38
   for (let i = 0; i < perSide; i++) {
-    const x = (-width / 2) * 0.82 + ((i + 0.5) / perSide) * width * 0.82 * 2
+    // Each cover takes the middle of its own share of the length, so the row is
+    // centred on the table and the end pair sits half a cover in from the ends.
+    // A cover laid past the end is a place the engine seats somebody at, facing
+    // the gangway, with `tableWithChairs` standing a real chair out there.
+    const x = -width / 2 + ((i + 0.5) / perSide) * width
     out.push({ x, z, facing: -Math.PI / 2, kind: 'seat' })
     out.push({ x, z: -z, facing: Math.PI / 2, kind: 'seat' })
   }
@@ -142,10 +146,11 @@ const TABLES: CatalogItem[] = [
     id: 'table-round-8',
     name: 'Banquet round (8)',
     category: 'tables',
-    // A true 6 ft round — the sibling `table-rect-6ft` spells the same size
-    // 1.83, and two items claiming one imperial dimension should not round it
-    // differently. The trade sets these for ten; eight is the comfortable
-    // setting and what this one is named for.
+    // A true 6 ft round, spelled the way `standards.ts` rounds feet to the
+    // millimetre — the same 1.829 as the sibling `table-rect-6ft`, because two
+    // items claiming one imperial dimension are two sizes that never line up if
+    // they round it differently. The trade sets these for ten; eight is the
+    // comfortable setting and what this one is named for.
     size: { width: 1.829, depth: 1.829, height: 0.75 },
     blocking: true,
     footprint: 'circle',
@@ -163,7 +168,8 @@ const TABLES: CatalogItem[] = [
     id: 'table-rect-6ft',
     name: 'Trestle table (6 ft)',
     category: 'tables',
-    size: { width: 1.83, depth: 0.76, height: 0.75 },
+    // 6 ft to the millimetre, the same spelling as the banquet round above.
+    size: { width: 1.829, depth: 0.76, height: 0.75 },
     blocking: true,
     footprint: 'rect',
     inset: 0,
