@@ -14,7 +14,14 @@ import type { PointerInfo } from '../../render/Viewport'
 import type { CrowdDocument, PlanObjectRef, Wall } from '../../core/model/types'
 import type { Vec2 } from '../../core/math/vec2'
 import { add, angleOf, distance, rotate as rotateVec, sub } from '../../core/math/vec2'
-import { boundsOf, pointInPolygon, polygonCentroid } from '../../core/math/geometry'
+import {
+  boundsOf,
+  closestPointOnSegment,
+  distanceToSegment,
+  pointInPolygon,
+  polygonCentroid,
+  segmentsIntersect,
+} from '../../core/math/geometry'
 import { objectFootprint, wallMidpoint } from '../geometryHelpers'
 import {
   isLocked,
@@ -38,12 +45,26 @@ type Mode =
       duplicate: boolean
       axis: 'free' | 'x' | 'y'
     }
-  | { kind: 'rotate'; center: Vec2; startAngle: number; origin: Map<string, number> }
+  /**
+   * `base` is the plan as it stood when the ring was taken hold of. Every frame
+   * of a turn is computed from it rather than from the document the last frame
+   * wrote: a wall and a zone carry no rotation field, so their corners would
+   * otherwise be spun by the whole delta again on every move, and a pointer
+   * that pauses on its way round would keep turning them.
+   */
+  | { kind: 'rotate'; center: Vec2; startAngle: number; base: CrowdDocument }
   | { kind: 'wall-endpoint'; wallId: string; end: 'a' | 'b'; other: Vec2 }
   | { kind: 'vertex'; zoneId: string; index: number }
   | { kind: 'marquee'; start: Vec2; current: Vec2 }
 
 const ROTATE_HANDLE_OFFSET_PX = 46
+
+/**
+ * How close to a zone's outline a double-click has to land to add a corner to
+ * it — roughly twice the handle hit radius, so aiming at an edge is forgiving
+ * while a click in the body of a zone is plainly not aimed at one.
+ */
+const ADD_VERTEX_REACH_PX = 24
 
 /** Selection centre, used as the pivot for rotation. */
 const selectionCenter = (doc: CrowdDocument, refs: readonly PlanObjectRef[]): Vec2 | null => {
@@ -55,6 +76,28 @@ const selectionCenter = (doc: CrowdDocument, refs: readonly PlanObjectRef[]): Ve
   if (points.length === 0) return null
   const b = boundsOf(points)
   return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }
+}
+
+/**
+ * Does a footprint meet the rubber band?
+ *
+ * Corner containment alone misses the object most worth catching: a long wall
+ * drawn straight across the band has neither end inside it, and the user who
+ * just rubber-banded it has no way to tell why it was left behind. Crossing
+ * edges catch it. A band drawn wholly inside a large footprint still catches
+ * nothing, which is deliberate — it is how a row of tables standing on a
+ * waiting zone is lifted off without taking the zone with them.
+ */
+const meetsBand = (polygon: readonly Vec2[], band: readonly Vec2[]): boolean => {
+  if (polygon.some((p) => pointInPolygon(p, band))) return true
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i]
+    const b = polygon[(i + 1) % polygon.length]
+    for (let j = 0; j < band.length; j++) {
+      if (segmentsIntersect(a, b, band[j], band[(j + 1) % band.length])) return true
+    }
+  }
+  return false
 }
 
 const positionOf = (doc: CrowdDocument, ref: PlanObjectRef): Vec2 | null => {
@@ -102,8 +145,19 @@ const moveObject = (
   switch (ref.kind) {
     case 'furniture':
       return updateFurniture(doc, ref.id, { position: target })
-    case 'service':
-      return updateServicePoint(doc, ref.id, { position: target })
+    case 'service': {
+      const point = doc.plan.servicePoints.find((s) => s.id === ref.id)
+      if (!point) return doc
+      // A queue drawn by hand is a world-space centreline belonging to this
+      // counter, so it travels with it — as it already does through a paste.
+      // Left behind, people walk to where the till used to be and the queue
+      // length the study reports is measured along a line nobody stands on.
+      const shift = sub(target, point.position)
+      return updateServicePoint(doc, ref.id, {
+        position: target,
+        ...(point.queue ? { queue: point.queue.map((p) => add(p, shift)) } : {}),
+      })
+    }
     case 'wall': {
       const wall = doc.plan.walls.find((w) => w.id === ref.id)
       if (!wall) return doc
@@ -130,45 +184,51 @@ const moveObject = (
   }
 }
 
+/**
+ * Turn one object by `delta` about `pivot`.
+ *
+ * Everything is read out of `base` — the plan as it was when the gesture
+ * started — and written into `doc`, so re-running the same angle lands on the
+ * same place however many frames it takes. `orbit` carries the whole object
+ * round the pivot; a lone object turns on the spot instead.
+ */
 const rotateObject = (
   doc: CrowdDocument,
+  base: CrowdDocument,
   ref: PlanObjectRef,
   pivot: Vec2,
   delta: number,
-  baseRotation: number,
-  basePosition: Vec2 | null,
+  orbit: boolean,
 ): CrowdDocument => {
-  const spun = basePosition ? add(pivot, rotateVec(sub(basePosition, pivot), delta)) : null
+  const spin = (p: Vec2): Vec2 => add(pivot, rotateVec(sub(p, pivot), delta))
+  const rotation = rotationOf(base, ref) + delta
+  const basePosition = orbit ? positionOf(base, ref) : null
+  const spun = basePosition ? spin(basePosition) : null
   switch (ref.kind) {
     case 'furniture':
       return updateFurniture(doc, ref.id, {
-        rotation: baseRotation + delta,
+        rotation,
         ...(spun ? { position: spun } : {}),
       })
     case 'service':
       return updateServicePoint(doc, ref.id, {
-        rotation: baseRotation + delta,
+        rotation,
         ...(spun ? { position: spun } : {}),
       })
     case 'backdrop':
       return updateBackdrop(doc, {
-        rotation: baseRotation + delta,
+        rotation,
         ...(spun ? { position: spun } : {}),
       })
     case 'wall': {
-      const wall = doc.plan.walls.find((w) => w.id === ref.id)
+      const wall = base.plan.walls.find((w) => w.id === ref.id)
       if (!wall) return doc
-      return updateWall(doc, ref.id, {
-        a: add(pivot, rotateVec(sub(wall.a, pivot), delta)),
-        b: add(pivot, rotateVec(sub(wall.b, pivot), delta)),
-      })
+      return updateWall(doc, ref.id, { a: spin(wall.a), b: spin(wall.b) })
     }
     case 'zone': {
-      const zone = doc.plan.zones.find((z) => z.id === ref.id)
+      const zone = base.plan.zones.find((z) => z.id === ref.id)
       if (!zone) return doc
-      return updateZone(doc, ref.id, {
-        polygon: zone.polygon.map((p) => add(pivot, rotateVec(sub(p, pivot), delta))),
-      })
+      return updateZone(doc, ref.id, { polygon: zone.polygon.map(spin) })
     }
     default:
       return doc
@@ -255,7 +315,10 @@ export class SelectTool implements Tool {
       }
     }
 
-    const center = selectionCenter(doc, refs)
+    // No ring over a selection that is locked solid. The endpoint and vertex
+    // handles already go when an object is locked; a ring that stays, reads out
+    // a quarter turn and leaves the wall where it was is a control that lies.
+    const center = this.movable(ctx).length > 0 ? selectionCenter(doc, refs) : null
     if (center) {
       const points: Vec2[] = []
       for (const ref of refs) {
@@ -319,13 +382,11 @@ export class SelectTool implements Tool {
       if (handle.kind === 'rotate') {
         const center = selectionCenter(ctx.document, ctx.selection)
         if (!center) return
-        const origin = new Map<string, number>()
-        for (const ref of ctx.selection) origin.set(ref.id, rotationOf(ctx.document, ref))
         this.mode = {
           kind: 'rotate',
           center,
           startAngle: angleOf(sub(info.ground, center)),
-          origin,
+          base: ctx.document,
         }
         return
       }
@@ -434,6 +495,11 @@ export class SelectTool implements Tool {
           ])
         }
         const moving = this.movable(ctx)
+        // An alt-drag is one gesture, so the copy and the move that carries it
+        // off share the copy's key: undone as two steps, the first undo puts
+        // the copy back exactly on top of the original, which looks like
+        // nothing happened while the plan quietly holds two of everything.
+        const duplicating = this.mode.duplicate
         ctx.apply(
           (doc) => {
             let next = doc
@@ -444,8 +510,8 @@ export class SelectTool implements Tool {
             }
             return next
           },
-          'Move',
-          'move-selection',
+          duplicating ? 'Duplicate' : 'Move',
+          duplicating ? 'duplicate' : 'move-selection',
         )
         ctx.setLabels([
           {
@@ -466,19 +532,12 @@ export class SelectTool implements Tool {
         if (!info.altKey) delta = Math.round(delta / step) * step
         const refs = this.movable(ctx)
         const pivot = this.mode.center
-        const origin = this.mode.origin
+        const base = this.mode.base
         ctx.apply(
           (doc) => {
             let next = doc
             for (const ref of refs) {
-              next = rotateObject(
-                next,
-                ref,
-                pivot,
-                delta,
-                origin.get(ref.id) ?? 0,
-                refs.length > 1 ? positionOf(doc, ref) : null,
-              )
+              next = rotateObject(next, base, ref, pivot, delta, refs.length > 1)
             }
             return next
           },
@@ -592,13 +651,24 @@ export class SelectTool implements Tool {
         const consider = (kind: PlanObjectRef['kind'], id: string) => {
           const polygon = objectFootprint(doc, kind, id)
           if (!polygon) return
-          if (polygon.some((p) => pointInPolygon(p, rect))) picked.push({ kind, id })
+          if (meetsBand(polygon, rect)) picked.push({ kind, id })
         }
         for (const wall of doc.plan.walls) consider('wall', wall.id)
         for (const item of doc.plan.furniture) consider('furniture', item.id)
         for (const zone of doc.plan.zones) consider('zone', zone.id)
         for (const point of doc.plan.servicePoints) consider('service', point.id)
-        ctx.setSelection(info.shiftKey ? [...ctx.selection, ...picked] : picked)
+        if (info.shiftKey) {
+          // A band over something already held adds nothing. Twice in the
+          // selection is twice duplicated by the next alt-drag, and two objects
+          // where the inspector and every count should see one.
+          const held = ctx.selection
+          const added = picked.filter(
+            (p) => !held.some((have) => have.id === p.id && have.kind === p.kind),
+          )
+          ctx.setSelection([...held, ...added])
+        } else {
+          ctx.setSelection(picked)
+        }
       }
     }
     if (this.mode.kind !== 'idle') ctx.seal()
@@ -608,27 +678,46 @@ export class SelectTool implements Tool {
   }
 
   onDoubleClick(info: PointerInfo, ctx: ToolContext): void {
-    // Double-clicking a zone adds a vertex at that point along its outline.
+    // Double-clicking near a zone's outline adds a corner to it.
     if (!info.hit || info.hit.ref.kind !== 'zone' || !info.ground) return
-    const zoneId = info.hit.ref.id
+    const hit = info.hit.ref
+    // A measurement zone is locked precisely so that clicking about on top of
+    // it cannot change what it counts.
+    if (isLocked(ctx.document, hit)) return
+    const zone = ctx.document.plan.zones.find((z) => z.id === hit.id)
+    if (!zone || zone.polygon.length === 0) return
     const point = info.ground
-    ctx.apply((doc) => {
-      const zone = doc.plan.zones.find((z) => z.id === zoneId)
-      if (!zone) return doc
-      let bestIndex = 0
-      let bestDistance = Infinity
-      for (let i = 0; i < zone.polygon.length; i++) {
-        const a = zone.polygon[i]
-        const b = zone.polygon[(i + 1) % zone.polygon.length]
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-        const d = distance(mid, point)
-        if (d < bestDistance) {
-          bestDistance = d
-          bestIndex = i
-        }
+
+    // The nearest edge, and the point *on* that edge. Taking the nearest edge
+    // midpoint and keeping the raw click would cut a notch from an edge all
+    // the way in to the pointer, and a zone is a counted region: a fold like
+    // that quietly changes who it says was inside it.
+    let bestIndex = 0
+    let bestDistance = Infinity
+    for (let i = 0; i < zone.polygon.length; i++) {
+      const a = zone.polygon[i]
+      const b = zone.polygon[(i + 1) % zone.polygon.length]
+      const d = distanceToSegment(point, a, b)
+      if (d < bestDistance) {
+        bestDistance = d
+        bestIndex = i
       }
-      const polygon = [...zone.polygon]
-      polygon.splice(bestIndex + 1, 0, point)
+    }
+    // Deep inside the zone the click was aimed at something standing on it,
+    // not at the outline, so it adds nothing rather than a corner nobody can
+    // see and an undo step nobody asked for.
+    if (bestDistance > ADD_VERTEX_REACH_PX * ctx.scale) return
+    const zoneId = zone.id
+    const onEdge = closestPointOnSegment(
+      point,
+      zone.polygon[bestIndex],
+      zone.polygon[(bestIndex + 1) % zone.polygon.length],
+    )
+    ctx.apply((doc) => {
+      const current = doc.plan.zones.find((z) => z.id === zoneId)
+      if (!current) return doc
+      const polygon = [...current.polygon]
+      polygon.splice(bestIndex + 1, 0, onEdge)
       return updateZone(doc, zoneId, { polygon })
     }, 'Add zone point')
   }
@@ -668,21 +757,17 @@ export class SelectTool implements Tool {
       case '[':
       case ']': {
         const delta = (event.key === '[' ? -1 : 1) * (event.shiftKey ? Math.PI / 180 : Math.PI / 12)
-        const center = selectionCenter(ctx.document, ctx.selection)
+        // Over the movable part of the selection, like every other edit here: a
+        // keystroke that walks past the lock is the easiest way to knock a
+        // finished shell out of true while drawing over it.
+        const refs = this.movable(ctx)
+        const center = refs.length > 0 ? selectionCenter(ctx.document, ctx.selection) : null
         if (!center) return false
-        const refs = ctx.selection
         ctx.apply(
           (doc) => {
             let next = doc
             for (const ref of refs) {
-              next = rotateObject(
-                next,
-                ref,
-                center,
-                delta,
-                rotationOf(doc, ref),
-                refs.length > 1 ? positionOf(doc, ref) : null,
-              )
+              next = rotateObject(next, doc, ref, center, delta, refs.length > 1)
             }
             return next
           },

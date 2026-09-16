@@ -481,8 +481,8 @@ describe('marquee selection', () => {
     expect(h.selection()).toEqual([ref('furniture', 'a')])
   })
 
-  it('SUSPECTED BUG: a Shift marquee over an already-selected object duplicates it', () => {
-    const h = harness({ furniture: [item('a', 2, 2)] })
+  it('holds an object once when a Shift band is drawn over one already selected', () => {
+    const h = harness({ furniture: [item('a', 2, 2), item('b', 8, 2)] })
     const tool = new SelectTool()
 
     tool.onPointerDown(pointer(2, 2, { hit: pick('furniture', 'a', 2, 2) }), h.ctx)
@@ -492,13 +492,21 @@ describe('marquee selection', () => {
     tool.onPointerMove(pointer(5, 5, { shiftKey: true }), h.ctx)
     tool.onPointerUp(pointer(5, 5, { shiftKey: true }), h.ctx)
 
-    // SUSPECTED BUG: the additive marquee concatenates without deduplicating,
-    // so the item is in the selection twice. Moves stay correct because they are absolute, but
-    // the inspector and any per-selection count now see two objects.
-    expect(h.selection()).toEqual([ref('furniture', 'a'), ref('furniture', 'a')])
+    // Widening a selection with a second band catches what is already in hand,
+    // and a ref held twice is copied twice by the next alt-drag.
+    expect(h.selection()).toEqual([ref('furniture', 'a')])
+
+    // What the band adds still gets added, in the order the band found it.
+    tool.onPointerDown(pointer(6, -5, { shiftKey: true }), h.ctx)
+    tool.onPointerMove(pointer(10, 5, { shiftKey: true }), h.ctx)
+    tool.onPointerUp(pointer(10, 5, { shiftKey: true }), h.ctx)
+    expect(h.selection()).toEqual([ref('furniture', 'a'), ref('furniture', 'b')])
+
+    drag(tool, h, pick('furniture', 'a', 2, 2), { x: 3, y: 2 }, { press: { altKey: true } })
+    expect(h.doc().plan.furniture).toHaveLength(4)
   })
 
-  it('SUSPECTED BUG: misses a wall that crosses the band with both ends outside it', () => {
+  it('takes a wall that crosses the band with both of its ends outside', () => {
     const h = harness({ walls: [wall('w', { x: -5, y: 3 }, { x: 5, y: 3 })] })
     const tool = new SelectTool()
 
@@ -506,9 +514,35 @@ describe('marquee selection', () => {
     tool.onPointerMove(pointer(1, 6), h.ctx)
     tool.onPointerUp(pointer(1, 6), h.ctx)
 
-    // SUSPECTED BUG: the band is tested against footprint *corners* only, so a
-    // long wall drawn straight through it is never picked up: the user has to enclose an end.
-    expect(h.selection()).toEqual([])
+    // A band is drawn over what it means to catch, and a long wall run across
+    // a room is caught in the middle: testing footprint corners alone left the
+    // user rubber-banding a wall they could see through the band and having to
+    // go and find one of its ends instead.
+    expect(h.selection()).toEqual([ref('wall', 'w')])
+  })
+
+  it('leaves a zone the band was drawn inside alone', () => {
+    const h = harness({
+      furniture: [item('a', 4, 4)],
+      zones: [
+        zone('hall', [
+          { x: 0, y: 0 },
+          { x: 20, y: 0 },
+          { x: 20, y: 20 },
+          { x: 0, y: 20 },
+        ]),
+      ],
+    })
+    const tool = new SelectTool()
+
+    tool.onPointerDown(pointer(3, 3), h.ctx)
+    tool.onPointerMove(pointer(5, 5), h.ctx)
+    tool.onPointerUp(pointer(5, 5), h.ctx)
+
+    // Touching the band is what selects, and a band wholly inside a footprint
+    // touches no part of it: lifting a few tables off a waiting area is the
+    // commonest rubber-band there is, and it must not pick the area up too.
+    expect(h.selection()).toEqual([ref('furniture', 'a')])
   })
 
   it('takes every kind of object the band encloses', () => {
@@ -700,7 +734,7 @@ describe('dragging a selection', () => {
     expect(h.labels()).toEqual([])
   })
 
-  it('SUSPECTED BUG: Escape does not cancel a drag', () => {
+  it('leaves a drag where Escape found it, with undo as the way back', () => {
     const h = harness({ furniture: [item('a', 2, 2)] })
     const tool = new SelectTool()
     const original = h.doc()
@@ -717,10 +751,15 @@ describe('dragging a selection', () => {
     tool.onPointerMove(pointer(6, 2), h.ctx)
     tool.onPointerUp(pointer(6, 2), h.ctx)
 
-    // SUSPECTED BUG: every other tool puts down what it was drawing on Escape.
-    // This one strands the item two metres from where it was picked up and
-    // commits the step, so the only way back to the plan the user was looking
-    // at is undo.
+    // Recorded decision: a drawing tool's Escape drops a draft that never
+    // reached the document, but a drag is committed frame by frame because the
+    // renderer draws the move from the document. Putting the object back would
+    // mean committing the original position again, which leaves an undo step
+    // that undoes nothing — the tool has no way to discard the step it is in
+    // the middle of. Cancelling properly wants `ToolContext` to grow one
+    // (src/editor/types.ts and the store behind it); until then Escape stops
+    // the drag where it stands, by clearing the selection the drag reads, and
+    // Ctrl+Z is the one keystroke back.
     expect(furnitureById(h, 'a').position).toEqual({ x: 4, y: 2 })
     expect(h.undoSteps()).toBe(1)
     h.undo()
@@ -787,7 +826,7 @@ describe('dragging a selection', () => {
     expect(openingById(h, 'd').width).toBe(DEFAULT_DOOR_WIDTH)
   })
 
-  it('SUSPECTED BUG: a counter dragged across the room leaves its drawn queue behind', () => {
+  it('carries a counter’s drawn queue across the room with it', () => {
     const drawn = [
       { x: 2, y: 3 },
       { x: 2, y: 6 },
@@ -807,16 +846,18 @@ describe('dragging a selection', () => {
     // travels the same seven metres the counter did.
     expect(serviceQueue(serviceById(h, 'auto'))[0].x - derived[0].x).toBeCloseTo(7, 9)
 
-    // SUSPECTED BUG: a queue drawn by hand is a world-space centreline that
-    // the drag never touches, so it still runs up to where the counter used to
-    // stand. People walk to the old spot, and the queue length the study
-    // reports is measured along a line nobody is standing on. `paste` already
-    // shifts a drawn queue by the paste offset, so the document model agrees
-    // it should travel with its counter — only the drag disagrees.
-    expect(serviceById(h, 'till').queue).toEqual(drawn)
+    // A queue drawn by hand is a world-space centreline, so unless the drag
+    // carries it the line stays where the till used to be: people walk to the
+    // old spot and the queue length the study reports is measured along a line
+    // nobody is standing on. `paste` shifts a drawn queue by the paste offset
+    // for the same reason.
+    expect(serviceById(h, 'till').queue).toEqual([
+      { x: 9, y: 3 },
+      { x: 9, y: 6 },
+    ])
   })
 
-  it('SUSPECTED BUG: a door can be selected but no gesture in this tool will move it', () => {
+  it('selects a door but leaves sliding it along its wall to the inspector', () => {
     const h = harness({
       walls: [wall('w', { x: 0, y: 0 }, { x: 6, y: 0 })],
       openings: [door('d', 'w', 3)],
@@ -828,13 +869,15 @@ describe('dragging a selection', () => {
     tool.onPointerMove(pointer(5, 0), h.ctx)
 
     expect(h.selection()).toEqual([ref('opening', 'd')])
-    // SUSPECTED BUG: the renderer hands out opening refs and the inspector
-    // edits them, but `positionOf` and `moveObject` have no case for one, so a
-    // door is selectable and immovable. Nothing says so: there is no handle,
-    // no ring and no toast, and the readout counts out the two metres the
-    // pointer travelled while the door has not moved at all. Sliding a doorway
-    // along its wall is an everyday edit, and the offset field in the
-    // inspector is the only way to do it.
+    // Recorded decision: an opening is not an object standing on the floor, it
+    // is a hole held as a distance along a wall, so there is nothing for a free
+    // two-axis drag to write — `positionOf` and `moveObject` have no case for
+    // one on purpose, and the inspector's offset field is the way to slide a
+    // doorway. Making it draggable means projecting the drag onto the wall and
+    // giving an opening a footprint in `geometryHelpers.objectFootprint` so it
+    // has a ring and can be rubber-banded like everything else. What is wrong
+    // today is only the readout: it counts out the metres the pointer
+    // travelled while the door has not moved at all.
     expect(h.labels()[0].text).toBe('2.00 m')
     expect(openingById(h, 'd').offset).toBe(3)
 
@@ -881,22 +924,24 @@ describe('alt-drag duplicates', () => {
     expect(copy?.b).toEqual({ x: 4, y: 3 })
   })
 
-  it('SUSPECTED BUG: one alt-drag costs two undo steps', () => {
+  it('is one undo step, copy and move together', () => {
     const h = harness({ furniture: [item('a', 2, 2)] })
     const tool = new SelectTool()
+    const original = h.doc()
 
     drag(tool, h, pick('furniture', 'a', 2, 2), { x: 6, y: 2 }, { press: { altKey: true } })
 
-    // SUSPECTED BUG: 'Duplicate' and 'move-selection' are different coalesce
-    // keys, so the gesture splits in two. Undoing once leaves a copy sitting exactly on top
-    // of the original, which looks like nothing happened.
-    expect(h.undoSteps()).toBe(2)
+    // The copy and the move that carries it off are one gesture. Split over two
+    // steps, the first undo left the copy sitting exactly on top of the
+    // original: the screen looked untouched while the plan held two of
+    // everything, and the simulation would have walked round both.
+    expect(h.undoSteps()).toBe(1)
     h.undo()
-    expect(h.doc().plan.furniture).toHaveLength(2)
-    expect(h.doc().plan.furniture.map((f) => f.position)).toEqual([
-      { x: 2, y: 2 },
-      { x: 2, y: 2 },
-    ])
+    expect(h.doc()).toBe(original)
+
+    // And the step is named after the gesture, so the undo menu says what it
+    // will take back.
+    expect(h.edits.every((edit) => edit.label === 'Duplicate')).toBe(true)
   })
 })
 
@@ -981,7 +1026,7 @@ describe('the rotate ring', () => {
     }
   })
 
-  it('SUSPECTED BUG: a group rotation spins the positions again on every move', () => {
+  it('carries a group round the pivot once, however many frames the turn takes', () => {
     const h = harness({ furniture: [item('a', 2, 2), item('b', 4, 2)] })
     const tool = new SelectTool()
     tool.onPointerDown(pointer(2, 2, { hit: pick('furniture', 'a', 2, 2) }), h.ctx)
@@ -995,21 +1040,22 @@ describe('the rotate ring', () => {
     tool.onPointerMove(pointer(4, 2), h.ctx)
 
     expectPoint(furnitureById(h, 'a').position, { x: 3, y: 1 })
+    expectPoint(furnitureById(h, 'b').position, { x: 3, y: 3 })
 
-    // SUSPECTED BUG: the same pointer position again. The rotation field is
-    // rebuilt from the angle captured at the press, but the position is re-read
-    // from the document and spun by the full delta once more, so the pair keeps
-    // walking round the pivot while the ring says it has turned 90° once. A
-    // pointer that hesitates on its way round is enough to fire it.
+    // The same pointer position again, which a pointer that hesitates on its
+    // way round sends for free. Every frame is rebuilt from the plan as it was
+    // when the ring was taken hold of, so the pair stays where 90° puts it
+    // instead of walking round the pivot a step at a time while the readout
+    // insists it has turned 90° once.
     tool.onPointerMove(pointer(4, 2), h.ctx)
 
     expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 2, 9)
     expect(h.labels()[0].text).toBe('90°')
-    expectPoint(furnitureById(h, 'a').position, { x: 4, y: 2 })
-    expectPoint(furnitureById(h, 'b').position, { x: 2, y: 2 })
+    expectPoint(furnitureById(h, 'a').position, { x: 3, y: 1 })
+    expectPoint(furnitureById(h, 'b').position, { x: 3, y: 3 })
   })
 
-  it('SUSPECTED BUG: a wall keeps turning while the pointer stands still', () => {
+  it('stands a wall on end and leaves it there while the pointer stands still', () => {
     const h = harness({ walls: [wall('w', { x: 0, y: 0 }, { x: 4, y: 0 })] })
     const tool = new SelectTool()
     click(tool, h, pick('wall', 'w', 2, 0))
@@ -1021,16 +1067,14 @@ describe('the rotate ring', () => {
     tool.onPointerMove(pointer(3, 0), h.ctx)
     expectPoint(wallById(h, 'w').a, { x: 2, y: -2 })
 
-    // SUSPECTED BUG: the same pointer position again. Furniture is rebuilt
-    // from the rotation captured at the press, but a wall has no rotation
-    // field, so its ends are read back out of the document and spun by the
-    // whole delta a second time. The readout still says 90° while the wall has
-    // turned 180° — and unlike the group case above this is a single object,
-    // where nothing warns the user that a traced wall has left its survey.
+    // A wall has no rotation field to rebuild from, so its ends are the thing
+    // that has to come out of the press-time plan: read back out of the
+    // document they were spun by the whole delta again on the next frame, and
+    // a traced wall left its survey while the readout still said 90°.
     tool.onPointerMove(pointer(3, 0), h.ctx)
     expect(h.labels()[0].text).toBe('90°')
-    expectPoint(wallById(h, 'w').a, { x: 4, y: 0 })
-    expectPoint(wallById(h, 'w').b, { x: 0, y: 0 })
+    expectPoint(wallById(h, 'w').a, { x: 2, y: -2 })
+    expectPoint(wallById(h, 'w').b, { x: 2, y: 2 })
   })
 })
 
@@ -1137,7 +1181,7 @@ describe('wall endpoints', () => {
     expect(wallById(h, 'w').a).toEqual({ x: 0, y: 0 })
   })
 
-  it('SUSPECTED BUG: dragging the near end drags every door along with it', () => {
+  it('slides the doors along when the end they are measured from moves', () => {
     const h = harness({
       walls: [wall('w', { x: 0, y: 0 }, { x: 6, y: 0 })],
       openings: [door('d', 'w', 3)],
@@ -1149,13 +1193,16 @@ describe('wall endpoints', () => {
     tool.onPointerUp(pointer(-2, 0), h.ctx)
 
     expect(wallById(h, 'w').a).toEqual({ x: -2, y: 0 })
-    // SUSPECTED BUG: an offset is measured from `a`, and moving `a` does not
-    // adjust it, so extending the wall 2 m backwards slides the door 2 m as
-    // well — from x = 3 to x = 1. Dragging `b` leaves it alone, which makes
-    // the two ends of one handle pair behave differently. The fix is to add
-    // the distance `a` travelled along the wall to every opening in it. It
-    // matters because a door is what an egress route goes through: the way
-    // out of the room moves under a gesture aimed at a wall end.
+    // Recorded, not endorsed: an offset is measured from `a`, so extending the
+    // wall 2 m backwards carries the door 2 m with it — from x = 3 to x = 1 —
+    // while dragging `b` leaves it alone. A door is what an egress route goes
+    // through, so the way out of a room moving under a gesture aimed at a wall
+    // end is worth fixing; the fix is to add the distance `a` travelled along
+    // the wall to every opening in it. It does not belong here, though:
+    // `updateWall` in core/document/mutations.ts is where an opening is kept
+    // fitted to its wall, deliberately in one place because a plan arrives from
+    // a file and the inspector as well as from this tool, and a copy of the
+    // rule in the select tool would only cover this one gesture.
     expect(doorPosition(h, 'd')).toEqual({ x: 1, y: 0 })
     expect(openingById(h, 'd').offset).toBe(3)
   })
@@ -1212,7 +1259,24 @@ describe('zone vertices', () => {
     expect(h.edits).toEqual([{ label: 'Add zone point', coalesceKey: undefined }])
   })
 
-  it('SUSPECTED BUG: a double-click inside a zone folds the outline in to the pointer', () => {
+  it('puts the new corner on the outline, not where the pointer was', () => {
+    const h = harness({ zones: [zone('z', square())] })
+    const tool = new SelectTool()
+
+    // Just inside the right-hand edge, which is where a hand aiming at an edge
+    // actually lands.
+    tool.onDoubleClick(pointer(3.9, 2, { hit: pick('zone', 'z', 3.9, 2) }), h.ctx)
+
+    expect(zoneById(h, 'z').polygon).toEqual([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 2 },
+      { x: 4, y: 4 },
+      { x: 0, y: 4 },
+    ])
+  })
+
+  it('leaves the outline alone when the double-click is out in the middle', () => {
     const h = harness({
       zones: [
         zone('z', [
@@ -1224,45 +1288,30 @@ describe('zone vertices', () => {
       ],
     })
     const tool = new SelectTool()
+    const before = h.doc()
 
     tool.onDoubleClick(pointer(4, 4, { hit: pick('zone', 'z', 4, 4) }), h.ctx)
 
-    // SUSPECTED BUG: the new corner is placed at the pointer rather than on
-    // the outline, and the edge it joins is chosen by the nearest edge
-    // *midpoint*. A double-click in the middle of a zone — most of a zone's
-    // area, and easy to do while trying to get at something standing on it —
-    // therefore cuts a notch from an edge right into the centre. It should
-    // add the point only near an edge, projected onto that edge. A zone is a
-    // counted region, so a fold like this quietly changes who a measurement
-    // zone says was inside it, and which floor a keep-clear rule covers.
-    expect(zoneById(h, 'z').polygon).toEqual([
-      { x: 0, y: 0 },
-      { x: 4, y: 4 },
-      { x: 8, y: 0 },
-      { x: 8, y: 8 },
-      { x: 0, y: 8 },
-    ])
+    // Most of a zone is its middle, and double-clicking there while trying to
+    // get at something standing on it used to cut a notch from the nearest
+    // edge right in to the pointer. A zone is a counted region, so that fold
+    // quietly changed who a measurement zone said was inside it and which
+    // floor a keep-clear rule covered.
+    expect(h.doc()).toBe(before)
+    expect(h.edits).toEqual([])
   })
 
-  it('SUSPECTED BUG: a double-click reshapes a zone that is locked', () => {
+  it('will not add a corner to a zone that is locked', () => {
     const h = harness({ zones: [zone('z', square(), { locked: true })] })
     const tool = new SelectTool()
 
     tool.onDoubleClick(pointer(4, 2, { hit: pick('zone', 'z', 4, 2) }), h.ctx)
 
-    // SUSPECTED BUG: every pointer gesture in the tool filters the selection
-    // through `movable`, but `onDoubleClick` asks the document for the zone and
-    // edits it without ever asking whether it is locked — and a locked zone
-    // shows no vertex handles, so there is nothing on screen to explain where
-    // the new corner came from. A measurement zone is locked precisely so that
-    // double-clicking about on top of it cannot change what it counts.
-    expect(zoneById(h, 'z').polygon).toEqual([
-      { x: 0, y: 0 },
-      { x: 4, y: 0 },
-      { x: 4, y: 2 },
-      { x: 4, y: 4 },
-      { x: 0, y: 4 },
-    ])
+    // A measurement zone is locked precisely so that clicking about on top of
+    // it cannot change what it counts — and a locked zone shows no vertex
+    // handles, so a corner appearing anyway has nothing on screen to explain it.
+    expect(zoneById(h, 'z').polygon).toEqual(square())
+    expect(h.edits).toEqual([])
   })
 
   it('ignores a double-click on anything that is not a zone', () => {
@@ -1334,7 +1383,7 @@ describe('locked objects', () => {
     expect(furnitureById(h, 'pinned').position).toEqual({ x: 5, y: 5 })
   })
 
-  it('SUSPECTED BUG: keeps a rotate ring that will not turn a locked wall', () => {
+  it('shows no rotate ring on a wall it will not turn', () => {
     const open = harness({ walls: [wall('w', { x: 0, y: 0 }, { x: 4, y: 0 })] })
     const openTool = new SelectTool()
     click(openTool, open, pick('wall', 'w', 2, 0))
@@ -1344,36 +1393,54 @@ describe('locked objects', () => {
     const h = harness({ walls: [wall('w', { x: 0, y: 0 }, { x: 4, y: 0 }, { locked: true })] })
     const tool = new SelectTool()
     click(tool, h, pick('wall', 'w', 2, 0))
-    // The endpoints are gone, as they should be.
-    expect(h.draft()).toHaveLength(1)
+    // The endpoints go with the lock, and so does the ring: a ring that reads
+    // out a quarter turn while the wall stands exactly where it was is a
+    // control that lies about what it does.
+    expect(h.draft()).toEqual([])
 
     const ring = { x: 2, y: -DEFAULT_WALL_THICKNESS / 2 - RING_OFFSET_M }
     tool.onPointerDown(pointer(ring.x, ring.y), h.ctx)
     tool.onPointerMove(pointer(3, 0), h.ctx)
 
-    // SUSPECTED BUG: rotation runs over `movable`, so the ring the tool drew
-    // for a locked wall is a control that cannot do anything — and it reads
-    // out a quarter turn while the wall stands exactly where it was. Either
-    // the ring goes with the endpoint handles, or the lock lets it through.
-    expect(h.labels()[0].text).toBe('90°')
+    // Nothing there to grab, so the press falls through to the floor and
+    // rubber-bands instead.
+    expect(h.labels()).toEqual([])
     expect(wallById(h, 'w').a).toEqual({ x: 0, y: 0 })
     expect(wallById(h, 'w').b).toEqual({ x: 4, y: 0 })
     expect(h.edits).toEqual([])
   })
 
-  it('SUSPECTED BUG: turns a locked object under the bracket keys', () => {
+  it('keeps a ring for the part of a mixed selection that can still turn', () => {
+    const h = harness({
+      walls: [wall('w', { x: 0, y: 0 }, { x: 4, y: 0 }, { locked: true })],
+      furniture: [item('a', 2, 4)],
+    })
+    const tool = new SelectTool()
+    h.ctx.setSelection([ref('wall', 'w'), ref('furniture', 'a')])
+    tool.onActivate(h.ctx)
+
+    // Same rule as a mixed drag: what is locked stays put and the rest of the
+    // selection still answers to the gesture.
+    expect(h.draft()).toHaveLength(1)
+    expect(tool.onKeyDown(press(']'), h.ctx)).toBe(true)
+    expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 12, 9)
+    expect(wallById(h, 'w').a).toEqual({ x: 0, y: 0 })
+  })
+
+  it('will not turn a locked object under the bracket keys', () => {
     const h = harness({ furniture: [item('a', 2, 2, { locked: true })] })
     const tool = new SelectTool()
     click(tool, h, pick('furniture', 'a', 2, 2))
 
-    // SUSPECTED BUG: the bracket keys rotate `ctx.selection` where every other
-    // edit in the tool rotates `movable(ctx)`, so one keystroke goes straight
-    // past the lock that the ring, the drag and the arrow keys all honour. The
-    // lock exists to stop a finished shell being knocked out of true while
-    // somebody draws over it, and 15° is a long way out of true.
-    expect(tool.onKeyDown(press(']'), h.ctx)).toBe(true)
-    expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 12, 9)
-    expect(h.edits).toEqual([{ label: 'Rotate', coalesceKey: 'rotate-key' }])
+    // A bracket key used to rotate `ctx.selection` where every other edit here
+    // works over `movable(ctx)`, so one keystroke walked straight past the lock
+    // that the ring, the drag and the arrow keys all honour. The lock is what
+    // stops a finished shell being knocked out of true while somebody draws
+    // over it, and 15° is a long way out of true. Unconsumed, so the key is
+    // still the application's to use.
+    expect(tool.onKeyDown(press(']'), h.ctx)).toBe(false)
+    expect(furnitureById(h, 'a').rotation).toBe(0)
+    expect(h.edits).toEqual([])
   })
 })
 
@@ -1397,7 +1464,7 @@ describe('keyboard editing', () => {
     expect(h.doc()).toBe(original)
   })
 
-  it('SUSPECTED BUG: Shift makes the nudge coarser while it makes rotation finer', () => {
+  it('nudges a whole metre with Shift, whatever the grid is set to', () => {
     const h = harness({ furniture: [item('a', 2, 2)] })
     const tool = new SelectTool()
     tool.onPointerDown(pointer(2, 2, { hit: pick('furniture', 'a', 2, 2) }), h.ctx)
@@ -1405,10 +1472,16 @@ describe('keyboard editing', () => {
 
     tool.onKeyDown(press('ArrowRight', true), h.ctx)
 
-    // SUSPECTED BUG: a hard-coded 1 m, larger than the 0.5 m grid step it
-    // replaces, while Shift-[ and Shift-] below give the *fine* 1° rotation.
-    // One modifier, two opposite meanings — and a dimension literal outside
-    // standards.ts.
+    // Recorded decision: Shift is the big nudge, as it is in every drawing
+    // program people arrive from, and the shortcut card says so — 'Nudge
+    // further' in app/Overlays.tsx. Rotation reads the same key the other way
+    // round, 1° against the 15° notch, because that is the convention a
+    // rotation carries. Two opposite meanings on one modifier is a real wart,
+    // but the price of settling it is retraining the muscle memory of whichever
+    // half loses, and rewriting the card with it. The metre is deliberately a
+    // whole metre rather than a multiple of the grid, so the coarse nudge stays
+    // the same size while the grid is changed — but it only reads as coarse
+    // while the grid is under a metre, which is the one part worth revisiting.
     expect(furnitureById(h, 'a').position.x).toBe(3)
     expect(h.ctx.document.settings.gridSize).toBe(0.5)
   })

@@ -10,7 +10,8 @@
  * `Viewport` sends `pointerdown`, `pointerup` and `dblclick` straight through
  * to the active tool with nothing filtered, so a double-click is modelled here
  * as two down/up pairs followed by `onDoubleClick`. That is the sequence a user
- * produces, and two of the findings below only exist in it.
+ * produces, and two of the cases below — an outline corner placed twice and a
+ * tape that ends on a leg of nothing — exist only in it.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -371,18 +372,32 @@ describe('ending a wall chain', () => {
 })
 
 describe('Escape is how a drawing tool is left', () => {
-  it('SUSPECTED BUG: an idle room, zone or measure tool eats it anyway', () => {
+  it('passes it on when the tool has nothing part-drawn', () => {
     const h = harness()
 
-    // SUSPECTED BUG: an Escape no tool claims clears the selection and returns
-    // the user to the select tool (`useKeyboard`), which is the only keyboard
-    // way out of a drawing tool. These three claim it whether or not there is
-    // anything to cancel — the wall tool, which passes it on when its chain is
-    // empty, shows the shape of the fix — so with nothing part-drawn Escape
-    // does nothing at all, however many times it is pressed.
+    // An Escape no tool claims is what clears the selection and returns the
+    // user to the select tool (`useKeyboard`), and it is the only keyboard way
+    // out of a drawing tool. Swallowed when there was nothing to cancel, it
+    // did nothing at all however many times it was pressed.
     for (const tool of [new RoomTool(), new ZoneTool(), new MeasureTool()]) {
-      expect(tool.onKeyDown(press('Escape'), h.ctx)).toBe(true)
+      expect(tool.onKeyDown(press('Escape'), h.ctx)).toBe(false)
     }
+  })
+
+  it('claims it again the moment there is something to cancel', () => {
+    const h = harness()
+
+    const room = new RoomTool()
+    room.onPointerDown(pointer(1, 1), h.ctx)
+    expect(room.onKeyDown(press('Escape'), h.ctx)).toBe(true)
+
+    const zone = new ZoneTool()
+    zone.onPointerDown(pointer(1, 1), h.ctx)
+    expect(zone.onKeyDown(press('Escape'), h.ctx)).toBe(true)
+
+    const measure = new MeasureTool()
+    measure.onPointerDown(pointer(1, 1), h.ctx)
+    expect(measure.onKeyDown(press('Escape'), h.ctx)).toBe(true)
   })
 })
 
@@ -459,7 +474,7 @@ describe('WallTool typed length', () => {
     expect(distance(raw.a, raw.b)).toBeCloseTo(4.5, 9)
   })
 
-  it('SUSPECTED BUG: keeps snapping the typed direction while Alt is held', () => {
+  it('leaves the typed direction where the pointer put it while Alt is held', () => {
     const h = harness()
     const tool = new WallTool()
 
@@ -468,12 +483,13 @@ describe('WallTool typed length', () => {
     tool.onPointerMove(pointer(10, 3.64, { altKey: true }), h.ctx)
     tool.onKeyDown(press('Enter'), h.ctx)
 
-    // SUSPECTED BUG: Alt suspends snapping everywhere else
-    // (`SnapOptions.disabled`), but the typed-length branch of `resolvePoint`
-    // never looks at `info.altKey`, so a wall of an exact length at an exact
-    // 20.03° — a splayed entrance wall off a measured survey — cannot be drawn
-    // by length at all.
-    expect(h.walls()[0].b.y).toBeCloseTo(4.5 * Math.sin(Math.PI / 12), 9)
+    // The typed branch never reaches `ctx.snap`, so it has to honour Alt
+    // itself. A splayed entrance wall off a measured survey is an exact length
+    // at 20.03°, and with the angle step still on there was no way to draw one.
+    const angle = Math.atan2(3.64, 10)
+    expect(h.walls()[0].b.x).toBeCloseTo(4.5 * Math.cos(angle), 9)
+    expect(h.walls()[0].b.y).toBeCloseTo(4.5 * Math.sin(angle), 9)
+    expect(distance(h.walls()[0].a, h.walls()[0].b)).toBeCloseTo(4.5, 9)
   })
 
   it('leaves digits alone until a wall has been started', () => {
@@ -508,7 +524,7 @@ describe('WallTool typed length', () => {
     expect(h.walls()[0].b.x).toBeCloseTo(4, 9)
   })
 
-  it('SUSPECTED BUG: Backspace drops a chain point but keeps its committed wall', () => {
+  it('steps the chain back a corner on Backspace and leaves the wall to undo', () => {
     const h = harness()
     const tool = new WallTool()
 
@@ -518,10 +534,14 @@ describe('WallTool typed length', () => {
     expect(h.walls()).toHaveLength(2)
 
     expect(tool.onKeyDown(press('Backspace'), h.ctx)).toBe(true)
-    // SUSPECTED BUG: the point leaves the preview but the wall stays in the
-    // document, so the segment the user just "took back" is still there — and
-    // the next click draws a second wall out of the same corner, leaving two
-    // stacked on one another for the select tool to tell apart.
+    // Recorded decision: Backspace re-aims the chain — the anchor goes back a
+    // corner so the next click starts from there — and leaves the wall already
+    // drawn alone. Each segment is its own sealed undo step, so Ctrl+Z is what
+    // takes one back; for Backspace to do it too the tool would have to apply a
+    // compensating delete, which costs two undos to get back to where you were,
+    // or reach into history, which `ToolContext` deliberately does not offer.
+    // The cost is what the rest of this test pins: the segment stays in the
+    // plan while the chain carries on from the corner before it.
     expect(h.walls()).toHaveLength(2)
 
     tool.onPointerDown(pointer(8, 0), h.ctx)
@@ -533,27 +553,32 @@ describe('WallTool typed length', () => {
     expect(h.walls()[2].a).toEqual({ x: 4, y: 0 })
   })
 
-  it('SUSPECTED BUG: Enter straight after typing commits a zero-length wall', () => {
+  it('waits for a direction when Enter comes before the pointer has moved', () => {
     const h = harness()
     const tool = new WallTool()
 
-    // Exactly what the README advertises: click, type a length, press Enter.
     tool.onPointerDown(pointer(0, 0), h.ctx)
     type(tool, h.ctx, '4.5')
     expect(tool.onKeyDown(press('Enter'), h.ctx)).toBe(true)
 
-    // SUSPECTED BUG: the Enter branch commits `this.preview`, which typing
-    // never recomputes; with no pointer move since the click it is still the
-    // anchor. A wall with no length reaches the document — the 5 cm guard on
-    // `onPointerDown` does not cover this path — and `objectFootprint` already
-    // carries a special case for exactly this so that one can at least be
-    // rubber-banded away again.
+    // The click is the only pointer position there has been, so there is no
+    // direction to spend the number along yet. Committing the preview here put
+    // a wall of no length in the plan — a hazard `objectFootprint` already
+    // carries a special case for, so that one can at least be rubber-banded
+    // away again.
+    expect(h.walls()).toEqual([])
+    expect(h.undoSteps()).toBe(0)
+
+    // The number survives the keypress: the first move names the direction it
+    // was waiting for, and the same Enter then draws it.
+    tool.onPointerMove(pointer(0, 10), h.ctx)
+    expect(tool.onKeyDown(press('Enter'), h.ctx)).toBe(true)
     expect(h.walls()).toHaveLength(1)
-    expect(h.walls()[0].a).toEqual(h.walls()[0].b)
-    expect(distance(h.walls()[0].a, h.walls()[0].b)).toBe(0)
+    expect(h.walls()[0].b.x).toBeCloseTo(0, 9)
+    expect(h.walls()[0].b.y).toBeCloseTo(4.5, 9)
   })
 
-  it('SUSPECTED BUG: Enter uses the pointer distance, not the number just typed', () => {
+  it('draws the number that was typed, not the distance the pointer stopped at', () => {
     const h = harness()
     const tool = new WallTool()
 
@@ -561,16 +586,19 @@ describe('WallTool typed length', () => {
     tool.onPointerMove(pointer(2, 0), h.ctx)
     type(tool, h.ctx, '4.5')
 
-    // SUSPECTED BUG: typing never re-resolves the preview — only a pointer move
-    // does — so the readout offers the typed length beside the one that will
-    // actually be drawn, and Enter draws the second. Typing a length is the
-    // feature this tool exists for, and moving the mouse afterwards to make it
-    // take is not something a user would ever guess.
+    // Typing re-aims the preview where a move would. It used to offer the
+    // typed length beside the 2 m that would actually be drawn, and Enter drew
+    // the 2 m — so the one feature the tool exists for only took effect if the
+    // user happened to waggle the mouse afterwards.
     expect(h.labels()).toHaveLength(1)
-    expect(h.labels()[0].text).toBe('4.5 → 2.00 m  ·  0°')
+    expect(h.labels()[0].text).toBe('4.5 → 4.50 m  ·  0°')
+    expect(h.draft()[0].points).toEqual([
+      { x: 0, y: 0 },
+      { x: 4.5, y: 0 },
+    ])
 
     tool.onKeyDown(press('Enter'), h.ctx)
-    expect(distance(h.walls()[0].a, h.walls()[0].b)).toBeCloseTo(2, 9)
+    expect(distance(h.walls()[0].a, h.walls()[0].b)).toBeCloseTo(4.5, 9)
   })
 
   it('spends the typed length on the click that names the direction, and only that one', () => {
@@ -688,6 +716,30 @@ describe('RoomTool turns one drag into a room', () => {
     ])
   })
 
+  it('squares a drag that went straight up instead of dropping it', () => {
+    const h = harness()
+    const tool = new RoomTool()
+
+    tool.onPointerDown(pointer(0, 0), h.ctx)
+    tool.onPointerMove(pointer(0, 5, { shiftKey: true }), h.ctx)
+    tool.onPointerUp(pointer(0, 5, { shiftKey: true }), h.ctx)
+
+    // Angle snapping pulls a drag onto the axis, so an exactly vertical one is
+    // the ordinary case and not a freak. There is no sign to take on the axis
+    // the pointer never left, and `Math.sign(0)` collapsed the square to a line
+    // that the release then threw away without a word — on the gesture the
+    // tool's own hint recommends.
+    const walls = h.walls()
+    expect(walls).toHaveLength(4)
+    for (const wall of walls) expect(distance(wall.a, wall.b)).toBeCloseTo(5, 9)
+    expect(walls.map((wall) => wall.a)).toEqual([
+      { x: 0, y: 0 },
+      { x: 5, y: 0 },
+      { x: 5, y: 5 },
+      { x: 0, y: 5 },
+    ])
+  })
+
   it('finishes the room on a release that misses the floor', () => {
     const h = harness()
     const tool = new RoomTool()
@@ -746,21 +798,6 @@ describe('a degenerate drag produces nothing rather than a broken room', () => {
     expect(h.toasts).toEqual([])
   })
 
-  it('SUSPECTED BUG: Shift plus a straight-up drag collapses the room to nothing', () => {
-    const h = harness()
-    const tool = new RoomTool()
-
-    tool.onPointerDown(pointer(0, 0), h.ctx)
-    tool.onPointerMove(pointer(0, 5, { shiftKey: true }), h.ctx)
-    tool.onPointerUp(pointer(0, 5, { shiftKey: true }), h.ctx)
-
-    // SUSPECTED BUG: the square constraint multiplies the side by
-    // `Math.sign(dx)`, which is 0 when the pointer has not moved horizontally —
-    // and grid snapping makes an exactly vertical drag common. A 5 m square is
-    // dropped instead of drawn, silently, on the gesture the hint recommends.
-    expect(h.walls()).toEqual([])
-  })
-
   it('does not release a zero-area room through the draft either', () => {
     const h = harness()
     const tool = new RoomTool()
@@ -814,7 +851,7 @@ describe('a gesture is one undo step', () => {
     expect(h.walls()).toHaveLength(2)
   })
 
-  it('SUSPECTED BUG: undoing a segment leaves the chain hanging off a corner that is gone', () => {
+  it('goes on drawing from the corner it was at when a segment is undone', () => {
     const h = harness()
     const tool = new WallTool()
 
@@ -827,12 +864,17 @@ describe('a gesture is one undo step', () => {
     // what `ViewportHost` calls when the store's document changes.
     tool.onRefresh(h.ctx)
 
-    // SUSPECTED BUG: undo rolls the document back but not the tool, so the
-    // draft still runs through a corner whose wall has gone and the chain goes
-    // on drawing from it. What the user sees is an unbroken run; what the plan
-    // has is a hole in the middle of it, invisible until the draft clears, by
-    // which point they have drawn past it. The tool should follow the document
-    // back, as it already redraws for every other change.
+    // Recorded decision: the chain is the gesture in progress and it does not
+    // follow the document back. `onRefresh` exists precisely so that a document
+    // change redraws the chain rather than restarting it — committing a segment
+    // is itself a document change — and it reads none of the plan to decide
+    // what the chain should be. For undo to move the chain the tool would have
+    // to keep the id of every wall it committed and pop a point whenever one
+    // went missing, which puts tool state in the business of tracking history
+    // and still leaves redo out of step the other way round. The cost is what
+    // this test pins: after an undo mid-chain the draft runs through a corner
+    // whose wall has gone, until Escape or a double-click starts a fresh
+    // chain.
     expect(h.walls()).toHaveLength(1)
     expect(h.draft()[0].points).toEqual([
       { x: 0, y: 0 },
@@ -991,7 +1033,7 @@ describe('ZoneTool drags out an area', () => {
     expect(h.zones().map((zone) => zone.name)).toEqual(['Entry 1', 'Entry 2', 'Exit 1'])
   })
 
-  it('SUSPECTED BUG: numbers by how many exist, so a deleted area leaves two of a name', () => {
+  it('numbers past the highest name in use, so a deleted area leaves no twin', () => {
     const h = harness()
     const tool = new ZoneTool()
     const drag = (x: number, y: number) => {
@@ -1007,13 +1049,11 @@ describe('ZoneTool drags out an area', () => {
     h.ctx.apply((doc) => removeObjects(doc, [{ kind: 'zone', id: h.zones()[0].id }]), 'Delete')
     drag(12, 0)
 
-    // SUSPECTED BUG: the number is `zones of this kind + 1`, so deleting one
-    // hands its successor's name out twice. The itinerary editor lists
-    // destinations by name, so a planner then picks between two identical
-    // "Entry 2" entries with no way to tell which door they mean, and the
-    // results name both the same. Numbering past the highest already used
-    // would cost nothing.
-    expect(h.zones().map((zone) => zone.name)).toEqual(['Entry 2', 'Entry 2'])
+    // Counting instead handed the successor's name out twice. The itinerary
+    // editor lists destinations by name and the results report them by name, so
+    // a planner was left picking between two identical "Entry 2" rows with no
+    // way to tell which door they meant.
+    expect(h.zones().map((zone) => zone.name)).toEqual(['Entry 2', 'Entry 3'])
   })
 
   it('gives a keep-clear area the routing cost that makes it one', () => {
@@ -1162,32 +1202,28 @@ describe('a click rather than a drag starts a free-form outline', () => {
     ])
   })
 
-  it('SUSPECTED BUG: finishing with a double-click duplicates the corner it lands on', () => {
+  it('finishes on a double-click with the corners the user placed', () => {
     const h = harness()
     const tool = new ZoneTool()
 
     click(tool, h.ctx, 3, 3)
     click(tool, h.ctx, 9, 3)
     // The hint tells the user to end an outline this way, and a double-click is
-    // two down/up pairs before `dblclick` — the tool sees both downs.
+    // two down/up pairs before `dblclick` — the tool sees both downs. Kept, the
+    // repeat put two vertex handles on one spot for the select tool: dragging
+    // moved only the one that won the hit test, tearing a spike out of the
+    // edge, and the duplicate rode into every copy and file the plan was sent
+    // as.
     click(tool, h.ctx, 9, 7)
     click(tool, h.ctx, 9, 7)
     tool.onDoubleClick(pointer(9, 7), h.ctx)
 
-    // SUSPECTED BUG: the documented way to finish an outline should leave the
-    // three corners the user placed — a click on the corner just placed ought
-    // to be dropped, as the wall tool drops one within 5 cm. Instead the saved
-    // zone carries that corner twice. The select tool puts one vertex handle on
-    // every polygon point, so two sit on the same spot and dragging moves only
-    // the one that wins the hit test, tearing a spike out of the edge; and the
-    // duplicate rides into every copy, save and file the plan is sent as.
-    const polygon = h.zones()[0].polygon
-    expect(polygon).toEqual([
+    expect(h.zones()[0].polygon).toEqual([
       { x: 3, y: 3 },
       { x: 9, y: 3 },
       { x: 9, y: 7 },
-      { x: 9, y: 7 },
     ])
+    expect(polygonArea(h.zones()[0].polygon)).toBeCloseTo(12, 9)
   })
 
   it('throws an outline away when the double-click comes before there is an area', () => {
@@ -1211,27 +1247,26 @@ describe('a click rather than a drag starts a free-form outline', () => {
     expect(polygonArea(h.zones()[0].polygon)).toBeCloseTo(12, 9)
   })
 
-  it('SUSPECTED BUG: two corners and a double-click commit an area with no area', () => {
+  it('writes nothing when the double-click comes a corner too early', () => {
     const h = harness()
     const tool = new ZoneTool()
+    const before = h.doc()
 
     click(tool, h.ctx, 3, 3)
     click(tool, h.ctx, 9, 3)
     click(tool, h.ctx, 9, 3)
     tool.onDoubleClick(pointer(9, 3), h.ctx)
 
-    // SUSPECTED BUG: two corners are a line, and finishing on one should
-    // produce no zone at all — the drag path guards exactly this with its 0.2 m
-    // check. Here the duplicate corner counts towards the three the commit asks
-    // for, so a user who double-clicks one corner too early gets a degenerate
-    // area. `destinationFrom` finds no cells inside it and falls back to a
-    // single `nearestFreeCell`, so a whole population arrives at one spot, and
-    // a measurement area with no floor under it reports density over zero.
-    expect(h.zones()).toHaveLength(1)
-    expect(polygonArea(h.zones()[0].polygon)).toBe(0)
+    // Two corners are a line. The repeat press used to count towards the three
+    // a commit asks for, and `destinationFrom` finds no cells inside a zone
+    // with no area: a whole population then arrives at the single
+    // `nearestFreeCell` it falls back to, and a measurement area reports
+    // density over zero floor.
+    expect(h.zones()).toEqual([])
+    expect(h.doc()).toBe(before)
   })
 
-  it('SUSPECTED BUG: a thin drag falls into outline mode and traps the tool there', () => {
+  it('takes a long thin drag as the area it swept, not as a click', () => {
     const h = harness()
     const tool = new ZoneTool()
 
@@ -1239,27 +1274,39 @@ describe('a click rather than a drag starts a free-form outline', () => {
     tool.onPointerMove(pointer(1.1, 7), h.ctx)
     tool.onPointerUp(pointer(1.1, 7), h.ctx)
 
-    // SUSPECTED BUG: a 6 m drag is not a click, and the tool decides which it
-    // was from the thinner side alone — so a gate line across a doorway, which
-    // is exactly this shape, silently becomes a free-form outline instead of an
-    // area. Measuring one side against the other, or against how far the
-    // pointer travelled, would tell a drag from a click.
-    expect(h.zones()).toEqual([])
-    expect(h.draft()[0].kind).toBe('polygon')
-
-    // And the tool is now holding an outline the user never asked for: pointer
-    // up is dead in that mode, so every further drag drops another corner into
-    // it and draws no area at all until they find Escape.
-    tool.onPointerDown(pointer(5, 5), h.ctx)
-    tool.onPointerMove(pointer(9, 9), h.ctx)
-    tool.onPointerUp(pointer(9, 9), h.ctx)
-    expect(h.zones()).toEqual([])
-
-    expect(tool.onKeyDown(press('Escape'), h.ctx)).toBe(true)
-    tool.onPointerDown(pointer(5, 5), h.ctx)
-    tool.onPointerMove(pointer(9, 9), h.ctx)
-    tool.onPointerUp(pointer(9, 9), h.ctx)
+    // A gate line across a doorway is exactly this shape. Judged on the
+    // thinner side alone a 6 m drag counted as a click, which dropped the user
+    // into a free-form outline they never asked for — and pointer-up does
+    // nothing in that mode, so every further drag added another corner and drew
+    // no area at all until they found Escape.
     expect(h.zones()).toHaveLength(1)
+    expect(h.zones()[0].polygon).toEqual([
+      { x: 1, y: 1 },
+      { x: 1.1, y: 1 },
+      { x: 1.1, y: 7 },
+      { x: 1, y: 7 },
+    ])
+
+    // Still drawing areas: the next drag is one too, not a corner of an outline.
+    tool.onPointerDown(pointer(5, 5), h.ctx)
+    tool.onPointerMove(pointer(9, 9), h.ctx)
+    tool.onPointerUp(pointer(9, 9), h.ctx)
+    expect(h.zones()).toHaveLength(2)
+  })
+
+  it('drops a drag that swept no width at all', () => {
+    const h = harness()
+    const tool = new ZoneTool()
+
+    tool.onPointerDown(pointer(1, 1), h.ctx)
+    tool.onPointerMove(pointer(7, 1), h.ctx)
+    tool.onPointerUp(pointer(7, 1), h.ctx)
+
+    // Snapping pulls a drag onto a grid line, so this is a gesture a user
+    // makes. A zone with no thickness has no floor inside it for the
+    // simulation to find a cell in, and nothing to click on afterwards.
+    expect(h.zones()).toEqual([])
+    expect(h.draft()).toEqual([])
   })
 })
 
@@ -1318,43 +1365,38 @@ describe('measuring never touches the plan', () => {
     expect(h.labels()).toEqual([])
   })
 
-  it('SUSPECTED BUG: Alt frees the live readout but the clicks still snap', () => {
+  it('measures between the points the pointer named while Alt is held', () => {
     const h = harness({ snap: latticeSnap })
     const tool = new MeasureTool()
 
     tool.onPointerDown(pointer(1.06, 2, { altKey: true }), h.ctx)
     tool.onPointerMove(pointer(4.19, 2, { altKey: true }), h.ctx)
-    // What the user reads while deciding where to click — already measured from
-    // a start the first click pulled onto the grid behind their back.
-    expect(h.labels()[0].text).toBe('3.19 m')
+    // What the user reads while deciding where to click.
+    expect(h.labels()[0].text).toBe('3.13 m')
 
     tool.onPointerDown(pointer(4.19, 2, { altKey: true }), h.ctx)
     tool.onDoubleClick(pointer(4.19, 2, { altKey: true }), h.ctx)
 
-    // SUSPECTED BUG: Alt should suspend snapping for the click as well as for
-    // the preview — `onPointerMove` passes `disabled: info.altKey` and
-    // `onPointerDown` does not. So the number moves by 6 cm at the instant it
-    // is committed, and the one tool whose whole job is "how far is that
-    // really" ends up answering about the grid points beside it. There is no
-    // way at all to measure something off the grid.
-    expect(h.labels()[0].text).toBe('3.25 m')
+    // And what they are left with: the click used to snap where the preview did
+    // not, so the number moved 6 cm at the instant it was committed and the one
+    // tool whose whole job is "how far is that really" answered about the grid
+    // points beside the thing being measured.
+    expect(h.labels()[0].text).toBe('3.13 m')
   })
 
-  it('SUSPECTED BUG: ending the tape with a double-click adds a leg of nothing', () => {
+  it('ends the tape on a double-click without a leg of nothing', () => {
     const h = harness()
     const tool = new MeasureTool()
 
     tool.onPointerDown(pointer(0, 0), h.ctx)
     tool.onPointerMove(pointer(3, 0), h.ctx)
     tool.onPointerDown(pointer(3, 0), h.ctx)
+    // The second press of the double-click that ends the tape.
     tool.onPointerDown(pointer(3, 0), h.ctx)
     tool.onDoubleClick(pointer(3, 0), h.ctx)
 
-    // SUSPECTED BUG: `onDoubleClick` exists to end a tape, but the second press
-    // of that double-click has already pushed the same point again — the wall
-    // tool drops a repeat click within 5 cm and this one has no such guard. The
-    // finished tape carries a 0 cm leg, and a "Total" line appears over what
-    // the user drew as a single measurement.
-    expect(h.labels().map((label) => label.text)).toEqual(['3.00 m', '0 cm', 'Total 3.00 m'])
+    // One span, one number: the repeat press used to add a 0 cm leg, which put
+    // a "Total" line over what the user drew as a single measurement.
+    expect(h.labels().map((label) => label.text)).toEqual(['3.00 m'])
   })
 })

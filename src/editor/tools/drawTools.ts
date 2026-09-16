@@ -21,6 +21,17 @@ import { ZONE_COLORS, ZONE_LABELS } from '../../core/model/defaults'
 
 const DRAFT_COLOR = '#f08a3c'
 
+/**
+ * Two points closer together than this are the same point.
+ *
+ * A double-click arrives as two down/up pairs, so the tools that build a point
+ * at a time see the corner they just placed pressed a second time.
+ */
+const SAME_POINT = 0.05
+
+/** A press and release that swept less than this in both directions is a click. */
+const CLICK_SLOP = 0.2
+
 /** Shared preview label placed at the midpoint of a segment. */
 const segmentLabels = (ctx: ToolContext, a: Vec2, b: Vec2, prefix = '') => {
   const length = distance(a, b)
@@ -46,6 +57,13 @@ export class WallTool implements Tool {
   private points: Vec2[] = []
   private preview: Vec2 | null = null
   private typed = ''
+  /**
+   * Where the pointer last was, and whether Alt was down with it.
+   *
+   * Typing is not a pointer event, so a typed length has nothing to aim along
+   * unless the tool remembers the last one it saw.
+   */
+  private pointer: { ground: Vec2; altKey: boolean } | null = null
 
   onActivate(ctx: ToolContext): void {
     this.reset(ctx)
@@ -64,6 +82,7 @@ export class WallTool implements Tool {
     this.points = []
     this.preview = null
     this.typed = ''
+    this.pointer = null
     ctx.setDraft([])
     ctx.setLabels([])
   }
@@ -72,32 +91,49 @@ export class WallTool implements Tool {
     return this.points.length ? this.points[this.points.length - 1] : null
   }
 
-  private resolvePoint(info: PointerInfo, ctx: ToolContext): Vec2 | null {
-    if (!info.ground) return null
+  /**
+   * Where a typed length lands: the pointer says which way, the number says how
+   * far. Null when there is no usable number, or no direction yet.
+   */
+  private typedPoint(ctx: ToolContext, ground: Vec2, altKey: boolean): Vec2 | null {
     const anchor = this.anchor()
-    if (anchor && this.typed) {
-      const length = parseLength(this.typed, ctx.document.settings.units)
-      if (length !== null && length > 0) {
-        const direction = fromAngle(angleOf(sub(info.ground, anchor)))
-        const step = ctx.document.settings.angleSnapDeg
-        const angle =
-          step > 0
-            ? Math.round(angleOf(direction) / ((step * Math.PI) / 180)) * ((step * Math.PI) / 180)
-            : angleOf(direction)
-        return add(anchor, fromAngle(angle, length))
-      }
-    }
-    return ctx.snap(info.ground, {
-      anchor,
-      angleSnapDeg: ctx.document.settings.angleSnapDeg,
-      disabled: info.altKey,
-    }).point
+    if (!anchor || !this.typed) return null
+    const length = parseLength(this.typed, ctx.document.settings.units)
+    if (length === null || length <= 0) return null
+    const delta = sub(ground, anchor)
+    // Until the pointer has left the anchor it names no direction, and a wall
+    // of the typed length could point anywhere.
+    if (delta.x === 0 && delta.y === 0) return null
+    // This branch never reaches `ctx.snap`, so Alt has to suspend the angle
+    // step here itself — otherwise an exact length at a surveyed angle, which
+    // is the whole reason to type one, cannot be drawn at all.
+    const step = altKey ? 0 : ctx.document.settings.angleSnapDeg
+    const increment = (step * Math.PI) / 180
+    const angle = step > 0 ? Math.round(angleOf(delta) / increment) * increment : angleOf(delta)
+    return add(anchor, fromAngle(angle, length))
+  }
+
+  private resolvePoint(ground: Vec2, altKey: boolean, ctx: ToolContext): Vec2 {
+    return (
+      this.typedPoint(ctx, ground, altKey) ??
+      ctx.snap(ground, {
+        anchor: this.anchor(),
+        angleSnapDeg: ctx.document.settings.angleSnapDeg,
+        disabled: altKey,
+      }).point
+    )
+  }
+
+  /** Typing is not a move, so the preview has to be re-aimed by hand. */
+  private retarget(ctx: ToolContext): void {
+    if (this.pointer) this.preview = this.resolvePoint(this.pointer.ground, this.pointer.altKey, ctx)
+    this.refresh(ctx, null)
   }
 
   onPointerMove(info: PointerInfo, ctx: ToolContext): void {
-    const point = this.resolvePoint(info, ctx)
-    if (!point) return
-    this.preview = point
+    if (!info.ground) return
+    this.pointer = { ground: info.ground, altKey: info.altKey }
+    this.preview = this.resolvePoint(info.ground, info.altKey, ctx)
     this.refresh(ctx, info)
   }
 
@@ -136,11 +172,12 @@ export class WallTool implements Tool {
   }
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
-    const point = this.resolvePoint(info, ctx)
-    if (!point) return
+    if (!info.ground) return
+    this.pointer = { ground: info.ground, altKey: info.altKey }
+    const point = this.resolvePoint(info.ground, info.altKey, ctx)
     const anchor = this.anchor()
     if (anchor) {
-      if (distance(anchor, point) < 0.05) return
+      if (distance(anchor, point) < SAME_POINT) return
       this.commitSegment(ctx, anchor, point)
     }
     this.points.push(point)
@@ -175,12 +212,22 @@ export class WallTool implements Tool {
       return false
     }
     if (event.key === 'Enter') {
-      if (this.anchor() && this.preview && this.typed) {
-        const anchor = this.anchor()!
-        this.commitSegment(ctx, anchor, this.preview)
-        this.points.push(this.preview)
-        this.typed = ''
-        this.refresh(ctx, null)
+      const anchor = this.anchor()
+      if (anchor && this.typed) {
+        // The number, not the preview: the preview is where the pointer last
+        // was, and with no move since the click that is the anchor itself — so
+        // Enter straight after typing used to put a wall of no length in the
+        // plan, and otherwise drew the distance on screen instead of the one
+        // that had just been typed.
+        const point = this.pointer
+          ? this.typedPoint(ctx, this.pointer.ground, this.pointer.altKey)
+          : null
+        if (point) {
+          this.commitSegment(ctx, anchor, point)
+          this.points.push(point)
+          this.typed = ''
+          this.retarget(ctx)
+        }
         return true
       }
       this.reset(ctx)
@@ -189,7 +236,7 @@ export class WallTool implements Tool {
     if (event.key === 'Backspace') {
       if (this.typed) {
         this.typed = this.typed.slice(0, -1)
-        this.refresh(ctx, null)
+        this.retarget(ctx)
         return true
       }
       if (this.points.length) {
@@ -201,13 +248,13 @@ export class WallTool implements Tool {
     }
     if (/^[0-9.]$/.test(event.key) && this.anchor()) {
       this.typed += event.key
-      this.refresh(ctx, null)
+      this.retarget(ctx)
       return true
     }
     if (/^[a-z]$/i.test(event.key) && this.typed) {
       // Allow typing a unit suffix such as `cm` or `ft`.
       this.typed += event.key
-      this.refresh(ctx, null)
+      this.retarget(ctx)
       return true
     }
     return false
@@ -243,7 +290,14 @@ export class RoomTool implements Tool {
       const dx = point.x - this.start.x
       const dy = point.y - this.start.y
       const side = Math.max(Math.abs(dx), Math.abs(dy))
-      point = { x: this.start.x + Math.sign(dx) * side, y: this.start.y + Math.sign(dy) * side }
+      // A drag that is exactly vertical or horizontal — which angle snapping
+      // makes the usual case, not a rare one — has no sign on that axis, and
+      // `Math.sign` returned 0 for it: the square collapsed to a line and the
+      // release threw it away without a word.
+      point = {
+        x: this.start.x + (dx < 0 ? -side : side),
+        y: this.start.y + (dy < 0 ? -side : side),
+      }
     }
     this.current = point
     const polygon = rectangleFrom(this.start, point)
@@ -285,7 +339,10 @@ export class RoomTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
-    if (event.key === 'Escape') {
+    // Only while there is a drag to abandon: an Escape no tool claims is how
+    // the editor hands the user back to the select tool, and swallowing it
+    // when idle left them with no keyboard way out of the room tool at all.
+    if (event.key === 'Escape' && this.start) {
       this.onDeactivate(ctx)
       return true
     }
@@ -318,6 +375,11 @@ export class ZoneTool implements Tool {
     if (!info.ground) return
     const point = ctx.snap(info.ground, { disabled: info.altKey }).point
     if (this.polygon.length > 0) {
+      // The double-click that finishes an outline presses the last corner a
+      // second time; kept, it rode into the saved polygon as two vertices on
+      // one spot, and into every copy and file the plan was sent as.
+      const last = this.polygon[this.polygon.length - 1]
+      if (distance(last, point) < SAME_POINT) return
       this.polygon.push(point)
       this.refreshPolygon(ctx)
       return
@@ -375,12 +437,22 @@ export class ZoneTool implements Tool {
     if (!this.start || !this.current) return
     const width = Math.abs(this.current.x - this.start.x)
     const depth = Math.abs(this.current.y - this.start.y)
-    if (width < 0.2 || depth < 0.2) {
-      // A click rather than a drag starts a free-form outline.
+    if (width < CLICK_SLOP && depth < CLICK_SLOP) {
+      // A click rather than a drag starts a free-form outline. It takes both
+      // sides: a long thin drag — a gate line across a doorway is exactly one
+      // — is a drag, and used to drop the user into an outline they never
+      // asked for, where pointer-up does nothing and only Escape gets out.
       this.polygon = [this.start]
       this.current = info.ground
       this.start = null
       this.refreshPolygon(ctx)
+      return
+    }
+    if (width < SAME_POINT || depth < SAME_POINT) {
+      // A drag along a grid line ends on the corner it started from, as far as
+      // one axis is concerned. There is no floor inside an area like that for
+      // the simulation to find, so it is dropped rather than written.
+      this.onDeactivate(ctx)
       return
     }
     this.commit(ctx, rectangleFrom(this.start, this.current))
@@ -393,13 +465,18 @@ export class ZoneTool implements Tool {
 
   private commit(ctx: ToolContext, polygon: Vec2[]): void {
     const kind = ctx.options.zoneKind
-    const existing = ctx.document.plan.zones.filter((z) => z.kind === kind).length
+    // Past the highest number in use rather than past the count: deleting an
+    // area used to hand its successor's name out twice, and the itinerary
+    // editor and the results then offer two destinations called the same thing.
+    const used = ctx.document.plan.zones
+      .filter((z) => z.kind === kind)
+      .map((z) => Number(/(\d+)$/.exec(z.name)?.[1] ?? 0))
     ctx.apply(
       (doc) =>
         addZone(doc, {
           id: newId('zone'),
           kind,
-          name: `${ZONE_LABELS[kind]} ${existing + 1}`,
+          name: `${ZONE_LABELS[kind]} ${Math.max(0, ...used) + 1}`,
           polygon,
           ...(kind === 'keep-clear' ? { cost: 4 } : {}),
         }),
@@ -410,7 +487,9 @@ export class ZoneTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
-    if (event.key === 'Escape') {
+    // Only while there is something part-drawn; an unclaimed Escape is what
+    // returns the user to the select tool.
+    if (event.key === 'Escape' && (this.start || this.polygon.length > 0)) {
       this.onDeactivate(ctx)
       return true
     }
@@ -444,12 +523,21 @@ export class MeasureTool implements Tool {
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
     if (!info.ground) return
-    this.points.push(
-      ctx.snap(info.ground, {
-        anchor: this.points[this.points.length - 1] ?? null,
-        angleSnapDeg: ctx.document.settings.angleSnapDeg,
-      }).point,
-    )
+    const last = this.points[this.points.length - 1] ?? null
+    // Alt suspends snapping on the click as well as on the preview: the one
+    // tool whose whole job is "how far is that really" would otherwise answer
+    // about the grid points beside the thing being measured, and the number
+    // moved at the instant it was committed.
+    const point = ctx.snap(info.ground, {
+      anchor: last,
+      angleSnapDeg: ctx.document.settings.angleSnapDeg,
+      disabled: info.altKey,
+    }).point
+    // The second press of the double-click that ends a tape lands on the point
+    // just placed, and a leg of 0 cm put a total over what the user drew as a
+    // single measurement.
+    if (last && distance(last, point) < SAME_POINT) return
+    this.points.push(point)
     this.refresh(ctx)
   }
 
@@ -505,7 +593,9 @@ export class MeasureTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
-    if (event.key === 'Escape') {
+    // Only while there is a tape to clear; an unclaimed Escape is what returns
+    // the user to the select tool.
+    if (event.key === 'Escape' && this.points.length > 0) {
       this.onDeactivate(ctx)
       return true
     }
