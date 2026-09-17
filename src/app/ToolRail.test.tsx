@@ -1,0 +1,110 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+/**
+ * The tool strip.
+ *
+ * It is the only place the drawing tools are named to the user, and each name
+ * comes with the key that selects it. The rail is therefore two claims at once:
+ * that clicking it changes tool, and that the letter printed beside the tool is
+ * the letter that works. Both are tested here, because a tooltip that lies
+ * about a shortcut is worse than no tooltip.
+ */
+
+import { useRef } from 'react'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { ToolRail } from './ToolRail'
+import { useKeyboard } from './useKeyboard'
+import type { ViewportHandle } from './ViewportHost'
+import { useEditor, type ToolId } from '../state/editorStore'
+
+const editor = () => useEditor.getState()
+
+beforeEach(() => {
+  useEditor.setState({ tool: 'select', hint: null })
+})
+
+/** The rail with the global keyboard map live behind it, as in the real app. */
+const Shell = () => {
+  const viewportRef = useRef<ViewportHandle>({ viewport: null, controller: null })
+  useKeyboard({
+    viewportRef,
+    onToggleHeatmap: () => undefined,
+    onShowShortcuts: () => undefined,
+    overlayOpen: false,
+  })
+  return <ToolRail />
+}
+
+const RAIL: Array<{ label: string; tool: ToolId }> = [
+  { label: 'Select and move', tool: 'select' },
+  { label: 'Draw walls', tool: 'wall' },
+  { label: 'Draw a room', tool: 'room' },
+  { label: 'Add a doorway', tool: 'door' },
+  { label: 'Add a window', tool: 'window' },
+  { label: 'Place furniture', tool: 'furniture' },
+  { label: 'Draw an area', tool: 'zone' },
+  { label: 'Place a service point', tool: 'service' },
+  { label: 'Reshape a queue', tool: 'queue' },
+  { label: 'Tape measure', tool: 'measure' },
+]
+
+const button = (label: string): HTMLElement => screen.getByRole('button', { name: label })
+
+describe('the tool rail', () => {
+  it('offers every tool the editor has, and picks the one that was clicked', () => {
+    render(<ToolRail />)
+    expect(screen.getAllByRole('button')).toHaveLength(RAIL.length)
+
+    for (const { label, tool } of RAIL) {
+      fireEvent.click(button(label))
+      expect(editor().tool).toBe(tool)
+    }
+  })
+
+  it('shows one tool held down at a time, and follows a tool chosen elsewhere', () => {
+    render(<ToolRail />)
+
+    // The keyboard, the inspector and a tool that finishes its gesture all set
+    // the tool without going near the rail; the rail reads the store, so it
+    // cannot drift out of step with what the pointer is actually doing.
+    act(() => useEditor.setState({ tool: 'door' }))
+    expect(button('Add a doorway').getAttribute('aria-pressed')).toBe('true')
+    expect(
+      screen.getAllByRole('button').filter((el) => el.getAttribute('aria-pressed') === 'true'),
+    ).toHaveLength(1)
+
+    act(() => useEditor.setState({ tool: 'measure' }))
+    expect(button('Add a doorway').getAttribute('aria-pressed')).toBe('false')
+    expect(button('Tape measure').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('advertises the key that really does select the tool', () => {
+    render(<Shell />)
+
+    for (const { label, tool } of RAIL) {
+      const title = button(label).getAttribute('title') ?? ''
+      const promised = /\(([^)]+)\)\s*$/.exec(title)?.[1]
+      expect(promised, `${label} has no shortcut in its tooltip`).toBeTypeOf('string')
+
+      // Start somewhere else, so a tooltip that names the wrong key cannot pass
+      // by leaving the tool where it already was.
+      act(() => useEditor.setState({ tool: tool === 'select' ? 'wall' : 'select' }))
+      fireEvent.keyDown(window.document.body, { key: (promised as string).toLowerCase() })
+      expect(editor().tool, `${label} promises ${promised}`).toBe(tool)
+      expect(button(label).getAttribute('aria-pressed')).toBe('true')
+    }
+  })
+
+  it('clears the tool hint when the tool changes', () => {
+    render(<ToolRail />)
+    // The status strip belongs to the tool that wrote it. Carrying "click to
+    // place the second point" over into the tape measure is a stale
+    // instruction for a gesture that no longer exists.
+    act(() => useEditor.setState({ tool: 'wall', hint: 'Click to start a wall.' }))
+    fireEvent.click(button('Tape measure'))
+    expect(editor().hint).toBeNull()
+  })
+})
