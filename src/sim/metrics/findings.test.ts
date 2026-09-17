@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { deriveFindings } from './findings'
 import type { Finding, FindingInput } from './findings'
 import { CROWD_SAFETY, WALKWAY_LOS, losFor } from './los'
+import type { LosBand } from './los'
 import type { AreaSummary, RunSummary, ServiceSummary } from '../types'
 
 type Series = FindingInput['series']
@@ -15,8 +16,22 @@ type Series = FindingInput['series']
 const SAMPLE_S = 10
 const SAMPLES = 61
 
-/** Where the shared tables put the two bands the density detectors talk about. */
-const LOS_F_FROM = WALKWAY_LOS[4].maxDensity // 1 / 0.46 = 2.174 per m²
+/**
+ * Where the shared tables put the two bands the density detectors talk about.
+ *
+ * The band is found by its letter, not by its row. `findings.ts` reaches for
+ * `WALKWAY_LOS[4]`, and a test that reached for the same row would move with it
+ * — a band inserted into the table would silently shift the density the product
+ * calls level of service F while every assertion here went on passing.
+ */
+const walkwayEdge = (level: LosBand['level']): number => {
+  const band = WALKWAY_LOS.find((entry) => entry.level === level)
+  if (!band) throw new Error(`The walkway table has no band ${level}`)
+  return band.maxDensity
+}
+
+/** F begins where E runs out: 1 / 0.46 = 2.174 per m². */
+const LOS_F_FROM = walkwayEdge('E')
 const CRUSH_FROM = CROWD_SAFETY.warnDensity
 
 /** A counter nobody had to wait at, so an override turns one thing bad at a time. */
@@ -293,6 +308,12 @@ describe('density findings', () => {
       seriesOf({ peakDensity: heldFor(CRUSH_FROM, 70) }),
     )
     expect(idsOf(atTheEdge)).toEqual(['density-crush'])
+    // And the sentence quotes that same number. It cannot fail while the
+    // constant is 4 — the two tests above assert the whole headline as a string
+    // — but it is what turns "why did this string change?" into the answer if
+    // the constant is ever moved, and what catches the number being restated in
+    // prose beside a detector that has moved on from it.
+    expect(atTheEdge[0].headline).toContain(`${CROWD_SAFETY.warnDensity} people per m²`)
 
     // A hair under and the same crowd is a failing level of service instead.
     // The two detectors have to meet at one number or a run falls between them.
@@ -394,8 +415,10 @@ describe('density findings', () => {
       'density-fail',
     )
     expect(finding.headline).toBe('The busiest area sat at level of service F for 2 min')
-    // The threshold it fired on, so a planner can disagree with it and still
-    // use the number.
+    // The sentence quotes the table's edge to two decimals. On its own that
+    // string is no evidence — the rounded literal printed the same thing — so
+    // it is the `stillE` run above that holds the threshold in place, and this
+    // only checks the planner is still handed a number to disagree with.
     expect(finding.detail).toContain('Above 2.17 per m²')
   })
 })
@@ -450,9 +473,12 @@ describe('measured area findings', () => {
     // A finding names its object by bare id, which is all this module can
     // honestly say: it has no view and no document to resolve against. The
     // known cost is that ResultsPanel selects every targetId as
-    // { kind: 'service' }, so clicking an area finding — whose id is a zone's —
-    // selects nothing. Closing that needs the kind added here *and* the panel
-    // to stop hardcoding one; the panel half is the half that fixes the click.
+    // { kind: 'service' } (ResultsPanel.tsx:339), so clicking an area finding —
+    // whose id is a zone's — selects nothing. The panel disagrees with itself:
+    // its own areas table two rows down selects the same ids as
+    // { kind: 'zone' } (ResultsPanel.tsx:408). Closing it needs the kind added
+    // here *and* the panel to stop hardcoding one; the panel is the half that
+    // fixes the click.
     expect(finding.targetId).toBe('zone-gate')
   })
 

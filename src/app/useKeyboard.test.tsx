@@ -26,13 +26,14 @@ import { PlanBuilder } from '../library/planBuilder'
 import { planBounds } from '../core/model/planGeometry'
 import { documentFileName, serializeDocument } from '../core/document/serialize'
 import { downloadText, saveProject } from '../core/document/storage'
+import type * as Storage from '../core/document/storage'
 import type { CrowdDocument, PlanObjectRef } from '../core/model/types'
 
 // Saving reaches IndexedDB and a download anchor, neither of which exists here
 // and neither of which is what these tests are about: what matters is that the
 // chord reaches them at all, with the document the user is looking at.
 vi.mock('../core/document/storage', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../core/document/storage')>()
+  const actual = await importOriginal<typeof Storage>()
   return { ...actual, downloadText: vi.fn(), saveProject: vi.fn(() => Promise.resolve()) }
 })
 
@@ -246,24 +247,34 @@ describe('keys that belong to somebody else', () => {
   it('gives the tool mid-gesture first refusal on every key', () => {
     const { handleKeyDown } = mount({ toolConsumes: true })
     editor().setSelection([refTo('furniture', hall.table.id)])
+    editor().apply((doc) => renameDocument(doc, 'Riverside Hall B'), 'Rename project')
+    const edited = editor().document
 
     expect(reachedTheBrowser('Escape')).toBe(false)
     expect(reachedTheBrowser('r')).toBe(false)
+    // The chords go through the tool first as well, so a tool that has claimed
+    // ⌘Z to step back one point of a wall chain is not undone whole underneath
+    // the user's hand.
+    expect(reachedTheBrowser('z', { metaKey: true })).toBe(false)
 
     // A wall chain half drawn owns Escape and Enter; the editor must not clear
-    // the selection or change tool out from under it.
-    expect(handleKeyDown).toHaveBeenCalledTimes(2)
+    // the selection, change tool, or roll the document back out from under it.
+    expect(handleKeyDown).toHaveBeenCalledTimes(3)
     expect(editor().selection).toHaveLength(1)
     expect(editor().tool).toBe('select')
+    expect(editor().document).toBe(edited)
   })
 
   it('lets the browser keep the chords it never claimed', () => {
-    mount()
-    // ⌘P prints and ⌘W closes the tab. Swallowing either — or worse, letting
-    // ⌘W fall through to the wall tool — is a shortcut the editor stole.
+    const { onToggleHeatmap } = mount()
+    // ⌘P prints, ⌘W closes the tab and ⌘H hides the window. Swallowing any of
+    // them — or worse, letting ⌘W fall through to the wall tool or ⌘H to the
+    // heat map — is a shortcut the editor stole.
     expect(reachedTheBrowser('p', { metaKey: true })).toBe(true)
     expect(reachedTheBrowser('w', { metaKey: true })).toBe(true)
+    expect(reachedTheBrowser('h', { metaKey: true })).toBe(true)
     expect(editor().tool).toBe('select')
+    expect(onToggleHeatmap).not.toHaveBeenCalled()
   })
 })
 
@@ -322,6 +333,24 @@ describe('editing from the keyboard', () => {
 })
 
 describe('the clipboard', () => {
+  // This test has to stay the first in the file that presses ⌘V. The clipboard
+  // is module-level in `useKeyboard.ts` — deliberately, so a copy survives
+  // switching project — and nothing can empty it again, so this is the only
+  // moment in the run at which "never copied anything" is the real state. A
+  // reorder that put a copy before it fails here loudly rather than passing
+  // for the wrong reason.
+  it('leaves ⌘V to the browser until something has been copied', () => {
+    mount()
+    const before = editor().document
+
+    // Otherwise the editor swallows the paste of the text, the image or the
+    // file the user actually had on the system clipboard, and does nothing
+    // with it.
+    expect(reachedTheBrowser('v', { metaKey: true })).toBe(true)
+    expect(editor().document).toBe(before)
+    expect(editor().tool).toBe('select')
+  })
+
   it('pastes clear of the original and steps further out each time', () => {
     mount()
     const grid = hall.document.settings.gridSize
@@ -427,6 +456,11 @@ describe('the view and the run', () => {
     editor().setView({ preset: 'eye' })
     press('Tab')
     expect(editor().view.preset).toBe('plan')
+
+    // Tab is focus traversal everywhere else on the web. Taking it for the view
+    // means also stopping it, or the camera swings and the focus ring walks off
+    // into the panel behind at the same time.
+    expect(reachedTheBrowser('Tab')).toBe(false)
   })
 
   it('fits the whole plan in view with a margin around it', () => {
@@ -438,11 +472,17 @@ describe('the view and the run', () => {
 
   it('opens the shortcut sheet and toggles the heat map', () => {
     const { onShowShortcuts, onToggleHeatmap } = mount()
-    press('?')
+
+    // "?" never arrives without Shift held, and Caps Lock sends "H" without it,
+    // so both have to work whatever the shift key is doing.
+    press('?', { shiftKey: true })
     press('h')
     press('H')
+
     expect(onShowShortcuts).toHaveBeenCalledTimes(1)
     expect(onToggleHeatmap).toHaveBeenCalledTimes(2)
+    // Neither letter belongs to a tool, so neither may leave the user drawing.
+    expect(editor().tool).toBe('select')
   })
 
   it('drives the whole transport from the space bar', () => {
@@ -450,6 +490,8 @@ describe('the view and the run', () => {
     press(' ')
     expect(sim().phase).toBe('preparing')
 
+    // The stub worker never answers, so the phase it would have moved the run
+    // into when the navigation grid was ready is set by hand here.
     useSimulation.setState({ phase: 'running' })
     press(' ')
     expect(sim().phase).toBe('paused')
@@ -475,13 +517,13 @@ describe('the view and the run', () => {
     const first = sim().runId
     press(' ')
 
-    // SUSPECTED BUG (src/app/useKeyboard.ts:180). The playback bar disables Run
-    // while the phase is 'preparing' precisely because building the navigation
-    // grid for a large venue takes seconds; the space bar has no such guard, so
-    // a second press throws that work away and starts again, and an impatient
-    // user can keep the run permanently a few hundred milliseconds from
-    // starting. The 'preparing' phase should behave like 'running' here — be
-    // ignored, or stop the run — rather than fall through to `run`.
+    // SUSPECTED BUG (src/app/useKeyboard.ts:196-207). The space bar reads the
+    // phase as "not running and not paused" and starts a fresh run, so a
+    // second press while the navigation grid is still being built throws that
+    // work away and starts it again under a new id — and for a large venue the
+    // grid is seconds of work, so an impatient user can keep the run
+    // permanently a moment away from starting. 'preparing' should be ignored
+    // here, or stop the run, rather than fall through to `run`.
     expect(sim().runId).not.toBe(first)
     expect(sim().phase).toBe('preparing')
   })

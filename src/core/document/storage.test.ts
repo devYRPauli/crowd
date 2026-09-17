@@ -451,15 +451,44 @@ describe('a stored venue that cannot be read back', () => {
     expect(await storage.loadProject('doc_notavenue')).toBeNull()
 
     // Refusing it does not lose it: the row is still listed, so it can still be
-    // downloaded away or deleted.
+    // deleted. It cannot be downloaded — the panel's download button is
+    // `loadProject` then `if (!full) return` (ProjectsModal.tsx:166) — so
+    // refusing a row is also the end of the only way to get at what is in it.
     const listed = await storage.listProjects()
     expect(listed.map((project) => project.name)).toEqual(['Shopping list'])
     expect(listed[0].id).toBe('doc_notavenue')
+    expect(listed[0].bytes).toBe(payload.length)
 
     // A venue this store actually wrote comes back as itself.
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
     await storage.saveProject(hall)
     expect((await storage.loadProject(hall.id))?.id).toBe(hall.id)
+  })
+
+  it('will not open a readable venue that is filed under another project’s key', async () => {
+    // Every row is keyed on the document inside it, so the two can only
+    // disagree if something wrote the row wrong. Handing the payload back would
+    // put the foyer on screen under the hall's name, and the next autosave
+    // would write the foyer over the hall's row — the copy the user still
+    // believes is their hall.
+    const foyer = venue('Foyer', '2024-05-01T10:00:00.000Z')
+    db.rows.set('doc_hall', {
+      id: 'doc_hall',
+      name: 'Main hall',
+      updatedAt: '2024-05-01T10:00:00.000Z',
+      payload: JSON.stringify(foyer),
+    })
+
+    // Nothing is wrong with the document itself: it parses without a warning.
+    const parsed = parseDocument(JSON.parse(JSON.stringify(foyer)))
+    expect(parsed.warnings).toEqual([])
+    expect(parsed.document.id).toBe(foyer.id)
+
+    expect(await storage.loadProject('doc_hall')).toBeNull()
+    // And it is not reachable under its own id either: nothing was ever filed
+    // there. The cost of refusing is that a mis-keyed row is unreadable by
+    // every route, which is the honest answer but not a recoverable one.
+    expect(await storage.loadProject(foyer.id)).toBeNull()
   })
 
   it('loads a venue with its only door missing without saying so', async () => {
@@ -676,6 +705,13 @@ describe('handing the venue over as a file', () => {
   })
 
   it('never hands the import dialog the word "null" to work with', async () => {
+    // The text arrives whole: it is handed straight to `JSON.parse`, so a read
+    // that trimmed or re-encoded it would fail the import with a syntax error
+    // pointing at a character the file does not have.
+    const payload = '{"name":"Main hall — north end","schemaVersion":1}'
+    installFileReader({ result: payload })
+    expect(await storage.readFileAsText(new File([], 'venue.crowd.json'))).toBe(payload)
+
     const reads = installFileReader({ result: null })
     await expect(storage.readFileAsText(new File([], 'venue.crowd.json'))).resolves.toBe('')
     expect(reads).toEqual(['text'])

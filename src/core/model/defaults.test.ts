@@ -396,9 +396,10 @@ describe('two documents made the same way', () => {
     expect(sharedReferences(a, b)).toEqual([])
     expect(a.scenario.profiles[0].speed).not.toBe(AGENT_PROFILES[0].speed)
     expect(a.scenario.profiles[0].speed).toEqual(AGENT_PROFILES[0].speed)
-    // Documents built from a template or repaired by the loader still go
-    // through the shallow copies in src/library/templates.ts and
-    // src/core/document/serialize.ts, which this file does not cover.
+    // Only this path is fixed. A document built from a template
+    // (templates.ts:46) or handed back by the loader (serialize.ts:347) — which
+    // between them is most documents — still copies the profiles shallowly and
+    // shares one `speed` object with the constants and with each other.
   })
 
   it('keeps an in-place edit out of the shipped defaults and out of each other', () => {
@@ -416,17 +417,29 @@ describe('two documents made the same way', () => {
     a.settings.defaultDoorWidth = 99
     a.plan.walls.push(wall)
     a.scenario.profiles[0].name = 'Renamed'
+    // The one nested object a profile owns. Nothing in the product writes to it
+    // today — the engine only reads it (engine.ts:535) and there is no profile
+    // editor yet — so this is the guard that makes adding one safe rather than a
+    // regression test for a bug users have hit. A shallow copy left it pointing
+    // at the shipped adult, so the first in-place write would move one venue's
+    // walking speed in every venue, and in the baseline a seeded comparison is
+    // measured against.
+    a.scenario.profiles[0].speed.mean = 0.4
     a.scenario.populations[0].profileMix[0].weight = 1
     a.scenario.populations[0].itinerary.push(createItineraryStep('exit'))
 
     expect(DEFAULT_SETTINGS.defaultDoorWidth).toBe(DEFAULT_DOOR_WIDTH)
     expect(AGENT_PROFILES[0].name).toBe('Adult')
+    expect(AGENT_PROFILES[0].speed.mean).toBeCloseTo(1.34, 6)
     expect(DEFAULT_PROFILE_MIX[0].weight).toBe(62)
     expect(b.settings.defaultDoorWidth).toBe(DEFAULT_DOOR_WIDTH)
     expect(b.plan.walls).toEqual([])
     expect(b.scenario.profiles[0].name).toBe('Adult')
+    expect(b.scenario.profiles[0].speed.mean).toBeCloseTo(1.34, 6)
     expect(b.scenario.populations[0].profileMix[0].weight).toBe(62)
     expect(b.scenario.populations[0].itinerary).toHaveLength(1)
+    // The venue that was edited keeps the edit; the copy is not a freeze.
+    expect(a.scenario.profiles[0].speed.mean).toBeCloseTo(0.4, 6)
   })
 })
 

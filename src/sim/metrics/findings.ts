@@ -12,7 +12,7 @@
  */
 
 import type { RunSummary } from '../types'
-import { WALKWAY_LOS } from './los'
+import { CROWD_SAFETY, WALKWAY_LOS } from './los'
 import { formatDuration } from '../../core/model/units'
 
 export type FindingSeverity = 'high' | 'medium' | 'low' | 'good'
@@ -50,6 +50,15 @@ const SEVERITY_ORDER: Record<FindingSeverity, number> = { high: 0, medium: 1, lo
  * service F" line beside a zone that reported nothing and a cell coloured E.
  */
 const LOS_F_FROM = WALKWAY_LOS[4].maxDensity
+
+/**
+ * The density the safety overlay warns on, read from the same constant the
+ * engine counts a measured area's crush seconds with (engine.ts:1977). It was
+ * a bare 4 here, which is the LOS-F copy one row down in a different disguise:
+ * two detectors reporting the same band from two numbers that only happened to
+ * agree, and a headline stating one of them in prose.
+ */
+const CRUSH_FROM = CROWD_SAFETY.warnDensity
 
 /** Seconds the series spent at or above a threshold. */
 const timeAbove = (time: Float32Array, values: Float32Array, threshold: number): number => {
@@ -126,13 +135,13 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
   }
 
   // --- density -------------------------------------------------------------
-  const crushTime = timeAbove(series.time, series.peakDensity, 4)
+  const crushTime = timeAbove(series.time, series.peakDensity, CRUSH_FROM)
   const failTime = timeAbove(series.time, series.peakDensity, LOS_F_FROM)
   if (crushTime > 20) {
     findings.push({
       id: 'density-crush',
       severity: 'high',
-      headline: `Somewhere in the venue held 4 people per m² or more for ${formatDuration(crushTime)}`,
+      headline: `Somewhere in the venue held ${CRUSH_FROM} people per m² or more for ${formatDuration(crushTime)}`,
       detail: `Peak density reached ${summary.peakDensity.toFixed(1)} per m². This is the density band where stewarding is normally planned and where crowd pressure becomes a safety concern, not just a comfort one.`,
     })
   } else if (failTime > 60) {
@@ -162,7 +171,7 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
       findings.push({
         id: `area-crush-${area.id}`,
         severity: 'high',
-        headline: `${area.name} held 4 people per m² or more for ${formatDuration(area.secondsAtCrushRisk)}`,
+        headline: `${area.name} held ${CRUSH_FROM} people per m² or more for ${formatDuration(area.secondsAtCrushRisk)}`,
         detail: `It peaked at ${area.peakDensity.toFixed(1)} per m² with ${area.peakOccupancy} people in ${area.areaSqm.toFixed(0)} m². This is the density band where stewarding is normally planned.`,
         targetId: area.id,
       })

@@ -181,6 +181,12 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         runLabel: label,
         progress: 0,
         frame: null,
+        // The heat map goes with them, for the same reason and by the same
+        // route as in `stop` below. Building the nav grid is the slow part of a
+        // run, so "preparing" can last seconds — and the overlay is sized and
+        // shown from this grid, which until `ready` lands is still the last
+        // run's, describing a plan the user has since edited.
+        grid: null,
         summary: null,
         series: null,
         warnings: [],
@@ -216,11 +222,18 @@ export const useSimulation = create<SimulationState>()((set, get) => {
       // The findings go with the crowd. Stopping is also the first half of
       // opening a project or a template, so results left behind would be read
       // against the plan that arrives next — and saved as its baseline.
+      //
+      // `grid` is part of that and not bookkeeping: the heat map is shown while
+      // a grid exists (ViewportHost.tsx:167) and `DensityOverlay` holds the last
+      // frame it was handed, so a grid left behind kept the stopped run's
+      // density painted on the floor — at the old grid's origin and extent, over
+      // whatever venue was opened next — while the people it measured were gone.
       set({
         phase: 'idle',
         runId: null,
         progress: 0,
         frame: null,
+        grid: null,
         summary: null,
         series: null,
         warnings: [],

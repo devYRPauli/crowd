@@ -209,9 +209,11 @@ describe('undo, redo and the selection', () => {
 
     editor().undo()
 
-    // Drawing a wall selects it, so the very next Ctrl+Z leaves a ref to an
-    // object that is no longer there: handles in empty space, and an inspector
-    // editing something the document does not have.
+    // Placing a door or a counter leaves it selected, and so does pasting
+    // (placementTools.ts:272, useKeyboard.ts:44) — so the very next Ctrl+Z is
+    // routinely an undo of the thing that is selected. Without this filter it
+    // leaves a ref to an object that is no longer there: handles in empty
+    // space, and an inspector editing something the document does not have.
     expect(editor().selection).toEqual([ref('furniture', hall.table.id)])
   })
 
@@ -290,6 +292,11 @@ describe('deleting the selection', () => {
     expect(editor().document.plan.backdrop).toBeUndefined()
     expect(editor().document.plan.walls).toHaveLength(3)
     expect(editor().undoLabel()).toBe('Delete 2 objects')
+    // The survivor check runs through that same placeholder-id lookup. It is
+    // the half that can fail silently: a lookup that matched on id would report
+    // the tracing as still in the plan and leave it selected, with the
+    // inspector offering an opacity slider for an image that has gone.
+    expect(editor().selection).toEqual([])
 
     editor().undo()
     expect(editor().document.plan.backdrop).toBe(hall.tracing)

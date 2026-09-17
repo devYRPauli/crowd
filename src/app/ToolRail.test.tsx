@@ -23,7 +23,7 @@ import { useEditor, type ToolId } from '../state/editorStore'
 const editor = () => useEditor.getState()
 
 beforeEach(() => {
-  useEditor.setState({ tool: 'select', hint: null })
+  useEditor.setState({ tool: 'select', hint: null, selection: [], dirty: false })
 })
 
 /** The rail with the global keyboard map live behind it, as in the real app. */
@@ -86,16 +86,40 @@ describe('the tool rail', () => {
 
     for (const { label, tool } of RAIL) {
       const title = button(label).getAttribute('title') ?? ''
-      const promised = /\(([^)]+)\)\s*$/.exec(title)?.[1]
-      expect(promised, `${label} has no shortcut in its tooltip`).toBeTypeOf('string')
+      // The tooltip is the tool's own name followed by exactly one upper-case
+      // letter in brackets. A "(⇧W)" or a "(Ctrl D)" would be a promise the
+      // keyboard map cannot keep: it binds bare letters and refuses shifted and
+      // alted ones outright.
+      const promised = /^(.+?)\s+\(([A-Z])\)$/.exec(title)
+      expect(promised?.[1], `${label} has no shortcut in its tooltip`).toBe(label)
+      const key = promised?.[2] ?? ''
 
       // Start somewhere else, so a tooltip that names the wrong key cannot pass
       // by leaving the tool where it already was.
       act(() => useEditor.setState({ tool: tool === 'select' ? 'wall' : 'select' }))
-      fireEvent.keyDown(window.document.body, { key: (promised as string).toLowerCase() })
-      expect(editor().tool, `${label} promises ${promised}`).toBe(tool)
+      fireEvent.keyDown(window.document.body, { key: key.toLowerCase() })
+      expect(editor().tool, `${label} promises ${key}`).toBe(tool)
       expect(button(label).getAttribute('aria-pressed')).toBe('true')
     }
+  })
+
+  it('picks up a tool without touching the venue or losing what is selected', () => {
+    render(<ToolRail />)
+    const before = editor().document
+    const steps = editor().history.past.length
+    act(() => useEditor.setState({ selection: [{ kind: 'wall', id: 'wall-1' }] }))
+
+    fireEvent.click(button('Draw walls'))
+    fireEvent.click(button('Place furniture'))
+
+    // Reaching for a tool is not an edit, so it must not appear in the undo
+    // stack or mark the project unsaved — and the wall the user has selected
+    // stays selected, because the inspector beside the rail is where its
+    // thickness is about to be changed.
+    expect(editor().document).toBe(before)
+    expect(editor().history.past).toHaveLength(steps)
+    expect(editor().dirty).toBe(false)
+    expect(editor().selection).toEqual([{ kind: 'wall', id: 'wall-1' }])
   })
 
   it('clears the tool hint when the tool changes', () => {

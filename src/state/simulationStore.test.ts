@@ -301,6 +301,12 @@ describe('the transport controls', () => {
     expect(sim().runId).toBeNull()
     expect(sim().frame).toBeNull()
     expect(sim().progress).toBe(0)
+    // The heat map is the other half of what is on screen, and it does not go
+    // with the frame: the overlay is shown while a grid exists and keeps the
+    // last density it was handed, so a grid left behind painted the stopped
+    // run's crowd on the floor after its people had gone — and, because a stop
+    // is the first half of opening a project, over the next venue's plan.
+    expect(sim().grid).toBeNull()
 
     // Replies posted before the stop arrived are still on their way; replaying
     // one would put a crowd back on a plan the user is already editing, or —
@@ -311,11 +317,22 @@ describe('the transport controls', () => {
 
     expect(sim().phase).toBe('idle')
     expect(sim().frame).toBeNull()
+    expect(sim().grid).toBeNull()
     expect(sim().summary).toBeNull()
     expect(sim().progress).toBe(0)
     // The stop emptied the readout; the late `ready` must not refill it with a
     // crowd size for a run that is over.
     expect(sim().totalPeople).toBe(0)
+
+    // Clearing it is not the same as losing it: the next run describes its own
+    // grid, and the overlay is sized from that rather than from whatever the
+    // last venue happened to need.
+    sim().run(venue('Foyer with two doors'))
+    const restarted = ready(inFlight(), {
+      grid: { originX: 0, originY: 0, cellSize: 0.3, cols: 3, rows: 3 },
+    })
+    deliver(restarted)
+    expect(sim().grid).toBe(restarted.grid)
   })
 })
 
@@ -468,6 +485,12 @@ describe('reaching the end of the scenario', () => {
     expect(sim().warnings).toEqual([])
     expect(sim().error).toBeNull()
     expect(sim().progress).toBe(0)
+    // The heat map is one of those numbers and the longest-lived: the overlay
+    // is shown while a grid exists and keeps the last density it was given, and
+    // building the nav grid is the slow half of a run. Left behind, the previous
+    // run's density stayed painted across the whole of "preparing" — over a plan
+    // the user had just edited, which is the reason they pressed Run again.
+    expect(sim().grid).toBeNull()
   })
 
   it('takes the findings off the panel with the crowd when the run is stopped', () => {
@@ -625,6 +648,11 @@ describe('a worker that fails', () => {
     sim().clearError()
     expect(sim().phase).toBe('idle')
     expect(sim().error).toBeNull()
+    // App.tsx toasts the message and clears it in the same effect, so every
+    // error the user ever reads is read after this call. Taking the crowd down
+    // here would leave the toast describing an empty floor.
+    expect(sim().frame?.time).toBeCloseTo(18, 6)
+    expect(sim().grid?.cols).toBe(2)
 
     // A worker that dies outright reports through `onerror`, which names no run
     // and carries no message of its own when the module simply failed to load.
