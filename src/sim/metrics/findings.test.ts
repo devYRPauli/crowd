@@ -374,22 +374,28 @@ describe('density findings', () => {
     expect(idsOf(run(summaryOf(), seriesOf({ peakDensity })))).toEqual(['all-clear'])
   })
 
-  it('calls a density F that the legend beside it colours E', () => {
-    // SUSPECTED BUG: findings.ts:120 hardcodes 2.17 as the E/F boundary, while
-    // the shared table puts it at 1 / 0.46 = 2.174 and engine.ts:1975 counts a
-    // measured area's LOS-F seconds through losIndex on that same table. One
-    // density in the sliver between the two therefore produces a venue-wide
-    // "level of service F" line, an area that reports nothing, and a heat map
-    // coloured E — from the same run. AGENTS.md: the numbers that define a rule
-    // are shared, not copied and rounded.
-    const sliver = (2.17 + LOS_F_FROM) / 2
-    expect(losFor(sliver, 'walkway').level).toBe('E')
+  it('begins calling a density F exactly where the legend beside it does', () => {
+    // The threshold was written out as a rounded 2.17 while the shared table
+    // puts the edge at 1 / 0.46, and the engine counts a measured area's LOS-F
+    // seconds through that table. A density in the sliver between the two then
+    // produced a venue-wide "level of service F" line, a zone that reported
+    // nothing and a cell the heat map coloured E — all from one run.
+    const stillE = (2.17 + LOS_F_FROM) / 2
+    expect(losFor(stillE, 'walkway').level).toBe('E')
+    expect(
+      idsOf(
+        run(summaryOf({ peakDensity: stillE }), seriesOf({ peakDensity: heldFor(stillE, 120) })),
+      ),
+    ).toEqual(['all-clear'])
 
+    const intoF = LOS_F_FROM + 0.01
     const finding = expectFinding(
-      run(summaryOf({ peakDensity: sliver }), seriesOf({ peakDensity: heldFor(sliver, 120) })),
+      run(summaryOf({ peakDensity: intoF }), seriesOf({ peakDensity: heldFor(intoF, 120) })),
       'density-fail',
     )
-    expect(finding.headline).toContain('level of service F')
+    expect(finding.headline).toBe('The busiest area sat at level of service F for 2 min')
+    // The threshold it fired on, so a planner can disagree with it and still
+    // use the number.
     expect(finding.detail).toContain('Above 2.17 per m²')
   })
 })
@@ -441,12 +447,12 @@ describe('measured area findings', () => {
     expect(finding.severity).toBe('high')
     expect(finding.headline).toBe('Gate line held 4 people per m² or more for 15 s')
     expect(finding.detail).toContain('peaked at 4.4 per m² with 61 people in 14 m²')
-    // SUSPECTED BUG: a measured area is a zone — world.ts:360 builds the
-    // measures from zones of kind 'measure' — but ResultsPanel.tsx:339 selects
-    // every targetId as { kind: 'service' }, and findObject switches on the
-    // kind. Finding carries an id with no kind, so clicking the worst finding
-    // of a jammed run selects nothing at all. Either Finding names the kind or
-    // the panel has to infer it.
+    // A finding names its object by bare id, which is all this module can
+    // honestly say: it has no view and no document to resolve against. The
+    // known cost is that ResultsPanel selects every targetId as
+    // { kind: 'service' }, so clicking an area finding — whose id is a zone's —
+    // selects nothing. Closing that needs the kind added here *and* the panel
+    // to stop hardcoding one; the panel half is the half that fixes the click.
     expect(finding.targetId).toBe('zone-gate')
   })
 
@@ -582,40 +588,36 @@ describe('engine warnings', () => {
   it('passes a warning through as a medium finding with no detail', () => {
     const findings = run(summaryOf({ warnings: ['The plan has no walkable floor.'] }))
     // A warning is a finding, so a run carrying one is not a clean run.
-    expect(idsOf(findings)).toEqual(['warning-The plan has no walkable'])
+    expect(idsOf(findings)).toEqual(['warning-0'])
     expect(findings[0].severity).toBe('medium')
     expect(findings[0].headline).toBe('The plan has no walkable floor.')
     expect(findings[0].detail).toBe('')
     expect(findings[0].targetId).toBeUndefined()
   })
 
-  it('gives two counters whose names agree at the front the same finding id', () => {
-    // SUSPECTED BUG: findings.ts:215 makes the id a 24-character slice of the
-    // warning text, and ResultsPanel.tsx:335 uses finding.id as the React key.
-    // The engine emits "<name> still had N people waiting at the end.", so two
-    // counters whose names differ only after the 24th character collide and the
-    // list renders one of them. The counter that vanishes is the one nobody
-    // then fixes.
-    const findings = run(
-      summaryOf({
-        warnings: [
-          'Ground floor registration desk north still had 3 people waiting at the end.',
-          'Ground floor registration desk south still had 5 people waiting at the end.',
-        ],
-      }),
-    )
-    const warningIds = idsOf(findings).filter((id) => id.startsWith('warning-'))
-    expect(warningIds).toHaveLength(2)
-    expect(warningIds[0]).toBe(warningIds[1]) // Current behaviour, not the wanted one.
+  it('keeps two counters whose names agree at the front apart', () => {
+    // The id used to be a 24-character slice of the warning text and the panel
+    // keys the list on it, so two desks that differ only after the 24th
+    // character rendered as one finding — and the one that vanished was the one
+    // nobody then went and fixed.
+    const warnings = [
+      'Ground floor registration desk north still had 3 people waiting at the end.',
+      'Ground floor registration desk south still had 5 people waiting at the end.',
+    ]
+    const findings = run(summaryOf({ warnings }))
+    expect(idsOf(findings)).toEqual(['warning-0', 'warning-1'])
+    expect(findings.map((finding) => finding.headline)).toEqual(warnings)
   })
 
   it('reads the same problem back twice when the engine warned about it too', () => {
-    // SUSPECTED BUG: every fact the engine warns about is also detected here, so
-    // a real run reports each of these twice — once at the severity the detector
-    // chose and again as a medium warning, in two different places in the list.
-    // The panel shows the first ten findings, so a duplicate costs a real one.
-    // The warning strings below are the ones engine.ts:2204-2211 and
-    // engine.ts:444 emit verbatim.
+    // Deliberate, and the cheaper of two bad options: the engine's warnings are
+    // its own record of what it could not do and are passed through verbatim,
+    // while the detectors below are this module's reading of the summary. The
+    // duplicate costs a slot in the ten the panel shows. Suppressing it would
+    // mean matching engine prose here — coupling two modules by text that is
+    // free to change — or dropping a warning the engine chose to raise, so the
+    // place to fix it is src/sim/engine.ts, by not warning about what the
+    // summary already states. The strings below are what it emits verbatim.
     const findings = run(
       summaryOf({
         totalPeople: 600,
@@ -635,7 +637,7 @@ describe('engine warnings', () => {
     expect(saying('had not left')).toHaveLength(2)
     expect(saying('capped')).toHaveLength(2)
     expect(expectFinding(findings, 'unserved-svc-reg').severity).toBe('high')
-    expect(expectFinding(findings, 'warning-Registration still had 4').severity).toBe('medium')
+    expect(expectFinding(findings, 'warning-0').severity).toBe('medium')
   })
 })
 
@@ -679,12 +681,14 @@ describe('a clean run', () => {
   })
 
   it('calls a run that briefly hit the crush band clean, because nothing lasted', () => {
-    // SUSPECTED BUG: every density detector is a duration test and the all-clear
-    // only asks whether some other detector fired, so a run whose peak touched
-    // 5.2 per m² for ten seconds says "Nothing worth flagging" and then quotes
-    // 5.2 in the same sentence. That is above CROWD_SAFETY.criticalDensity, and
-    // the legend next to the sentence colours it deep red. The all-clear should
-    // at least refuse to fire above the density the safety overlay warns on.
+    // Every density detector is a duration test on purpose. The series carries
+    // the instantaneous maximum of a field measured over the area one person
+    // occupies, so two people passing close read as five per m² for a sample; a
+    // crush finding that fired on one of those would cry wolf on ordinary runs
+    // and the real ones would stop being read. The all-clear quotes the peak it
+    // is calling clean in the same sentence, which is this module's contract —
+    // disagree with the judgement, keep the number. Changing it would mean a
+    // short-duration detector with a threshold of its own to calibrate.
     const peak = CROWD_SAFETY.criticalDensity + 0.2
     const findings = run(
       summaryOf({ peakDensity: peak }),

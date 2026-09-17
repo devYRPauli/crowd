@@ -305,15 +305,16 @@ describe('wave arrivals', () => {
   })
 
   it('runs its coaches together into one stream when the window is short', () => {
-    // SUSPECTED BUG: the unload is `min(45, window, gap / 4 + 10)`, and that
-    // 10 s floor does not shrink with the gap — so once the coaches are under
-    // ~13 s apart, each is still unloading when the next pulls up. Twelve waves
-    // (the slider's maximum) over two minutes then reads as a continuous flow:
-    // three distinguishable arrivals here instead of twelve, where the same
-    // twelve over twenty minutes read as exactly twelve. That is the one
-    // setting where "in waves" and "evenly spread" produce the same schedule,
-    // which is the comparison the profile exists to make. Correct would be to
-    // cap the unload by the gap as well as by the window and 45 s.
+    // The unload is min(45, window, gap / 4 + 10) and the 10 s floor does not
+    // shrink with the gap, so twelve waves — the slider's maximum — squeezed
+    // into two minutes overlap and read as a continuous flow, where the same
+    // twelve over twenty minutes read as twelve coaches. Kept, because it is
+    // the honest answer: vehicles arriving eleven seconds apart *are* a
+    // continuous flow at the door, and capping the unload by the gap to keep
+    // the batches separate would have twenty people stepping off a coach in
+    // five seconds. The floor is also all a single wave has, having no gap to
+    // scale — cap by the gap and `waves: 1` becomes all-at-once, which the
+    // profile deliberately is not.
     const short = scheduleArrivals(
       profileFor('waves', { waves: 12, windowS: 120 }),
       240,
@@ -406,16 +407,17 @@ describe('peak arrivals', () => {
   })
 
   it('stacks a quarter of the crowd on one instant when the spread is very wide', () => {
-    // SUSPECTED BUG: Rng.truncatedNormal resamples 16 times and then gives up
-    // and returns the clamped *mean* rather than a clamped sample, so a spread
-    // wide enough that most draws miss [0, 1] hands hundreds of people the
-    // identical arrival second — a fabricated surge in the one profile meant to
-    // model a gentle one. At spread 5, 521 of 2000 land on exactly the peak
-    // instant; at spread 2, 59 do; at the 0.18 default, nobody does. There is no
-    // slider for spread, but serialize.ts passes a loaded one straight through
-    // unclamped, so a hand-edited or third-party document reaches this. Correct
-    // would be to clamp the failed sample rather than the mean — in
-    // core/math/random.ts, which every other caller of truncatedNormal shares.
+    // Known, and pinned here rather than patched here: Rng.truncatedNormal
+    // resamples 16 times and then returns the clamped *mean* instead of a
+    // clamped sample, so a spread wide enough that most draws miss [0, 1] hands
+    // hundreds of people the identical arrival second — a fabricated surge in
+    // the one profile meant to model a gentle one. At spread 5, 521 of 2000
+    // land on the peak instant; at spread 2, 59 do; at the 0.18 default nobody
+    // does, and no control in the product goes near it — serialize.ts passing a
+    // hand-edited spread through unclamped is the only way in. The fix is to
+    // clamp the failed sample, in src/core/math/random.ts: the engine draws
+    // every walking speed through the same function, so a ceiling bolted on
+    // here would hide the shared fault instead of closing it.
     const times = scheduleArrivals(profileFor('peak', { spread: 5 }), 2000, new Rng(5))
     expect(times.filter((t) => t === WINDOW * 0.5).length).toBeGreaterThan(300)
     // At a spread the product can produce, nobody shares an instant with anybody.

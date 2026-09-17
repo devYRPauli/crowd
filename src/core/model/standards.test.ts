@@ -542,22 +542,21 @@ describe('the sizes against each other', () => {
 })
 
 describe('the imperial readout', () => {
-  // SUSPECTED BUG: a whole number of feet is displayed one foot short plus
-  // twelve inches. `formatLength` splits the feet off with `Math.floor` and
-  // only then rounds the remaining inches to one decimal, so a total that is a
-  // hair under a whole foot prints `12.0"` instead of carrying into the feet —
-  // and totals are always a hair under, because INCHES_PER_METRE is truncated
-  // low (0.3048 x 39.37007874 = 11.999999999952, not 12). It is not the
-  // catalogue's millimetre rounding: an exact 6'0" of 1.8288 m reads `5' 12.0"`
-  // too, and the catalogue sizes that escape are the ones whose rounding
-  // pushed them *up* past the shortfall. The product's own default door is
-  // named 3'0" in the picker and reads `2' 12.0"` in the inspector header
-  // beside it; the default wall reads `8' 12.0"`, the default window
-  // `3' 12.0"`. Fifteen of the stock sizes are affected, and so is any whole
-  // foot a user drags out. It should carry: round the total inches before
-  // splitting them, or roll 12.0 into the next foot. Nothing dimensional is
-  // wrong in the document — see the round trip below — but every imperial
-  // length the user reads is one foot short plus twelve inches.
+  // A confirmed display fault, pinned here because the fix is not in this file.
+  // `formatLength` splits the feet off with `Math.floor` and only then rounds
+  // the remaining inches, so a total a hair under a whole foot prints `12.0"`
+  // instead of carrying into the feet — and totals are always a hair under,
+  // because INCHES_PER_METRE is truncated low (0.3048 x 39.37007874 =
+  // 11.999999999952, not 12). It is not the catalogue's millimetre rounding: an
+  // exact 6'0" of 1.8288 m reads `5' 12.0"` too, and the stock sizes that
+  // escape are the ones whose rounding pushed them *up* past the shortfall. The
+  // product's own default door is named 3'0" in the picker and reads `2' 12.0"`
+  // in the inspector header beside it; the default wall reads `8' 12.0"`, the
+  // default window `3' 12.0"`. Fifteen stock sizes are affected, and so is any
+  // whole foot a user drags out. Rounding the total inches before splitting
+  // them carries it, in src/core/model/units.ts. Nothing dimensional is wrong
+  // in the document — see the round trip below — which is what makes it a
+  // readout to correct rather than a plan to repair.
   it('names a whole number of feet as one foot short plus twelve inches', () => {
     expect(formatLength(DEFAULT_DOOR_WIDTH, 'imperial')).toBe(`2' 12.0"`)
     expect(formatLength(DEFAULT_WALL_HEIGHT, 'imperial')).toBe(`8' 12.0"`)

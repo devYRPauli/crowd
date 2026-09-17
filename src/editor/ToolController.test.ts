@@ -447,13 +447,15 @@ describe('switching tools', () => {
     expect(h.tools.wall.calls).toHaveLength(seen)
     expect(h.tools.wall.points).toEqual([{ x: 3, y: 1 }])
     expect(h.viewport.draft).toHaveLength(1)
-    // SUSPECTED BUG: the status bar goes blank and stays blank. The store's
-    // setTool clears the hint on every call, redundant or not, and nothing puts
-    // it back: no tool ever calls ctx.setHint, and the controller is the only
-    // other source. The fix belongs in the store — leave the hint alone when the
-    // id is unchanged — and not here, because in the app this method is not even
-    // re-entered: ViewportHost's effect is keyed on a *changed* tool id, so the
-    // early return below is only the reason nothing self-heals afterwards.
+    // The instruction in the status bar goes blank and stays blank, and that is
+    // recorded rather than repaired here: the store's setTool clears the hint on
+    // every call, redundant or not, and nothing puts it back — no tool calls
+    // ctx.setHint and the controller is the only other source. The fix is in
+    // src/state/editorStore.ts, leaving the hint alone when the id has not
+    // changed. Doing it in this file instead would not reach the app at all,
+    // because ViewportHost's effect is keyed on a *changed* tool id and this
+    // method is never re-entered; the early return below is only why nothing
+    // heals it afterwards.
     expect(useEditor.getState().hint).toBeNull()
   })
 

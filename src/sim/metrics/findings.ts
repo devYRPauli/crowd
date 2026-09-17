@@ -12,6 +12,7 @@
  */
 
 import type { RunSummary } from '../types'
+import { WALKWAY_LOS } from './los'
 import { formatDuration } from '../../core/model/units'
 
 export type FindingSeverity = 'high' | 'medium' | 'low' | 'good'
@@ -40,6 +41,15 @@ export interface FindingInput {
 }
 
 const SEVERITY_ORDER: Record<FindingSeverity, number> = { high: 0, medium: 1, low: 2, good: 3 }
+
+/**
+ * Where a walkway tips from E into F, read from the table rather than copied
+ * out of it. The heat map colours a cell through the same table and the engine
+ * counts a measured area's LOS-F seconds through it, so a rounded copy here put
+ * a sliver of densities in the position of producing a venue-wide "level of
+ * service F" line beside a zone that reported nothing and a cell coloured E.
+ */
+const LOS_F_FROM = WALKWAY_LOS[4].maxDensity
 
 /** Seconds the series spent at or above a threshold. */
 const timeAbove = (time: Float32Array, values: Float32Array, threshold: number): number => {
@@ -117,7 +127,7 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
 
   // --- density -------------------------------------------------------------
   const crushTime = timeAbove(series.time, series.peakDensity, 4)
-  const failTime = timeAbove(series.time, series.peakDensity, 2.17)
+  const failTime = timeAbove(series.time, series.peakDensity, LOS_F_FROM)
   if (crushTime > 20) {
     findings.push({
       id: 'density-crush',
@@ -130,7 +140,7 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
       id: 'density-fail',
       severity: 'medium',
       headline: `The busiest area sat at level of service F for ${formatDuration(failTime)}`,
-      detail: `Peak density was ${summary.peakDensity.toFixed(1)} per m². Above 2.17 per m² on a walkway people cannot choose their own speed and reverse flow stops.`,
+      detail: `Peak density was ${summary.peakDensity.toFixed(1)} per m². Above ${LOS_F_FROM.toFixed(2)} per m² on a walkway people cannot choose their own speed and reverse flow stops.`,
     })
   }
 
@@ -210,14 +220,17 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
     }
   }
 
-  for (const warning of summary.warnings) {
+  summary.warnings.forEach((warning, index) => {
     findings.push({
-      id: `warning-${warning.slice(0, 24)}`,
+      // Position, not text: the id was a 24-character slice of the warning, and
+      // the list is keyed on it, so two counters whose names agreed that far
+      // rendered as one finding. The one that vanished was the one nobody fixed.
+      id: `warning-${index}`,
       severity: 'medium',
       headline: warning,
       detail: '',
     })
-  }
+  })
 
   if (findings.length === 0 && summary.completed > 0) {
     findings.push({

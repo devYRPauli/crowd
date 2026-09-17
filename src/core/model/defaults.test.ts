@@ -388,23 +388,17 @@ describe('two documents made the same way', () => {
     const a = createDocument()
     const b = createDocument()
 
-    // SUSPECTED BUG: `createScenario` copies each profile with `{ ...profile }`,
-    // which is a copy of everything but the one nested object it has, so all
-    // seven `speed` objects stay shared — between every document in the session
-    // and with the exported `AGENT_PROFILES` constant itself. The copy is there
-    // to stop exactly that, so the correct behaviour is an empty list here: a
-    // profile editor writing `profile.speed.mean` would move the adult's
-    // walking speed in every open document and in the defaults the next one is
-    // built from, which is the comparison-against-a-baseline the seed exists to
-    // protect. Nothing writes speed in place today, so it is latent. The same
-    // shallow copy is in src/library/templates.ts:46 and in the profile
-    // fallback in src/core/document/serialize.ts, so fixing defaults.ts alone
-    // would not close it. Once fixed this reads `toEqual([])` and the
-    // identity assertion below goes.
-    expect(sharedReferences(a, b)).toEqual(
-      AGENT_PROFILES.map((_, index) => `scenario.profiles.${index}.speed`),
-    )
-    expect(a.scenario.profiles[0].speed).toBe(AGENT_PROFILES[0].speed)
+    // A shallow `{ ...profile }` copied everything but the one nested object a
+    // profile has, so every document's speeds were the shipped defaults' own
+    // objects: an editor writing `profile.speed.mean` in place would have moved
+    // the adult's walking speed in every open venue and in the next document
+    // built, which is exactly the baseline a seeded comparison rests on.
+    expect(sharedReferences(a, b)).toEqual([])
+    expect(a.scenario.profiles[0].speed).not.toBe(AGENT_PROFILES[0].speed)
+    expect(a.scenario.profiles[0].speed).toEqual(AGENT_PROFILES[0].speed)
+    // Documents built from a template or repaired by the loader still go
+    // through the shallow copies in src/library/templates.ts and
+    // src/core/document/serialize.ts, which this file does not cover.
   })
 
   it('keeps an in-place edit out of the shipped defaults and out of each other', () => {

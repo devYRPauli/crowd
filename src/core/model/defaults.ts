@@ -155,7 +155,11 @@ export const createScenario = (): Scenario => ({
   durationS: 1800,
   seed: 1,
   populations: [createPopulation(0)],
-  profiles: AGENT_PROFILES.map((profile) => ({ ...profile })),
+  // `speed` is the one nested object a profile owns, and a shallow copy left it
+  // shared with the shipped defaults and with every other open document — so an
+  // editor that wrote `profile.speed.mean` in place would move the adult's
+  // walking speed in every venue in the session and in the next one built.
+  profiles: AGENT_PROFILES.map((profile) => ({ ...profile, speed: { ...profile.speed } })),
   speedFactor: 1,
   routing: {
     adaptive: true,
