@@ -1263,3 +1263,44 @@ textarea {
     width: 250px;
   }
 }
+
+/* The crash screen. Deliberately plain: it has to render when the editor's own
+   styling may be part of what went wrong. */
+.crash {
+  max-width: 44rem;
+  margin: 12vh auto;
+  padding: 0 var(--space-6, 24px);
+  color: var(--text, #1c1f23);
+  font: inherit;
+}
+
+.crash h1 {
+  margin: 0 0 var(--space-3, 12px);
+  font-size: 1.5rem;
+}
+
+.crash p {
+  margin: 0 0 var(--space-4, 16px);
+  color: var(--text-muted, #5a6068);
+  line-height: 1.55;
+}
+
+.crash details {
+  margin-top: var(--space-5, 20px);
+  color: var(--text-muted, #5a6068);
+}
+
+.crash summary {
+  cursor: pointer;
+}
+
+.crash pre {
+  overflow: auto;
+  max-height: 16rem;
+  padding: var(--space-3, 12px);
+  border: 1px solid var(--border, #d8dce1);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-sunken, #f4f6f8);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}

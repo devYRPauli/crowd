@@ -99,6 +99,7 @@ export class Viewport {
   readonly overlayLayer = new Group()
 
   private renderer: WebGLRenderer
+  private contextLost = false
   private materials: MaterialLibrary
   private planRenderer: PlanRenderer
   private grid: GroundGrid
@@ -161,6 +162,7 @@ export class Viewport {
       'Venue plan. Use the tool buttons to draw, and the right mouse button or Space and drag to move the view.',
     )
     container.appendChild(this.renderer.domElement)
+    this.watchContext()
 
     this.scene.background = new Color(this.materials.palette.background).convertSRGBToLinear()
 
@@ -234,7 +236,42 @@ export class Viewport {
     this.frameHandle = requestAnimationFrame(loop)
   }
 
+  /**
+   * Survive the GPU going away.
+   *
+   * A browser drops a WebGL context whenever it feels the need to — a driver
+   * reset, a laptop switching graphics card, too many live contexts across
+   * tabs — and it is not an error the user did anything to cause. Left
+   * unhandled the canvas freezes on its last frame and the editor looks dead
+   * while still accepting clicks, which is the worst of both. Preventing the
+   * default on the loss event is what makes the browser promise a restore;
+   * without it the context is gone for good.
+   */
+  private watchContext(): void {
+    const canvas = this.renderer.domElement
+    canvas.addEventListener('webglcontextlost', (event) => {
+      event.preventDefault()
+      this.contextLost = true
+      cancelAnimationFrame(this.frameHandle)
+    })
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false
+      // Everything on the GPU went with the context, so the scene has to be
+      // uploaded again. Three.js re-uploads what it is asked to draw, so a
+      // forced frame is enough to bring the venue back.
+      this.dirty = true
+      this.lastTime = 0
+      if (!this.disposed) this.start()
+    })
+  }
+
+  /** True while the GPU context is gone and there is nothing to draw into. */
+  get isContextLost(): boolean {
+    return this.contextLost
+  }
+
   private renderFrame(): void {
+    if (this.contextLost) return
     const camera = this.rig.camera
     this.grid.update(camera.position, this.rig.distance)
     this.sun.target.position.set(this.rig.targetPoint.x, 0, this.rig.targetPoint.z)
