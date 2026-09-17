@@ -315,16 +315,15 @@ This is an exploratory planning model, not a safety certification.
   floor rather than reproducing the mistake.
 - **Group behaviour is limited.** People can arrive in groups, but there is no
   explicit cohesion model keeping a family together through a crowd.
-- **Theatre seating is not an obstacle.** Loose chairs and seat rows are
-  deliberately not blocked — eight chairs round a banquet round would seal the
-  table off entirely once the grid adds body clearance, and nobody could take
-  their seat. The consequence for a theatre is worth stating plainly: people walk
-  through the rows, so a theatre evacuation ignores the row and aisle geometry
-  that actually governs it. Mark anything you want treated as solid as an
-  obstacle per item.
-- **A counter needs room to queue into.** A desk placed close to a wall can have
-  its queue slots fall beyond that wall, and people will walk out of the building
-  and round the outside to join the back of the line. Nothing warns about it yet.
+- **Loose seating is passable by default, and a theatre needs it not to be.**
+  Chairs and seat rows are not navigation obstacles as shipped, because eight
+  chairs round a banquet round would seal the table off entirely once the grid
+  adds body clearance and nobody could take their seat. For a theatre that is the
+  wrong default: people walk through the rows. Mark the rows as obstacles per
+  item and the aisles carry the crowd properly — measured, that costs 39% of the
+  floor and 15% of the clearance time, and everybody still gets out. See
+  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Nothing prompts you to do it, which
+  is the part still worth fixing.
 - **Narrow doors are pessimistic.** Below about 1.2 m the engine passes fewer
   people per metre than the observational literature reports, because it keeps a
   fixed clearance between a body and a jamb and a narrow opening loses

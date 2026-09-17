@@ -198,8 +198,27 @@ much of the floor it covers**, which is the opposite of what an area calculation
 would tell you.
 
 **Theatre is identical to empty in every column**, because seat rows are
-deliberately not navigation obstacles. See the caveat under "What the study found
-about the tool itself" below — for a theatre this is a large simplification.
+deliberately not navigation obstacles by default — eight chairs round a banquet
+round would seal the table off entirely once the grid adds body clearance, and
+nobody could take their seat, so the catalog ships loose seating as passable.
+
+That default is wrong for a theatre, where the rows are exactly what governs
+egress. It is also overridable per item, and it is worth knowing what the
+override costs:
+
+| theatre seating | floor left | clearance | mean journey | out |
+| --- | --- | --- | --- | --- |
+| rows as shipped (passable) | 590 m² | 109.1 s ±5.7 | 53.3 s | 200 |
+| rows marked solid | 359 m² | 125.5 s ±10.9 | 62.6 s | 200 |
+
+Marking the rows solid takes 231 m² — 39% of the floor — out of circulation and
+costs 16.4 seconds, 15% of the clearance. **Everybody still gets out**, which is
+the part worth checking: the aisles carry the crowd rather than stranding it, so
+this is a usable configuration and not just a stricter one.
+
+**If you are modelling a theatre, mark the rows as obstacles.** The shipped
+default is chosen for banquet and reception floors, where loose chairs would
+otherwise wall people into their own tables.
 
 **Furniture is what costs compute, not people.** Per-person step cost more than
 doubles from the empty room to the banquet layout, 15.5 to 33.3 µs, on the same
@@ -355,22 +374,31 @@ It is the right alarm and the wrong comparison. The share of person-seconds spen
 at level of service E or F is what actually separates one layout from another,
 and it is what the layout table below reports.
 
-**4. A counter backed against a wall sends its queue outside the building.**
+**4. A counter backed against a wall sent its queue outside the building.**
 Placing a desk 4 m from the far wall put its queue slots past that wall, and
 people walked out of the door and around the outside of the venue to join the
-back of the line. Nothing warned about it — no finding, no run warning, and the
-counter simply reported nobody served. This one is **not fixed**; the study works
-around it by placing counters with room to queue into. It is a real trap for a
-user, because the plan looks fine.
+back of the line. Nothing warned about it — no finding, no run warning — and in
+the study's own setup the counter served nobody at all.
 
-**5. Theatre seating costs nothing.** In the layout table below, the theatre row
-is identical to the empty room in every column. That is a documented modelling
-choice — loose chairs and seat rows are deliberately not navigation obstacles,
-because eight chairs round a banquet table seal it off entirely once the grid
-adds body clearance — but its consequence for a theatre is worth stating plainly:
-**CROWD does not model the seating in a theatre evacuation at all.** People walk
-through the rows. For a venue whose egress is dominated by row and aisle
-geometry, that is a large simplification and the result should not be trusted.
+The trap underneath it was circular: the extent used to decide "inside" came
+from the plan's bounding box, which is computed partly *from the queue lines*,
+so a queue running out of the building stretched the bounds to contain itself.
+The building is what its walls enclose. **Fixed**: the line is mirrored about the
+counter when the drawn direction leaves the building and the other does not, and
+overflow past the drawn slots is bounded by the building, so a queue longer than
+its floor bunches against the wall instead of continuing through it. The counter
+that served 0 of 30 now serves 30 of 30.
+
+**5. Theatre seating costs nothing by default.** In the layout table above, the
+theatre row is identical to the empty room in every column, because loose chairs
+and seat rows ship as passable — eight chairs round a banquet table would seal it
+off entirely once the grid adds body clearance. For a theatre that is the wrong
+default and people walk through the rows.
+
+This one is **mitigated rather than fixed**: any item can be marked an obstacle
+individually, the override works, and the measured cost is in E2 above. What is
+not fixed is the default, and nothing prompts a user drawing a theatre to change
+it.
 
 ---
 
