@@ -126,7 +126,8 @@ export class WallTool implements Tool {
 
   /** Typing is not a move, so the preview has to be re-aimed by hand. */
   private retarget(ctx: ToolContext): void {
-    if (this.pointer) this.preview = this.resolvePoint(this.pointer.ground, this.pointer.altKey, ctx)
+    if (this.pointer)
+      this.preview = this.resolvePoint(this.pointer.ground, this.pointer.altKey, ctx)
     this.refresh(ctx, null)
   }
 

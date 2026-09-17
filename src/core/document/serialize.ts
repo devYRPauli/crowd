@@ -319,9 +319,7 @@ const parseScenario = (raw: unknown, warnings: string[]): Scenario => {
   const populations = entries.map(parsePopulation).filter((p): p is Population => p !== null)
   const lostPopulations = entries.length - populations.length
   if (lostPopulations > 0) {
-    warnings.push(
-      `${lostPopulations} group(s) of people could not be read and were dropped.`,
-    )
+    warnings.push(`${lostPopulations} group(s) of people could not be read and were dropped.`)
   }
   const profiles = array(raw.profiles).filter(isObject).length
     ? array(raw.profiles)
