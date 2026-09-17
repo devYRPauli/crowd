@@ -557,26 +557,26 @@ describe('the imperial readout', () => {
   // them carries it, in src/core/model/units.ts. Nothing dimensional is wrong
   // in the document — see the round trip below — which is what makes it a
   // readout to correct rather than a plan to repair.
-  it('names a whole number of feet as one foot short plus twelve inches', () => {
-    expect(formatLength(DEFAULT_DOOR_WIDTH, 'imperial')).toBe(`2' 12.0"`)
-    expect(formatLength(DEFAULT_WALL_HEIGHT, 'imperial')).toBe(`8' 12.0"`)
-    expect(formatLength(DEFAULT_WINDOW_WIDTH, 'imperial')).toBe(`3' 12.0"`)
-    expect(formatLength(1.8288, 'imperial')).toBe(`5' 12.0"`)
+  it('names every stock size the way its own label does', () => {
+    // These used to come back a foot short plus twelve inches — a 3'0" door as
+    // 2' 12.0" — because the formatter took the feet with a floor and rounded
+    // the remainder independently, and every catalogued size lands a hair under
+    // its nominal once the metric value is rounded to the millimetre. Which
+    // sizes escaped was decided by rounding direction alone: 2'0" is 609.6 mm
+    // stored as 610 and 6'0" is 1828.8 stored as 1829, so both cleared it.
+    expect(formatLength(DEFAULT_DOOR_WIDTH, 'imperial')).toBe(`3' 0"`)
+    expect(formatLength(DEFAULT_WALL_HEIGHT, 'imperial')).toBe(`9' 0"`)
+    expect(formatLength(DEFAULT_WINDOW_WIDTH, 'imperial')).toBe(`4' 0"`)
+    expect(formatLength(1.8288, 'imperial')).toBe(`6' 0"`)
+    expect(formatLength(DOOR_WIDTHS[0].metres, 'imperial')).toBe(`2' 0"`)
+    expect(formatLength(DEFAULT_DOUBLE_DOOR_WIDTH, 'imperial')).toBe(`6' 0"`)
 
-    // Which stock sizes escape is decided by the rounding direction alone:
-    // 2'0" is 609.6 mm stored as 610 and 6'0" is 1828.8 stored as 1829, and
-    // both clear the shortfall. That is what makes this a display fault rather
-    // than a wrong number in the catalogue.
-    expect(formatLength(DOOR_WIDTHS[0].metres, 'imperial')).toBe(`2' 0.0"`)
-    expect(formatLength(DEFAULT_DOUBLE_DOOR_WIDTH, 'imperial')).toBe(`6' 0.0"`)
-
-    // Every size named in feet *and* inches reads back exactly its own label,
-    // so the fault is confined to the whole feet.
+    // And every size in the tables reads back exactly its own label.
     for (const { size } of everySize) {
       const nominal = labelInches(size.imperial)
-      if (nominal % 12 === 0) continue
       const feet = Math.floor(nominal / 12)
-      const inches = (nominal % 12).toFixed(1)
+      const remainder = nominal % 12
+      const inches = Number.isInteger(remainder) ? String(remainder) : remainder.toFixed(1)
       expect(formatLength(size.metres, 'imperial')).toBe(
         feet === 0 ? `${inches}"` : `${feet}' ${inches}"`,
       )
@@ -584,10 +584,11 @@ describe('the imperial readout', () => {
   })
 
   it('still reads back as the same stock size when the user retypes it', () => {
-    // What bounds the fault above: the inspector's own readout, typed straight
-    // back into the width box, still commits the size it came from. `2' 12.0"`
-    // parses as three feet, and the 0.4 mm that separates that from the stored
-    // 0.914 stays inside `isStandard`. A misread size is never a resized one.
+    // The readout typed straight back into the width box commits the size it
+    // came from. Even the old broken spelling parses to the same place — `2'
+    // 12.0"` is three feet — and the 0.4 mm between that and the stored 0.914
+    // stays inside `isStandard`, so a misread size was never a resized one.
+    expect(parseLength(`3' 0"`, 'imperial')).toBeCloseTo(DEFAULT_DOOR_WIDTH, 3)
     expect(parseLength(`2' 12.0"`, 'imperial')).toBeCloseTo(DEFAULT_DOOR_WIDTH, 3)
     const lost = everySize
       .filter(({ size, sizes }) => {

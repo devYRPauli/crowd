@@ -106,36 +106,27 @@ describe('the inspector with a doorway selected', () => {
     select({ kind: 'opening', id: 'door-1' })
     show()
 
-    // SUSPECTED BUG: a 3'0" leaf — the default, and the commonest door in the
-    // catalogue — is shown as 2' 12.0". `formatLength` (src/core/model/units.ts:22)
-    // takes the feet with `Math.floor(totalInches / 12)` and then rounds the
-    // remainder to a tenth of an inch independently, with nothing carrying a
-    // rounded-up 12.0 back into the feet. Any total that lands a hair under a
-    // whole foot therefore prints as the foot below plus twelve inches, and two
-    // separate things put it there: `standards.ts` stores 3'0" as 914 mm
-    // (36 × 25.4 = 914.4, rounded), which is 35.98 in; and `INCHES_PER_METRE` is
-    // the truncated 39.37007874, so even an exact three feet comes back as
-    // 35.999999 in — see the round trip below. Affected sizes include 3'0",
-    // the 5'0" and 8'0" pairs, and the 8'/9'/10' wall heights. I believe the
-    // fix is to round the inches first and carry a full twelve into the feet.
-    // The cost of leaving it is that an imperial user cannot match anything on
-    // screen against a door schedule, which is the whole point of the imperial
-    // setting, and a width read back as 2' 12" invites someone to "correct" it
-    // to something nobody makes.
-    expect(control(/^width$/i).value).toBe(`2' 12.0"`)
-    expect(screen.getByText(`2' 12.0"`)).toBeDefined()
+    // A 3'0" leaf is the default and the commonest door in the catalogue, and
+    // it used to read 2' 12.0". `formatLength` took the feet with a floor and
+    // rounded the remainder to a tenth independently, so any total landing a
+    // hair under a whole foot — which every catalogued size does, because the
+    // metric value is rounded to the millimetre — printed as the foot below
+    // plus twelve inches. An imperial user could not match anything on screen
+    // against a door schedule, which is the entire point of the setting, and a
+    // width read back as 2' 12" invites somebody to "correct" it to a size
+    // nobody makes.
+    expect(control(/^width$/i).value).toBe(`3' 0"`)
+    expect(screen.getByText(`3' 0"`)).toBeDefined()
 
-    // Typing three feet into the box hands back 2' 12.0": the field will not
-    // echo the figure the user just typed, which is the shortest way to see it.
+    // And the box echoes the figure the user typed.
     typeAndLeave(/^width$/i, '3')
     expect(firstOpening().width).toBeCloseTo(0.9144, 6)
-    expect(control(/^width$/i).value).toBe(`2' 12.0"`)
+    expect(control(/^width$/i).value).toBe(`3' 0"`)
 
-    // A catalogued pair goes the same way, so it is the schedule that is
-    // unusable rather than one entry in it.
+    // A catalogued pair goes the same way.
     fireEvent.change(control(/^stock size$/i), { target: { value: `5'0" pair` } })
     expect(firstOpening().width).toBeCloseTo(1.524, 6)
-    expect(control(/^width$/i).value).toBe(`4' 12.0"`)
+    expect(control(/^width$/i).value).toBe(`5' 0"`)
   })
 
   it('cuts a width that would swallow the wall down to one the wall can carry', () => {
@@ -327,7 +318,7 @@ describe('the inspector with an area or a counter selected', () => {
     expect(screen.getByText(/4 corners/)).toBeDefined()
   })
 
-  it('commits a renamed area on every keystroke, one undo step each', () => {
+  it('makes a typed name one undo step, not one per letter', () => {
     openWith({ zones: [zone] })
     select({ kind: 'zone', id: 'zone-1' })
     show()
@@ -338,23 +329,21 @@ describe('the inspector with an area or a counter selected', () => {
     }
     expect(doc().plan.zones[0].name).toBe('Stage')
 
-    // SUSPECTED BUG: the name box is a plain controlled `<input>` whose
-    // `onChange` calls `apply(..., 'Rename area')` with no coalesce key
-    // (src/app/panels/InspectorPanel.tsx:459), so every character is its own
-    // committed document and its own history entry. The numeric fields beside
-    // it get this right — `NumberInput` and `LengthInput` hold a draft and
-    // commit on blur — and the project's own rule is that a gesture is one undo
-    // step and "a half-typed value never reaches" the document. Here "Stage"
-    // costs five, and one undo hands the user "Stag", which reads as the editor
-    // eating a letter rather than as undo working. The same input appears for a
-    // service point's name and a group's, so a five-word counter name buries
-    // whatever the user did before it. I believe the rename should pass a
-    // coalesce key keyed on the object and seal on blur.
+    // Typing a name is one gesture, so it is one undo step. Every character
+    // used to be its own history entry, which meant undoing "Stage" handed the
+    // user "Stag" — indistinguishable from the editor eating a letter. The
+    // numeric fields beside it already held a draft and committed on blur, and
+    // the project's own rule is that a gesture is one undo step.
     expect(useEditor.getState().undoLabel()).toBe('Rename area')
     useEditor.getState().undo()
-    expect(doc().plan.zones[0].name).toBe('Stag')
+    expect(doc().plan.zones[0].name).toBe('Dance floor')
+
+    // And the next rename is a separate step rather than merging into it.
+    useEditor.getState().redo()
+    fireEvent.blur(name)
+    fireEvent.change(name, { target: { value: 'Pit' } })
     useEditor.getState().undo()
-    expect(doc().plan.zones[0].name).toBe('Sta')
+    expect(doc().plan.zones[0].name).toBe('Stage')
   })
 
   const counter: ServicePoint = {

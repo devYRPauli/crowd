@@ -221,10 +221,11 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
 const PopulationEditor = ({ population, index }: { population: Population; index: number }) => {
   const document = useEditor((state) => state.document)
   const apply = useEditor((state) => state.apply)
+  const sealHistory = useEditor((state) => state.sealHistory)
   const entries = document.plan.zones.filter((zone) => zone.kind === 'entry')
 
-  const patch = (changes: Partial<Population>, label: string) =>
-    apply((doc) => updatePopulation(doc, population.id, changes), label)
+  const patch = (changes: Partial<Population>, label: string, coalesceKey?: string) =>
+    apply((doc) => updatePopulation(doc, population.id, changes), label, coalesceKey)
 
   return (
     <div
@@ -242,7 +243,12 @@ const PopulationEditor = ({ population, index }: { population: Population; index
             className="doc-name"
             style={{ padding: '1px 4px', fontSize: 12 }}
             value={population.name}
-            onChange={(event) => patch({ name: event.target.value }, 'Rename group')}
+            onChange={(event) =>
+              // One gesture, one undo step: see the same key on the inspector's
+              // name fields.
+              patch({ name: event.target.value }, 'Rename group', `rename:${population.id}`)
+            }
+            onBlur={sealHistory}
           />
         </span>
         {document.scenario.populations.length > 1 ? (

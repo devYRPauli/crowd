@@ -37,6 +37,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
   const document = useEditor((state) => state.document)
   const selection = useEditor((state) => state.selection)
   const apply = useEditor((state) => state.apply)
+  const sealHistory = useEditor((state) => state.sealHistory)
   const deleteSelection = useEditor((state) => state.deleteSelection)
   const units = document.settings.units
 
@@ -460,8 +461,12 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 apply(
                   (doc) => updateZone(doc, zone.id, { name: event.target.value }),
                   'Rename area',
+                  // Typing is one gesture. Without a key every keystroke is its
+                  // own undo step, so undoing "Stage" spells "Stag".
+                  `rename:${zone.id}`,
                 )
               }
+              onBlur={sealHistory}
             />
           </Field>
           <Field label="Role">
@@ -532,8 +537,10 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 apply(
                   (doc) => updateServicePoint(doc, point.id, { name: event.target.value }),
                   'Rename',
+                  `rename:${point.id}`,
                 )
               }
+              onBlur={sealHistory}
             />
           </Field>
           <Slider

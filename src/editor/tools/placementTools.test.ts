@@ -1013,14 +1013,13 @@ describe('placement against the document it lands in', () => {
     const h = harness({ walls: [wall(0, 0, 10, 0)] }, {}, { units: 'imperial' })
     new DoorTool().onPointerMove(pointer({ x: 5, y: 0.3 }), h.ctx)
 
-    // Recorded wart, pinned here so a fix has to come past this test: the label
-    // reads 2' 12.0" where the leaf is a 3'0". `formatLength` floors the feet
-    // and rounds the inches afterwards, and 3'0" carried to the millimetre is a
-    // hair under 36 inches, so the rounding pushes the inches back up to twelve.
-    // The carry belongs to `core/model/units.ts`, which every label in the app
-    // shares; correcting it here would mean this tool formatting its own
-    // dimensions, which is how the four-places-disagreeing problem started.
-    expect(h.labels[0].text).toBe(`2' 12.0"`)
+    // The preview names the leaf the way a schedule would. It used to read
+    // 2' 12.0" for a 3'0": every label in the app shares `core/model/units.ts`,
+    // which floored the feet and rounded the inches afterwards, and a stock size
+    // carried to the millimetre lands a hair under its nominal. Fixed there
+    // rather than here — a tool formatting its own dimensions is how four
+    // places come to disagree.
+    expect(h.labels[0].text).toBe(`3' 0"`)
 
     new FurnitureTool().onPointerMove(pointer({ x: 5, y: 4 }), h.ctx)
     expect(h.labels[0].text).toBe(`Stacking chair\n1' 5.7" × 1' 6.9"`)

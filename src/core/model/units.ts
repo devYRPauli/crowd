@@ -8,8 +8,18 @@
 
 import type { UnitSystem } from './types'
 
-const FEET_PER_METRE = 3.280839895
-const INCHES_PER_METRE = 39.37007874
+/**
+ * Exactly, rather than to eight places.
+ *
+ * An inch is defined as 25.4 mm, so these are derivable and there is no reason
+ * to carry a truncation. The truncated 39.37007874 turned an exact three feet
+ * into 35.999999 inches, which mattered: the formatter below splits a total
+ * into feet and inches, and a hair under a whole foot is the case it used to
+ * get wrong.
+ */
+const METRES_PER_INCH = 0.0254
+const INCHES_PER_METRE = 1 / METRES_PER_INCH
+const FEET_PER_METRE = INCHES_PER_METRE / 12
 
 export const metresToFeet = (m: number): number => m * FEET_PER_METRE
 
@@ -18,11 +28,22 @@ export const feetToMetres = (ft: number): number => ft / FEET_PER_METRE
 /** e.g. `3.40 m` or `11' 2"`. */
 export const formatLength = (metres: number, units: UnitSystem, precision = 2): string => {
   if (units === 'imperial') {
-    const totalInches = metres * INCHES_PER_METRE
-    const feet = Math.floor(totalInches / 12)
-    const inches = totalInches - feet * 12
-    if (feet === 0) return `${inches.toFixed(1)}"`
-    return `${feet}' ${inches.toFixed(inches % 1 === 0 ? 0 : 1)}"`
+    // Round the whole length to the tenth of an inch it is about to be printed
+    // at, and only then split it into feet and inches. Taking the feet first
+    // and rounding the remainder afterwards lets a length a hair under a whole
+    // foot print as the foot below plus twelve inches: a 3'0" door — the
+    // commonest door in the catalog — displayed as 2' 12.0", and so did the
+    // 5'0" and 8'0" pairs and the 8, 9 and 10 foot wall heights. Carrying real
+    // stock sizes is most of the point of this product, and that is not how a
+    // supplier writes any of them.
+    const tenths = Math.round(metres * INCHES_PER_METRE * 10)
+    const feet = Math.floor(tenths / 120)
+    const inches = (tenths - feet * 120) / 10
+    // A whole number of inches drops its decimal either side of a foot: an 8"
+    // sill and a 2' 8" door are the same measurement written twice, and they
+    // should not disagree about how to spell the inches.
+    const spelled = inches.toFixed(Number.isInteger(inches) ? 0 : 1)
+    return feet === 0 ? `${spelled}"` : `${feet}' ${spelled}"`
   }
   if (Math.abs(metres) < 1) return `${(metres * 100).toFixed(0)} cm`
   return `${metres.toFixed(precision)} m`

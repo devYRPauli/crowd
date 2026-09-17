@@ -17,6 +17,11 @@ import {
   type CatalogCategory,
   type CatalogItem,
 } from '../../library/catalog'
+import {
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_DOUBLE_DOOR_WIDTH,
+  DOUBLE_DOOR_FROM,
+} from '../../core/model/standards'
 import { useEditor } from '../../state/editorStore'
 import { formatLength } from '../../core/model/units'
 import { ZONE_LABELS } from '../../core/model/defaults'
@@ -216,8 +221,17 @@ const ToolOptions = ({ units }: { units: UnitSystem }) => {
         </Field>
         {tool === 'door' ? (
           <Segmented
-            value={options.doorWidth >= 1.5 ? 'double' : 'single'}
-            onChange={(value) => setToolOptions({ doorWidth: value === 'double' ? 1.8 : 0.9 })}
+            // Stock sizes, and the same threshold the placement tool splits
+            // leaves at. The literals here were 0.9 and 1.8 against a 1.5 m
+            // cutoff, so this control offered two widths nobody makes and
+            // called anything from 1.5 m a pair while the plan got one leaf —
+            // above the widest single leaf egress allows.
+            value={options.doorWidth >= DOUBLE_DOOR_FROM ? 'double' : 'single'}
+            onChange={(value) =>
+              setToolOptions({
+                doorWidth: value === 'double' ? DEFAULT_DOUBLE_DOOR_WIDTH : DEFAULT_DOOR_WIDTH,
+              })
+            }
             options={[
               { value: 'single', label: 'Single' },
               { value: 'double', label: 'Double' },

@@ -128,32 +128,27 @@ describe('the options of the tool in hand', () => {
     expect(useEditor.getState().tool).toBe('furniture')
   })
 
-  it('places a door at a width no supplier lists', () => {
+  it('places a door at a width a supplier actually lists', () => {
     openWith('door')
     render(<LibraryPanel />)
 
     fireEvent.click(screen.getByText('Double'))
 
-    // SUSPECTED BUG: the single/double buttons write 0.9 m and 1.8 m literals
-    // (src/app/panels/LibraryPanel.tsx:220), while the catalogue the rest of the
-    // editor draws on calls a single leaf 0.914 m (3'0") and a pair 1.829 m
-    // (6'0"). Every door placed with this tool is therefore 14 mm narrow, the
-    // inspector immediately flags it as "not a stock size", and the egress width
-    // it contributes is short of the leaf somebody would actually order. The
-    // project's own rule is that a dimension literal belongs in
-    // core/model/standards.ts; DEFAULT_DOOR_WIDTH and DEFAULT_DOUBLE_DOOR_WIDTH
-    // are already there and are what I believe these buttons should write.
-    expect(options().doorWidth).toBe(1.8)
-    expect(options().doorWidth).not.toBe(DEFAULT_DOUBLE_DOOR_WIDTH)
-    expect(isStandard(DOOR_WIDTHS, options().doorWidth)).toBe(false)
+    // These buttons used to write 0.9 m and 1.8 m literals while the catalogue
+    // the rest of the editor draws on calls a single leaf 0.914 m (3'0") and a
+    // pair 1.829 m (6'0"). Every door placed with the tool came out 14 mm
+    // narrow, the inspector flagged it as "not a stock size" the moment it was
+    // selected, and the egress width it contributed was short of the leaf
+    // somebody would order. A dimension literal belongs in standards.ts.
+    expect(options().doorWidth).toBe(DEFAULT_DOUBLE_DOOR_WIDTH)
+    expect(isStandard(DOOR_WIDTHS, options().doorWidth)).toBe(true)
 
     fireEvent.click(screen.getByText('Single'))
-    expect(options().doorWidth).toBe(0.9)
-    expect(options().doorWidth).not.toBe(DEFAULT_DOOR_WIDTH)
-    expect(isStandard(DOOR_WIDTHS, options().doorWidth)).toBe(false)
+    expect(options().doorWidth).toBe(DEFAULT_DOOR_WIDTH)
+    expect(isStandard(DOOR_WIDTHS, options().doorWidth)).toBe(true)
   })
 
-  it('calls an opening a pair at a width the plan will draw as one leaf', () => {
+  it('only calls an opening a pair at a width the plan will draw as one', () => {
     openWith('door')
     render(<LibraryPanel />)
 
@@ -161,17 +156,19 @@ describe('the options of the tool in hand', () => {
     fireEvent.change(width, { target: { value: '1.51' } })
     fireEvent.blur(width)
 
-    // SUSPECTED BUG: the same line carries a third literal — the toggle decides
-    // it is showing a pair at `options.doorWidth >= 1.5`
-    // (src/app/panels/LibraryPanel.tsx:219), while the tool that actually places
-    // the opening splits it into two leaves only from `DOUBLE_DOOR_FROM`
-    // (1.524 m, the smallest pair anybody hangs) up —
-    // src/editor/tools/placementTools.ts:301. Between 1.50 m and 1.524 m the
-    // panel says "Double" and the plan gets a single leaf, which above the 4'0"
-    // egress leaf maximum is a door that could not be hung. I believe the toggle
-    // should read `DOUBLE_DOOR_FROM` rather than carry its own number.
+    // The toggle used to decide it was showing a pair from 1.5 m while the tool
+    // that places the opening splits it into two leaves only from
+    // `DOUBLE_DOOR_FROM` (1.524 m, the smallest pair anybody hangs). Between
+    // the two the panel said "Double" and the plan got a single leaf — wider
+    // than the 4'0" maximum a single egress leaf is allowed, so a door that
+    // could not be hung. Both read the same constant now.
     expect(options().doorWidth).toBeCloseTo(1.51, 6)
     expect(options().doorWidth).toBeLessThan(DOUBLE_DOOR_FROM)
+    expect(screen.getByText('Single').className).toBe('is-active')
+
+    // And at the threshold itself it is a pair, in the panel and in the plan.
+    fireEvent.change(width, { target: { value: String(DOUBLE_DOOR_FROM) } })
+    fireEvent.blur(width)
     expect(screen.getByText('Double').className).toBe('is-active')
   })
 
