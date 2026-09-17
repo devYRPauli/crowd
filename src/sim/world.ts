@@ -12,6 +12,8 @@ import type { Vec2 } from '../core/math/vec2'
 import { add, distance, fromAngle, normalize, scale, sub } from '../core/math/vec2'
 import type { Bounds, Polygon } from '../core/math/geometry'
 import {
+  EMPTY_BOUNDS,
+  unionBounds,
   boundsOf,
   ensureWinding,
   pointInPolygon,
@@ -27,6 +29,7 @@ import {
   furniturePolygon,
   isFurnitureBlocking,
   isWalkableOpening,
+  wallPolygon,
   openingThreshold,
   planBounds,
   planSeats,
@@ -79,6 +82,8 @@ export interface QueueRecord {
   /** Where the queue tail continues when every slot is taken. */
   overflowAnchor: Vec2
   overflowDirection: Vec2
+  /** The building, so an overflowing queue does not line up outside it. */
+  overflowBounds: Bounds
   spacing: number
   serviceTime: Distribution
   opensAt: number
@@ -153,7 +158,12 @@ const cellsInPolygon = (grid: NavGrid, polygon: readonly Vec2[], blocked: Uint8A
 }
 
 /** Nearest free cell to a point, searched outward in rings. */
-export const nearestFreeCell = (grid: NavGrid, blocked: Uint8Array, p: Vec2): number => {
+export const nearestFreeCell = (
+  grid: NavGrid,
+  blocked: Uint8Array,
+  p: Vec2,
+  accept?: (point: Vec2) => boolean,
+): number => {
   const { col, row } = worldToCell(grid, p.x, p.y)
   const maxRing = Math.max(grid.cols, grid.rows)
   for (let ring = 0; ring < maxRing; ring++) {
@@ -164,7 +174,9 @@ export const nearestFreeCell = (grid: NavGrid, blocked: Uint8Array, p: Vec2): nu
         const r = row + dy
         if (c < 0 || r < 0 || c >= grid.cols || r >= grid.rows) continue
         const index = gridIndex(grid, c, r)
-        if (!blocked[index]) return index
+        if (blocked[index]) continue
+        if (accept && !accept(cellCenter(grid, c, r))) continue
+        return index
       }
     }
   }
@@ -402,8 +414,68 @@ export const buildWorld = (
     if (opening.use === 'exit' || opening.use === 'both') exits.push(record)
   }
 
-  const queues: QueueRecord[] = plan.servicePoints.map((sp) => {
+  /**
+   * The building's own extent: what the walls enclose.
+   *
+   * Not `planBounds`, which consumes each service point's queue line — so a
+   * queue running out through a wall extends the bounds to contain itself, and
+   * anything asking "is this inside the venue?" gets told yes because the thing
+   * being asked about moved the answer. Walls are the building. A plan with no
+   * walls has nothing to be outside of, and falls back to the plan's extent.
+   */
+  const venueBounds = plan.walls.length
+    ? plan.walls.reduce((acc, wall) => unionBounds(acc, boundsOf(wallPolygon(wall))), {
+        ...EMPTY_BOUNDS,
+      })
+    : planBounds(plan, 0)
+
+  /**
+   * The floor a queue is allowed to occupy.
+   *
+   * Outside the building is walkable — it has to be, or nobody could leave — so
+   * a queue line running past a wall snapped happily onto the grass beyond it,
+   * and people walked out of the door and round the outside of the venue to
+   * join the back of the line. The plan looks fine and nothing says otherwise.
+   * A waiting position has to be somewhere inside the place doing the serving.
+   */
+  const insideVenue = (point: Vec2): boolean =>
+    point.x >= venueBounds.minX &&
+    point.x <= venueBounds.maxX &&
+    point.y >= venueBounds.minY &&
+    point.y <= venueBounds.maxY
+
+  /**
+   * The queue line, turned round if the way it points leaves the building.
+   *
+   * A counter's queue runs out behind it for six metres, and a counter set near
+   * a wall sends that line straight through it. The ground outside is walkable
+   * — it has to be, or nobody could leave — so the waiting positions landed on
+   * the grass and people walked out of the door and round the outside of the
+   * venue to join the back of the line. The plan looked fine and nothing said
+   * otherwise.
+   *
+   * Clamping each position back inside is worse: it folds the line into
+   * whatever strip is left between the counter and the wall, which is where
+   * staff stand and which the counter itself blocks the way to. A queue forms
+   * on the side with room for one, so if the drawn direction leaves the
+   * building and the opposite one does not, the line is mirrored about the
+   * counter. An author who drew the line by hand keeps it, and a counter with
+   * nowhere to queue either side keeps what it was given.
+   */
+  const queueLine = (sp: (typeof plan.servicePoints)[number]): Vec2[] => {
     const line = serviceQueue(sp)
+    if (sp.queue && sp.queue.length >= 2) return line
+    const fits = (points: readonly Vec2[]) => points.every(insideVenue)
+    if (fits(line)) return line
+    const mirrored = line.map((p) => ({
+      x: 2 * sp.position.x - p.x,
+      y: 2 * sp.position.y - p.y,
+    }))
+    return fits(mirrored) ? mirrored : line
+  }
+
+  const queues: QueueRecord[] = plan.servicePoints.map((sp) => {
+    const line = queueLine(sp)
     const spacing = Math.max(0.35, sp.queueSpacing)
     const length = polylineLength(line)
     const slotCount = Math.max(1, Math.floor(length / spacing) + 1)
@@ -412,14 +484,18 @@ export const buildWorld = (
     // sending people to stand somewhere they can never reach.
     const slots = samplePolyline(line, spacing, slotCount).map((slot) => {
       const { col, row } = worldToCell(grid, slot.x, slot.y)
-      const inside =
+      const usable =
         col >= 0 &&
         row >= 0 &&
         col < grid.cols &&
         row < grid.rows &&
-        !navBlocked[gridIndex(grid, col, row)]
-      if (inside) return slot
-      const cell = nearestFreeCell(grid, navBlocked, slot)
+        !navBlocked[gridIndex(grid, col, row)] &&
+        insideVenue(slot)
+      if (usable) return slot
+      // Inside the building if at all possible; anywhere walkable rather than
+      // nowhere, for a counter genuinely standing outside one.
+      const within = nearestFreeCell(grid, navBlocked, slot, insideVenue)
+      const cell = within >= 0 ? within : nearestFreeCell(grid, navBlocked, slot)
       if (cell < 0) return slot
       return cellCenter(grid, cell % grid.cols, (cell / grid.cols) | 0)
     })
@@ -447,6 +523,7 @@ export const buildWorld = (
       slotFacing,
       overflowAnchor: tail,
       overflowDirection,
+      overflowBounds: venueBounds,
       spacing,
       serviceTime: sp.serviceTime,
       opensAt: sp.opensAt ?? 0,
@@ -494,7 +571,6 @@ export const buildWorld = (
    * the floor the crowd was actually standing on, and every person per square
    * metre a reader worked out from it came out low.
    */
-  const venueBounds = planBounds(plan, 0)
   let insideCells = 0
   for (let row = 0; row < grid.rows; row++) {
     for (let col = 0; col < grid.cols; col++) {
@@ -564,7 +640,16 @@ export const servicePositionFor = (queue: QueueRecord, serverIndex: number): Vec
 export const queueSlotPosition = (queue: QueueRecord, slot: number): Vec2 => {
   if (slot < queue.slots.length) return queue.slots[slot]
   const extra = slot - queue.slots.length + 1
-  return add(queue.overflowAnchor, scale(queue.overflowDirection, extra * queue.spacing))
+  const out = add(queue.overflowAnchor, scale(queue.overflowDirection, extra * queue.spacing))
+  // A queue longer than the floor drawn for it has to end up somewhere, and
+  // outside the building is not it — that is the whole defect this and the
+  // mirrored line exist to close. Once the overflow reaches a wall the people
+  // behind bunch against it, which is what a queue meeting a wall does.
+  const b = queue.overflowBounds
+  return {
+    x: Math.min(Math.max(out.x, b.minX), b.maxX),
+    y: Math.min(Math.max(out.y, b.minY), b.maxY),
+  }
 }
 
 export const queueSlotFacing = (queue: QueueRecord, slot: number): number => {

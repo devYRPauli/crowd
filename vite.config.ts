@@ -24,7 +24,12 @@ export default defineConfig({
   },
   worker: { format: 'es' },
   test: {
+    // The simulation and the document model are pure and run far faster without
+    // a DOM, so `node` stays the default and only the files that render
+    // components ask for one, by the `@vitest-environment jsdom` docblock at
+    // the top of each. `.test.tsx` is included for those.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    setupFiles: ['src/test/setup.ts'],
   },
 })

@@ -28,7 +28,11 @@ import { createScenario } from '../core/model/defaults'
 import { cellCenter, gridIndex, solveEikonal, worldToCell } from './nav/eikonal'
 import { planSeats } from '../core/model/planGeometry'
 import { computeNewVelocity } from './avoidance/orca'
-import { DEFAULT_DOOR_WIDTH, DEFAULT_DOUBLE_DOOR_WIDTH } from '../core/model/standards'
+import {
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_DOUBLE_DOOR_WIDTH,
+  DEFAULT_WALL_THICKNESS,
+} from '../core/model/standards'
 import type { Distribution } from '../core/math/random'
 import type { Vec2 } from '../core/math/vec2'
 import type { Plan, ServicePoint } from '../core/model/types'
@@ -936,6 +940,45 @@ describe('what the world says about itself', () => {
     // And it leaves the approach outside the front door walkable, which is the
     // whole reason there is a margin.
     expect(world.navBlocked[cellAt(world, 10, -1)]).toBe(0)
+  })
+
+  it('keeps a queue inside the building even when its line runs out of one', () => {
+    // A counter close to a wall has its queue line cross it, and the ground
+    // outside is walkable — it has to be, or nobody could leave. So the waiting
+    // positions snapped happily onto the grass, and people walked out of the
+    // door and round the outside of the venue to join the back of the line.
+    // The plan looked fine and nothing said otherwise.
+    //
+    // The trap underneath it was circular: the extent used to decide "inside"
+    // came from `planBounds`, which consumes the queue line, so a queue running
+    // out of the building stretched the bounds to contain itself. The building
+    // is what its walls enclose.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 12)
+    b.door(room.south, 10, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'exit')
+    // Two metres from the north wall, facing so the queue forms behind it.
+    b.service('Desk', 10, 10, Math.PI, 1, { kind: 'constant', mean: 30 })
+    const world = buildWorld(b.build(), createScenario())
+
+    const queue = world.queues[0]
+    expect(queue.slots.length).toBeGreaterThan(1)
+    for (const slot of queue.slots) {
+      expect(slot.y).toBeLessThanOrEqual(12)
+      expect(slot.y).toBeGreaterThanOrEqual(0)
+      expect(slot.x).toBeGreaterThanOrEqual(0)
+      expect(slot.x).toBeLessThanOrEqual(20)
+    }
+    // And a queue longer than the floor drawn for it bunches against the wall
+    // rather than carrying on through it. The bound is the building's outer
+    // extent, so it includes the half thickness a wall stands on either side of
+    // its own centreline; keeping a body off the wall itself is the engine's
+    // job, not the queue's.
+    const envelope = DEFAULT_WALL_THICKNESS / 2 + 1e-6
+    const far = queueSlotPosition(queue, queue.slots.length + 6)
+    expect(far.y).toBeLessThanOrEqual(12 + envelope)
+    expect(far.y).toBeGreaterThanOrEqual(-envelope)
+    expect(far.x).toBeGreaterThanOrEqual(-envelope)
+    expect(far.x).toBeLessThanOrEqual(20 + envelope)
   })
 
   it('reports the floor inside the venue, not the ground the grid covers', () => {
