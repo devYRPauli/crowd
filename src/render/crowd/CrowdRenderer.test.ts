@@ -75,12 +75,12 @@ const tintOf = (renderer: CrowdRenderer, index: number): Color => {
 }
 
 /**
- * The tint the renderer writes today for a given palette hex — including the
- * second sRGB decode pinned as a suspected bug in `colours a person by what
- * they are doing`. The tests below are about which token gets picked, so they
- * go through the same call rather than repeating that literal each time.
+ * The tint the renderer writes for a given palette hex. Three decodes the hex
+ * into the working space the instanced buffer holds and `getHexString` encodes
+ * it back, so the round trip is the token itself; the tests below are about
+ * which token gets picked, not about the spaces it passes through.
  */
-const asWritten = (hex: string): string => new Color(hex).convertSRGBToLinear().getHexString()
+const asWritten = (hex: string): string => new Color(hex).getHexString()
 
 const transformOf = (renderer: CrowdRenderer, index: number) => {
   const matrix = new Matrix4()
@@ -308,21 +308,16 @@ describe('colouring the crowd', () => {
     const queuing = AGENT_STATE_ORDER.indexOf('queuing')
     renderer.update(frame([{ state: queuing }, { state: 99 }]))
 
-    // SUSPECTED BUG: the tint is decoded twice — `Color.set(hex)` already lands
-    // in the linear working space under r180's colour management and
-    // `convertSRGBToLinear()` (CrowdRenderer.ts:293, and 130 for the shader's
-    // skin, leg and hair tables) decodes it again. The standard material's
-    // `<colorspace_fragment>` encodes once on the way out, so the queuing amber
-    // #e0a23f is painted #be5c0d. Every person is drawn darker and more
-    // saturated than the legend beside them, which is the one comparison this
-    // colouring exists to support. The same defect is in the furniture builder
-    // and both overlays; `MaterialLibrary` decodes once and is right.
+    // A person is drawn in the colour the legend names. Decoding the hex twice
+    // on the way into the buffer painted the queuing amber as #be5c0d, darker
+    // and more saturated than the swatch beside it — and telling the picture
+    // and the legend apart is the whole point of colouring by state.
     expect(STATE_COLORS[queuing]).toBe('#e0a23f')
-    expect(tintOf(renderer, 0).getHexString()).toBe('be5c0d')
+    expect(tintOf(renderer, 0).getHexString()).toBe('e0a23f')
     // A state the renderer has no colour for still has to be drawn, in the
     // walking blue rather than in black.
     expect(STATE_COLORS[0]).toBe('#4c7dd4')
-    expect(tintOf(renderer, 1).getHexString()).toBe('1234a8')
+    expect(tintOf(renderer, 1).getHexString()).toBe('4c7dd4')
   })
 
   it('colours by population, wrapping round when there are more groups than colours', () => {

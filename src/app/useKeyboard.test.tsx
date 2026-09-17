@@ -511,21 +511,23 @@ describe('the view and the run', () => {
     expect(sim().runLabel).toBe('Riverside Hall B')
   })
 
-  it('starts a second run when space is pressed while the first is still preparing', () => {
+  it('lets the run it already started finish preparing when space is pressed again', () => {
     mount()
     press(' ')
     const first = sim().runId
     press(' ')
 
-    // SUSPECTED BUG (src/app/useKeyboard.ts:196-207). The space bar reads the
-    // phase as "not running and not paused" and starts a fresh run, so a
-    // second press while the navigation grid is still being built throws that
-    // work away and starts it again under a new id — and for a large venue the
-    // grid is seconds of work, so an impatient user can keep the run
-    // permanently a moment away from starting. 'preparing' should be ignored
-    // here, or stop the run, rather than fall through to `run`.
-    expect(sim().runId).not.toBe(first)
+    // Building the navigation grid is seconds of work on a large venue. A
+    // second press that started again would throw that away and begin the wait
+    // over, so an impatient user could keep the run permanently a moment from
+    // starting — and the transport offers no such button while it is preparing.
+    expect(sim().runId).toBe(first)
     expect(sim().phase).toBe('preparing')
+
+    // Shift is still how a prepare that is taking too long is called off.
+    press(' ', { shiftKey: true })
+    expect(sim().phase).toBe('idle')
+    expect(sim().runId).toBeNull()
   })
 })
 

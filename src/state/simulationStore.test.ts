@@ -514,8 +514,8 @@ describe('reaching the end of the scenario', () => {
     // that outlived it would be read against whatever plan arrives next — and
     // "Save as baseline" is offered whenever there is a summary, which would
     // pair the closed venue's results with the new document for good.
-    const opened = venue('Foyer with two doors')
-    sim().saveCurrentRun(opened.name, opened)
+    expect(sim().runDocument).toBeNull()
+    sim().saveCurrentRun('Foyer with two doors')
     expect(sim().savedRuns).toEqual([])
   })
 })
@@ -524,7 +524,7 @@ describe('the baseline a run is compared against', () => {
   it('holds the saved run and the live one apart', () => {
     const before = venue('Foyer')
     playToTheEnd(before, { meanJourney: 96, clearanceTime: 240 })
-    sim().saveCurrentRun('Before the extra doors', before)
+    sim().saveCurrentRun('Before the extra doors')
 
     const after = venue('Foyer with two doors')
     sim().run(after, after.name)
@@ -538,7 +538,9 @@ describe('the baseline a run is compared against', () => {
     expect(baseline.summary.meanJourney).toBeCloseTo(96, 6)
     expect(Array.from(baseline.series.active)).toEqual([12, 6, 0])
     // The saved run carries the plan it was produced from, so the comparison
-    // can say what changed rather than only by how much.
+    // can say what changed rather than only by how much — and that plan comes
+    // from the run rather than from the caller, who by now is editing the venue
+    // the baseline is about to be compared against.
     expect(baseline.document).toBe(before)
 
     expect(sim().summary?.meanJourney).toBeCloseTo(61, 6)
@@ -549,9 +551,28 @@ describe('the baseline a run is compared against', () => {
     expect(chosen?.summary.clearanceTime).toBeCloseTo(240, 6)
   })
 
+  it('keeps the venue each run was started from and lets it go when the run is stopped', () => {
+    const before = venue('Foyer')
+    sim().run(before, before.name)
+    // The run is the only place the plan being simulated is known: the panel
+    // reads this to tell whether the plan on screen is still the one the
+    // results came from, and to hand "Save as baseline" the right venue.
+    expect(sim().runDocument).toBe(before)
+
+    const after = venue('Foyer with two doors')
+    sim().run(after, after.name)
+    expect(sim().runDocument).toBe(after)
+
+    sim().stop()
+    // A stop is the first half of opening another project. A document left
+    // behind would have the panel measuring the next venue's plan against it
+    // and calling that venue unchanged.
+    expect(sim().runDocument).toBeNull()
+  })
+
   it('will not save a baseline before the run has produced one', () => {
     const doc = venue('Foyer')
-    sim().saveCurrentRun('Nothing yet', doc)
+    sim().saveCurrentRun('Nothing yet')
 
     sim().run(doc, doc.name)
     const runId = inFlight()
@@ -559,11 +580,11 @@ describe('the baseline a run is compared against', () => {
     deliver(frame(runId, { time: 40, progress: 0.13 }))
     // A run halfway through has frames but no summary; saving one would put a
     // baseline of zeros on the panel and every later run would beat it.
-    sim().saveCurrentRun('Halfway', doc)
+    sim().saveCurrentRun('Halfway')
     expect(sim().savedRuns).toEqual([])
 
     deliver(done(runId))
-    sim().saveCurrentRun('Baseline', doc)
+    sim().saveCurrentRun('Baseline')
 
     expect(sim().savedRuns).toHaveLength(1)
     expect(sim().savedRuns[0].label).toBe('Baseline')
@@ -578,8 +599,8 @@ describe('the baseline a run is compared against', () => {
   it('forgets the comparison when the run it pointed at is thrown away', () => {
     const doc = venue('Foyer')
     playToTheEnd(doc)
-    sim().saveCurrentRun('One door', doc)
-    sim().saveCurrentRun('Two doors', doc)
+    sim().saveCurrentRun('One door')
+    sim().saveCurrentRun('Two doors')
 
     const [newest, oldest] = sim().savedRuns
     expect(newest.label).toBe('Two doors')
@@ -598,7 +619,7 @@ describe('the baseline a run is compared against', () => {
   it('keeps the last dozen saved runs, newest first', () => {
     const doc = venue('Foyer')
     playToTheEnd(doc)
-    for (let option = 1; option <= 13; option++) sim().saveCurrentRun(`Option ${option}`, doc)
+    for (let option = 1; option <= 13; option++) sim().saveCurrentRun(`Option ${option}`)
 
     const saved = sim().savedRuns
     expect(saved).toHaveLength(12)
@@ -610,11 +631,11 @@ describe('the baseline a run is compared against', () => {
   it('forgets the comparison when a thirteenth save pushes that baseline off the list', () => {
     const doc = venue('Foyer')
     playToTheEnd(doc)
-    for (let option = 1; option <= 12; option++) sim().saveCurrentRun(`Option ${option}`, doc)
+    for (let option = 1; option <= 12; option++) sim().saveCurrentRun(`Option ${option}`)
 
     const oldest = sim().savedRuns[11]
     sim().setComparison(oldest.id)
-    sim().saveCurrentRun('Option 13', doc)
+    sim().saveCurrentRun('Option 13')
 
     // The panel finds the baseline by id. An id left pointing at a run the cap
     // evicted takes every "vs baseline" delta off the panel, with nothing on
@@ -624,7 +645,7 @@ describe('the baseline a run is compared against', () => {
 
     const survivor = sim().savedRuns[1]
     sim().setComparison(survivor.id)
-    sim().saveCurrentRun('Option 14', doc)
+    sim().saveCurrentRun('Option 14')
 
     // A baseline still on the list is left where the user put it.
     expect(sim().comparisonId).toBe(survivor.id)

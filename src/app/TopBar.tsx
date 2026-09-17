@@ -61,6 +61,7 @@ export const TopBar = ({
   const setPanel = useEditor((state) => state.setPanel)
   const view = useEditor((state) => state.view)
   const setView = useEditor((state) => state.setView)
+  const sealHistory = useEditor((state) => state.sealHistory)
   const replaceDocument = useEditor((state) => state.replaceDocument)
   const toast = useEditor((state) => state.toast)
   const markSaved = useEditor((state) => state.markSaved)
@@ -93,8 +94,16 @@ export const TopBar = ({
         value={document.name}
         aria-label="Project name"
         onChange={(event) =>
-          apply((doc) => renameDocument(doc, event.target.value), 'Rename project')
+          apply(
+            (doc) => renameDocument(doc, event.target.value),
+            'Rename project',
+            // Typing is one gesture. Without a key every character is its own
+            // undo step, so undoing a renamed venue spells the name backwards
+            // a letter at a time and the edit before it is thirty presses away.
+            `rename:${document.id}`,
+          )
         }
+        onBlur={sealHistory}
       />
       {dirty ? <span className="badge">Unsaved</span> : null}
 

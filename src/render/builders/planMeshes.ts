@@ -61,7 +61,15 @@ export const buildWallGeometry = (plan: Plan): WallMeshes => {
     const target = wall.kind === 'glass' ? glassParts : solidParts
     const openings = plan.openings.filter((o) => o.wallId === wall.id)
 
-    for (const span of solidSpans(wall, plan.openings)) {
+    // `solidSpans` opens up only the walkable openings, because to the
+    // simulation a glazed wall is as solid as any other one. The picture has to
+    // cut the glazed band out as well: left in, the full-height span buries the
+    // pane inside the masonry and a window reads as blank wall. Asking for the
+    // spans as if every opening were a doorway gives the stretches between
+    // openings, and the sill and head below put back the reveal a window keeps.
+    const holes = openings.map((o) => ({ ...o, sill: 0, kind: 'opening' as const }))
+
+    for (const span of solidSpans(wall, holes)) {
       const piece = wallBox(wall, span.start, span.end, 0, wall.height)
       if (piece) target.push(piece)
     }
@@ -155,13 +163,20 @@ export const buildOpeningGeometry = (plan: Plan): BufferGeometry | null => {
 /** A flat, horizontal polygon at the given height. */
 export const polygonGeometry = (polygon: readonly Vec2[], height = 0): BufferGeometry => {
   const shape = new Shape()
+  // Plan y is mirrored into the shape before the quarter turn puts it on the
+  // ground plane, so that the turn can go the way that leaves the plane facing
+  // up while plan y still lands on +z. Turned the other way the floor comes out
+  // face-down — culled outright by the front-side floor material, from the only
+  // direction the editor ever looks — and mirroring afterwards instead would
+  // leave the winding disagreeing with the normals, which culls it just the
+  // same while lighting it from underneath.
   polygon.forEach((p, index) => {
-    if (index === 0) shape.moveTo(p.x, p.y)
-    else shape.lineTo(p.x, p.y)
+    if (index === 0) shape.moveTo(p.x, -p.y)
+    else shape.lineTo(p.x, -p.y)
   })
   shape.closePath()
   const geometry = new ShapeGeometry(shape)
-  geometry.rotateX(Math.PI / 2)
+  geometry.rotateX(-Math.PI / 2)
   geometry.translate(0, height, 0)
   geometry.deleteAttribute('uv')
   return geometry

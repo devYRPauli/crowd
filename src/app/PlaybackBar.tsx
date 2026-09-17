@@ -42,11 +42,7 @@ export const PlaybackBar = () => {
     <div className="playbar">
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {phase === 'idle' || phase === 'done' || phase === 'error' ? (
-          <button
-            className="btn is-primary"
-            onClick={() => run(document, document.name)}
-            disabled={busy}
-          >
+          <button className="btn is-primary" onClick={() => run(document, document.name)}>
             <PlayIcon width={14} height={14} />
             {phase === 'done' ? 'Run again' : 'Run'}
           </button>
@@ -56,6 +52,12 @@ export const PlaybackBar = () => {
               className="btn is-primary"
               onClick={() => (running ? pause() : resume())}
               aria-label={running ? 'Pause' : 'Resume'}
+              // 'preparing' lands here too, and the store refuses resume in any
+              // phase but 'paused'. Live, this is a play button that takes the
+              // press and does nothing for as long as the grid takes to build;
+              // Stop beside it is what cancels. The guard used to sit on the Run
+              // button, which is never on screen while a run is preparing.
+              disabled={busy}
             >
               {running ? <PauseIcon width={14} height={14} /> : <PlayIcon width={14} height={14} />}
               {running ? 'Pause' : 'Resume'}

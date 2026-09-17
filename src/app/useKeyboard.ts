@@ -201,7 +201,12 @@ export const useKeyboard = ({
             simulation.pause()
           } else if (simulation.phase === 'paused') {
             simulation.resume()
-          } else {
+          } else if (simulation.phase !== 'preparing') {
+            // Not while it is preparing: building the navigation grid is
+            // seconds of work on a large venue, and starting again on a second
+            // press throws that away and begins the wait over — an impatient
+            // user could hold the run a moment from starting indefinitely.
+            // Shift-space is how a prepare is called off.
             simulation.run(editor.document, editor.document.name)
           }
           return

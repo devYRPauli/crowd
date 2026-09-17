@@ -50,8 +50,15 @@ export const NumberInput = ({
 
   const commit = () => {
     if (draft === null) return
-    const parsed = Number(draft.replace(/[^\d.\-+]/g, ''))
+    const cleaned = draft.replace(/[^\d.\-+]/g, '')
     setDraft(null)
+    // An emptied box is not a request for zero, and `Number('')` is 0: selecting
+    // the headcount, hitting Delete and clicking away used to set the crowd to
+    // nobody and run an empty venue. A draft with no number left in it is
+    // discarded like any other unreadable one, and the field springs back to
+    // what the document holds.
+    if (cleaned === '') return
+    const parsed = Number(cleaned)
     if (!Number.isFinite(parsed)) return
     let next = parsed
     if (min !== undefined) next = Math.max(min, next)

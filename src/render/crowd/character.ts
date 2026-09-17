@@ -110,9 +110,24 @@ export const buildCharacterGeometry = (detail: 'full' | 'simple' = 'full'): Buff
   return merged
 }
 
-/** A cheaper model for people far from the camera: one block per limb, no extremities. */
+/**
+ * A cheaper model for people far from the camera: the hair shell and the shoes
+ * go, and the shins grow down into the gap the shoes leave.
+ *
+ * The dark zone is shared by the crown and the feet — there were only four
+ * colour slots to go round — so dropping it takes the shoes with the hair.
+ * Without standing the shins back down on the floor, everybody who receded far
+ * enough to swap models would lift 60 mm off it as they went.
+ */
 const simplify = (parts: Part[]): Part[] =>
-  parts.filter((part) => part.zone !== ZONE.hair).map((part) => ({ ...part }))
+  parts
+    .filter((part) => part.zone !== ZONE.hair)
+    .map((part) => {
+      const shin = part.limb === LIMB.shinLeft || part.limb === LIMB.shinRight
+      if (!shin) return { ...part }
+      const knee = part.y + part.h / 2
+      return { ...part, y: knee / 2, h: knee }
+    })
 
 /** Skin tones, sampled by a per-instance value. */
 export const SKIN_TONES = ['#f2d2b6', '#e5b895', '#c98f68', '#a06a44', '#79482c', '#5a341f']

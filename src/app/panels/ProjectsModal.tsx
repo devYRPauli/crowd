@@ -164,7 +164,13 @@ export const ProjectsModal = ({
                 onClick={async (event) => {
                   event.stopPropagation()
                   const full = await loadProject(project.id)
-                  if (!full) return
+                  if (!full) {
+                    // Download is the only copy of a project that leaves this
+                    // browser, so a click that quietly wrote nothing read as a
+                    // slow browser rather than as an unreadable project.
+                    toast('That project could not be read.', 'error')
+                    return
+                  }
                   downloadText(documentFileName(full), serializeDocument(full))
                 }}
               >

@@ -216,7 +216,7 @@ describe('saving', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('says nothing at all when the copy it was asked to download cannot be read', async () => {
+  it('says the project could not be read when the copy it was asked to download fails', async () => {
     const venue = storedVenue('Atrium')
     disk.rows = [
       { id: 'proj-broken', name: 'Corrupted', updatedAt: minutesAgo(1), bytes: 900 },
@@ -230,21 +230,17 @@ describe('saving', () => {
     fireEvent.click(broken)
     fireEvent.click(readable)
 
-    // Both handlers await the same load, so once the readable one has written
-    // its file the unreadable one has finished doing whatever it does.
+    // Both handlers await the same load in click order, so by the time the
+    // readable one has written its file the unreadable one has already spoken.
     await waitFor(() => expect(disk.downloads).toHaveLength(1))
     expect(disk.downloads[0].name).toBe('atrium.crowd.json')
 
-    // SUSPECTED BUG: the download button's handler is `if (!full) return`
-    // (src/app/panels/ProjectsModal.tsx:167) — no file, no toast, nothing. The
-    // open button one row over hits the same `loadProject` returning null and
-    // says "That project could not be read.", so the panel already knows how to
-    // report it. Download is the only copy of a project that leaves this
-    // browser, and this panel's own text tells people to use it for anything
-    // they want to keep; a click that silently does nothing reads as a slow
-    // browser, and the natural next move is to clear site data and try again.
-    // I believe it should raise the same toast the open path does.
-    expect(useEditor.getState().toasts).toHaveLength(0)
+    // This panel's own text tells people to download anything they want to
+    // keep, so a download that writes no file has to say why: silence reads as
+    // a slow browser, and the next move after that is to clear site data.
+    expect(useEditor.getState().toasts).toHaveLength(1)
+    expect(useEditor.getState().toasts[0].message).toBe('That project could not be read.')
+    expect(useEditor.getState().toasts[0].tone).toBe('error')
   })
 })
 

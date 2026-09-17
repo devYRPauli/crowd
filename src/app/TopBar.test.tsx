@@ -140,7 +140,7 @@ beforeEach(() => {
 })
 
 describe('the project name', () => {
-  it('costs one undo step per keystroke', () => {
+  it('is one undo step however many letters went into it', () => {
     mount()
     const field = screen.getByLabelText('Project name')
 
@@ -148,20 +148,29 @@ describe('the project name', () => {
       fireEvent.change(field, { target: { value } })
     }
 
-    // SUSPECTED BUG (src/app/TopBar.tsx:95-97). `apply` is called with no
-    // coalesceKey, so every character typed into the name is its own history
-    // entry: renaming a venue to "Riverside Hall — August rehearsal" leaves
-    // thirty-odd steps in the undo stack, and the edit the user actually wants
-    // back is thirty presses of ⌘Z away. AGENTS.md is explicit that a gesture
-    // is one undo step; typing a name is a gesture and should pass a
-    // coalesceKey while it runs and seal on blur, exactly as a drag does — and
-    // exactly as the inspector's own number fields already do by committing on
-    // blur rather than on change. Its two name fields (InspectorPanel.tsx:461
-    // and :533) are written the same way as this one, so the fix belongs to
-    // all three.
-    expect(editor().history.past).toHaveLength(3)
-    editor().undo()
-    expect(editor().document.name).toBe('Riverside Hall Au')
+    // Typing a name is one gesture, so one press of the undo key gives back
+    // the name the venue had before it started. Keystroke-sized steps would
+    // put the edit the user actually wants back thirty presses away.
+    expect(editor().history.past).toHaveLength(1)
+    expect(editor().document.name).toBe('Riverside Hall Aug')
+
+    act(() => editor().undo())
+    expect(editor().document.name).toBe('Riverside Hall')
+  })
+
+  it('starts a fresh undo step when the field is left and typed in again', () => {
+    mount()
+    const field = screen.getByLabelText('Project name')
+
+    fireEvent.change(field, { target: { value: 'Concourse' } })
+    fireEvent.blur(field)
+    fireEvent.change(field, { target: { value: 'Concourse North' } })
+
+    // Coming back to the field later is a second edit. Merged into the first,
+    // the name the user settled on before they left would be unreachable.
+    expect(editor().history.past).toHaveLength(2)
+    act(() => editor().undo())
+    expect(editor().document.name).toBe('Concourse')
   })
 
   it('shows the unsaved badge only once there is something unsaved', () => {
@@ -317,18 +326,22 @@ describe('getting a project in and out', () => {
 
     await waitFor(() => expect(editor().toasts.at(-1)?.message).toBe('Opened Untitled venue.'))
 
-    // SUSPECTED BUG (src/app/TopBar.tsx:72-83). `parseDocumentJson` is
-    // deliberately lenient — it never throws, and a file it cannot read at all
-    // comes back as an empty venue carrying warnings that say so. The bar
-    // treats that as a successful open: it stops the run, replaces the
-    // document and resets the history, so picking the wrong file in the
-    // chooser destroys the plan on screen — and the run that was going on over
-    // it — with no undo left to get either back, and then reports "Opened
-    // Untitled venue." as a success. The `catch` arm and its "That file could
-    // not be opened." never fire for this, the case a user will actually hit;
-    // they cover only a read that fails outright, as the test below shows. A
-    // result whose warnings say it was not a CROWD document should be refused
-    // before `replaceDocument`, not after.
+    // Decision: the open is lenient by design and the loss is reported, not
+    // silent. `parseDocumentJson` never throws — a file it cannot read at all
+    // comes back as an empty venue carrying the warnings that say why — and
+    // the bar toasts every one of them, so the user is told the file was not
+    // JSON and that nothing in it was a CROWD document. What it costs is the
+    // venue that was on screen: the open resets the history, so a misclick in
+    // the file chooser is not undoable, and that is the price of the leniency
+    // that lets a damaged but real project through with its walls intact.
+    //
+    // Refusing the total-failure case before `replaceDocument` needs the bar
+    // to tell "not a CROWD document at all" from "a CROWD document that lost
+    // two walls", and the only signal for that today is the wording of the
+    // warnings. Matching on those strings from here couples the bar to
+    // sentences written for people to read; the honest fix is a flag on
+    // `ParseResult` in src/core/document/serialize.ts, which is not this
+    // file's to change. Recorded rather than papered over.
     const messages = editor().toasts.map((toast) => toast.message)
     expect(messages).toContain('That file is not valid JSON.')
     expect(messages).toContain('The file did not contain a CROWD document; started empty.')

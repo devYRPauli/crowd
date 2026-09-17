@@ -61,6 +61,9 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
       .map((z) => ({ value: z.id, label: z.name }))
   }
 
+  /** Several counters are offered as a tick list; one is offered as a select. */
+  const isMulti = (kind: ItineraryStep['kind']) => kind === 'service' && services.length > 1
+
   const patchStep = (stepId: string, patch: Partial<ItineraryStep>) => {
     apply(
       (doc) =>
@@ -104,7 +107,7 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
 
       {population.itinerary.map((step, index) => {
         const targets = targetsFor(step.kind)
-        const multi = step.kind === 'service' && services.length > 1
+        const multi = isMulti(step.kind)
         return (
           <div
             key={step.id}
@@ -123,7 +126,20 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
               <Select
                 value={step.kind}
                 onChange={(kind) =>
-                  patchStep(step.id, { kind, targetId: undefined, targetIds: undefined })
+                  // The old target means nothing to the new kind, but clearing
+                  // it outright left the select below showing its first option
+                  // while the step held none: the panel read "Queue at → Bar"
+                  // and the engine, finding no queue named, stepped past the
+                  // bar the scenario was built around. So commit what the
+                  // select is about to show, the way "Add a step" does. A tick
+                  // list shows nothing until it is ticked, and pre-ticking a
+                  // counter there would quietly add it to whichever desk the
+                  // planner does tick.
+                  patchStep(step.id, {
+                    kind,
+                    targetId: isMulti(kind) ? undefined : targetsFor(kind)[0]?.value,
+                    targetIds: undefined,
+                  })
                 }
                 options={(Object.keys(STEP_LABELS) as Array<ItineraryStep['kind']>).map((kind) => ({
                   value: kind,

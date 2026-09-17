@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ScenarioPanel } from './ScenarioPanel'
+import { Simulation } from '../../sim/engine'
 import { useEditor } from '../../state/editorStore'
 import { createDocument } from '../../core/model/defaults'
 import type { CrowdDocument, Plan, Population, ServicePoint, Zone } from '../../core/model/types'
@@ -82,31 +83,23 @@ describe('the numbers a run depends on', () => {
     expect(screen.getByText('120 people')).toBeDefined()
   })
 
-  it('reads a headcount of words, or an emptied box, as nobody at all', () => {
+  it('leaves the headcount alone when the box is emptied or filled with words', () => {
     openWith()
     render(<ScenarioPanel />)
 
     typeAndLeave(/^people$/i, 'a full house')
 
-    // SUSPECTED BUG: `NumberInput.commit` (src/app/components/ui.tsx:53) strips
-    // everything but digits and signs, and `Number('')` is 0 — so text it cannot
-    // read is silently replaced by zero rather than refused. The run then
-    // finishes instantly with nobody in the venue and reports that as a result,
-    // against the project's own rule that a parser which cannot read something
-    // says what it lost instead of handing back a default. Note that "2.5.5"
-    // above *is* refused, because it survives the strip as NaN — so which
-    // mistakes are caught is decided by what the regex happens to leave behind.
-    // I believe an unreadable draft should be discarded the way "2.5.5" is,
-    // leaving the previous count on screen.
-    expect(group().count).toBe(0)
-    expect(screen.getByText('0 people')).toBeDefined()
+    expect(group().count).toBe(120)
+    expect(screen.getByText('120 people')).toBeDefined()
 
-    // The same path, and the likelier one: selecting the box and hitting Delete
-    // before typing the new figure, then clicking away.
+    // The likelier path, and the one that used to empty the venue: select the
+    // figure, hit Delete, click away. An empty box is somebody part-way through
+    // typing, not a request to simulate nobody.
     typeAndLeave(/^people$/i, '500')
     expect(group().count).toBe(500)
     typeAndLeave(/^people$/i, '')
-    expect(group().count).toBe(0)
+    expect(group().count).toBe(500)
+    expect(control(/^people$/i).value).toBe('500')
   })
 
   it('holds the headcount inside the range the engine will build a crowd for', () => {
@@ -251,6 +244,12 @@ describe('the itinerary', () => {
     render(<ScenarioPanel />)
 
     fireEvent.change(screen.getByDisplayValue('Leave by'), { target: { value: 'service' } })
+
+    // The list arrives with nothing ticked: a counter ticked on the planner's
+    // behalf would be added to whichever desk they then tick, so "queue at the
+    // kiosk" would come out as both desks sharing the line.
+    expect((screen.getByLabelText('Bar') as HTMLInputElement).checked).toBe(false)
+
     fireEvent.click(screen.getByLabelText('Bar'))
     fireEvent.click(screen.getByLabelText('Kiosk'))
 
@@ -262,37 +261,24 @@ describe('the itinerary', () => {
     expect(step.targetId).toBe('svc-1')
   })
 
-  it('shows a destination on a step that names none, as soon as the kind is changed', () => {
+  it('holds the destination it shows when a step is changed to another kind', () => {
     openWith({ zones: [entry, exit, stand], servicePoints: [counter('svc-1', 'Bar')] })
     render(<ScenarioPanel />)
 
     fireEvent.change(screen.getByDisplayValue('Leave by'), { target: { value: 'service' } })
 
-    // SUSPECTED BUG: changing a step's kind clears its target
-    // (`patchStep(step.id, { kind, targetId: undefined, targetIds: undefined })`,
-    // src/app/panels/ScenarioPanel.tsx:126), and the target `<Select>` below then
-    // falls back to *displaying* `targets[0]` without ever committing it
-    // (ScenarioPanel.tsx:181). The panel therefore reads "Queue at → Bar" while
-    // the document holds no target at all, and `Simulation.beginStep`
-    // (src/sim/engine.ts:644) finds no queue for it and steps straight past: the
-    // bar the whole scenario was built around is skipped, and the results show a
-    // desk nobody visited. Nothing on screen distinguishes this from a step that
-    // was set on purpose — the fix is to open the select and re-pick the option
-    // already showing. I believe changing the kind should commit the first valid
-    // target, exactly as the "Add a step" button already does.
+    // The old target means nothing to the new kind, so it goes — but a step
+    // reading "Queue at → Bar" while the document names no counter is skipped
+    // outright by the engine, and the results then show a bar nobody visited
+    // with nothing on screen to say why.
     expect(screen.getByDisplayValue('Bar')).toBeDefined()
     expect(group().itinerary[0].kind).toBe('service')
-    expect(group().itinerary[0].targetId).toBeUndefined()
-    expect(group().itinerary[0].targetIds).toBeUndefined()
-
-    // Re-picking the option that was already on screen is what makes it real.
-    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'svc-1' } })
     expect(group().itinerary[0].targetId).toBe('svc-1')
 
     // Every kind goes the same way, so it is not something about counters.
     fireEvent.change(screen.getByDisplayValue('Queue at'), { target: { value: 'goto' } })
     expect(screen.getByDisplayValue('Merch stand')).toBeDefined()
-    expect(group().itinerary[0].targetId).toBeUndefined()
+    expect(group().itinerary[0].targetId).toBe('zone-stand')
   })
 
   it('lets a queueing step be left pointing at no counter at all', () => {
@@ -306,10 +292,12 @@ describe('the itinerary', () => {
     fireEvent.click(screen.getByLabelText('Bar'))
     fireEvent.click(screen.getByLabelText('Bar'))
 
-    // The same silent skip reached the other way: with more than one counter the
-    // step becomes a list of tickboxes, and unticking the last one leaves it
-    // numbered and headed "Queue at" with nothing behind it. Here at least the
-    // empty list is on screen, which is why the select above is the worse half.
+    // Unticking the last counter leaves a step headed "Queue at" that the
+    // engine steps straight past, and that is allowed on purpose: the empty
+    // list is on screen, so the panel is not showing a counter it has not
+    // stored. Refusing the last untick would mean one counter nobody can clear,
+    // and it would fight the gesture used to swap one desk for another —
+    // clearing the list before ticking the desks actually wanted.
     expect(group().itinerary[0].targetIds).toEqual([])
     expect(group().itinerary[0].targetId).toBeUndefined()
     expect(screen.getByText('Queue at')).toBeDefined()
@@ -346,28 +334,29 @@ describe('the evacuation', () => {
     expect(scenario().evacuationAtS).toBeNull()
   })
 
-  it('accepts an alarm set for after the run has ended', () => {
-    openWith()
+  it('takes an alarm set for after the run ends, and the run says it never sounded', () => {
+    openWith({ zones: [entry, exit] })
     render(<ScenarioPanel />)
 
     fireEvent.click(screen.getByLabelText(/evacuate partway through/i))
     typeAndLeave(/^alarm at$/i, '9000')
 
-    // SUSPECTED BUG: the run is 1800 s long, so an alarm at 9000 s never fires —
-    // `applyEvacuation` (src/sim/engine.ts:1180) returns while `this.time < at`
-    // and the run simply ends first. The box takes it because `min` is 0 and
-    // there is no `max`, the tickbox still reads as on, and the hint below still
-    // promises that everyone drops what they are doing. The engine's
-    // "Evacuation triggered at N s" warning is pushed only when the alarm
-    // actually fires, so the results carry no trace either: a planner reads a
-    // clean evacuation for a drill that never happened, which is the one thing
-    // the project says results may never do. I believe the field should be
-    // capped at the run length, or the panel should say the alarm falls outside
-    // the run.
+    // The field is deliberately not capped at the run length: planners set the
+    // drill time first and stretch the run to fit it, and a box that silently
+    // rewrote 9000 to 1800 would be the same lie in the other direction. The
+    // honesty belongs in the results, where a run that ended before the alarm
+    // must not come back looking like a clean evacuation.
     expect(scenario().evacuationAtS).toBe(9000)
     expect(scenario().durationS).toBe(1800)
     expect(control(/^alarm at$/i).value).toBe('9000')
-    expect(screen.getByLabelText(/evacuate partway through/i)).toHaveProperty('checked', true)
-    expect(screen.queryByText(/outside the run|after the run|never fires/i)).toBeNull()
+
+    const warnings = () => new Simulation(doc().plan, scenario()).summary().warnings
+    expect(warnings()).toContain(
+      'The evacuation is set for 9000 s but the run ends at 1800 s, so the alarm never sounds.',
+    )
+
+    // Brought back inside the run, the drill happens and the warning goes.
+    typeAndLeave(/^alarm at$/i, '600')
+    expect(warnings().join(' ')).not.toMatch(/never sounds/)
   })
 })

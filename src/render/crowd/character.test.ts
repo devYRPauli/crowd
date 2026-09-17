@@ -117,7 +117,7 @@ describe('the character mesh', () => {
     expect(new Set(soles.map((vertex) => vertex.zone))).toEqual(new Set([ZONE.hair]))
   })
 
-  it('gives the cheap model the same attributes and fewer boxes', () => {
+  it('gives the cheap model the same attributes and fewer boxes, still on the floor', () => {
     const before = full.getAttribute('position').count
     const after = simple.getAttribute('position').count
     expect(after).toBeLessThan(before)
@@ -127,13 +127,22 @@ describe('the character mesh', () => {
     expect(simple.getAttribute('aZone').count).toBe(after)
     expect(new Set(valuesOf(simple, 'aLimb'))).toEqual(new Set(Object.values(LIMB)))
 
-    // SUSPECTED BUG: `simplify` (character.ts:114-115) drops every part in the
-    // hair zone, and the shoes are tagged with it (81-91), so it loses its feet
-    // and starts 60 mm above the floor. Nothing asks for 'simple' today, so it
-    // costs nothing yet; the moment a distance test switches models, people
-    // would hover as they recede. Dropping by limb, or giving shoes their own
-    // zone, would fix it.
-    expect(boxOf(vertices(simple)).min.y).toBeCloseTo(0.06, 6)
+    // The shoes are tagged with the hair because the two share a colour zone,
+    // so dropping the detail drops them as well — and the shins have to reach
+    // the floor in their place. Anybody who recedes far enough to swap models
+    // would otherwise lift 60 mm off it as they went.
+    const box = boxOf(vertices(simple))
+    expect(box.min.y).toBeCloseTo(0, 6)
+    // Only the hair shell is missing from the top of the head.
+    expect(box.max.y).toBeCloseTo(1.735, 6)
+
+    for (const limb of [LIMB.shinLeft, LIMB.shinRight]) {
+      const shin = boxOf(partOf(simple, 'aLimb', limb))
+      expect(shin.min.y).toBeCloseTo(0, 6)
+      // And a longer shin still hangs below the knee it swings about, or the
+      // leg tears open at the joint on every step.
+      expect(shin.max.y).toBeCloseTo(PIVOTS[limb][1], 6)
+    }
   })
 
   it('leaves no uvs behind and bounds itself no larger than it is', () => {

@@ -459,6 +459,19 @@ export class Simulation {
     if (this.world.stats.freeCells === 0) {
       this.warnings.push('The plan has no walkable floor.')
     }
+    // An alarm past the end of the run is never reached by `applyEvacuation`,
+    // and the warning it would have pushed never arrives either — so the
+    // results read as a clean evacuation for a drill that never happened. Say
+    // it here instead, carrying both figures, rather than letting the run go
+    // quiet about the one thing it was set up to measure.
+    const alarm = this.scenario.evacuationAtS
+    if (alarm !== null && alarm > this.scenario.durationS) {
+      this.warnings.push(
+        `The evacuation is set for ${Math.round(alarm)} s but the run ends at ${Math.round(
+          this.scenario.durationS,
+        )} s, so the alarm never sounds.`,
+      )
+    }
   }
 
   // --- spawning --------------------------------------------------------------

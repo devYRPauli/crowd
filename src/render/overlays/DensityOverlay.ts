@@ -113,7 +113,12 @@ export class DensityOverlay {
     const limits = this.material.uniforms.uLimits.value as Float32Array
     const color = new Color()
     table.forEach((entry, index) => {
-      color.set(entry.color).convertSRGBToLinear()
+      // `set` already lands the hex in the linear working space — colour
+      // management is on — and the shader encodes once through
+      // `<colorspace_fragment>`. Decoding twice painted Fruin's level A near
+      // black, and the legend beside the map puts the same hex straight into
+      // CSS, so the paint and the key stopped naming the same colour.
+      color.set(entry.color)
       bands[index].set(color.r, color.g, color.b)
       limits[index] = Number.isFinite(entry.maxDensity) ? entry.maxDensity : 1e6
     })
@@ -121,8 +126,8 @@ export class DensityOverlay {
 
   setSafetyOverlay(enabled: boolean): void {
     this.material.uniforms.uShowSafety.value = enabled ? 1 : 0
-    const warn = new Color(CROWD_SAFETY.warnColor).convertSRGBToLinear()
-    const critical = new Color(CROWD_SAFETY.criticalColor).convertSRGBToLinear()
+    const warn = new Color(CROWD_SAFETY.warnColor)
+    const critical = new Color(CROWD_SAFETY.criticalColor)
     ;(this.material.uniforms.uWarnColor.value as Vector3).set(warn.r, warn.g, warn.b)
     ;(this.material.uniforms.uCriticalColor.value as Vector3).set(
       critical.r,

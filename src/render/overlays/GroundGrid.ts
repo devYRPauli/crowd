@@ -68,9 +68,14 @@ export class GroundGrid {
       side: DoubleSide,
       transparent: false,
       uniforms: {
-        uBase: { value: new Color(palette.ground).convertSRGBToLinear() },
-        uMinor: { value: new Color(palette.gridMinor).convertSRGBToLinear() },
-        uMajor: { value: new Color(palette.gridMajor).convertSRGBToLinear() },
+        // A hex reaches a `Color` in the linear working space already — colour
+        // management is on — and the shader encodes once on the way out through
+        // `<colorspace_fragment>`. Decoding here as well left the site darker
+        // than the walls standing on it, which take the same tokens through
+        // `MaterialLibrary`.
+        uBase: { value: new Color(palette.ground) },
+        uMinor: { value: new Color(palette.gridMinor) },
+        uMajor: { value: new Color(palette.gridMajor) },
         uCamera: { value: [0, 0, 0] },
         uCell: { value: cellSize },
         uFade: { value: 140 },
@@ -90,9 +95,9 @@ export class GroundGrid {
   }
 
   setPalette(palette: Palette): void {
-    ;(this.material.uniforms.uBase.value as Color).set(palette.ground).convertSRGBToLinear()
-    ;(this.material.uniforms.uMinor.value as Color).set(palette.gridMinor).convertSRGBToLinear()
-    ;(this.material.uniforms.uMajor.value as Color).set(palette.gridMajor).convertSRGBToLinear()
+    ;(this.material.uniforms.uBase.value as Color).set(palette.ground)
+    ;(this.material.uniforms.uMinor.value as Color).set(palette.gridMinor)
+    ;(this.material.uniforms.uMajor.value as Color).set(palette.gridMajor)
   }
 
   setCellSize(size: number): void {
@@ -107,6 +112,18 @@ export class GroundGrid {
   update(cameraPosition: Vector3, targetDistance: number): void {
     this.material.uniforms.uCamera.value = [cameraPosition.x, cameraPosition.y, cameraPosition.z]
     this.material.uniforms.uFade.value = Math.max(30, targetDistance * 6)
+    // Panning is not clamped, and the quad is only 1200 m across: pinned to the
+    // origin it runs out from under anything drawn past 600 m and the
+    // background shows through. The grid pattern is computed from world
+    // coordinates in the shader, so sliding the sheet does not slide the lines
+    // on it. `matrixAutoUpdate` is off, so the move has to be baked by hand or
+    // it never reaches the scene.
+    if (this.mesh.position.x === cameraPosition.x && this.mesh.position.z === cameraPosition.z) {
+      return
+    }
+    this.mesh.position.x = cameraPosition.x
+    this.mesh.position.z = cameraPosition.z
+    this.mesh.updateMatrix()
   }
 
   dispose(): void {

@@ -73,8 +73,10 @@ export const buildPrimGeometry = (
     geometry.applyMatrix4(scratchMatrix)
 
     const source = tint && tintRole && prim.color === tintRole ? tint : roleColor(prim.color)
+    // Vertex colours are handed to the shader in the working space, and `set`
+    // has already brought the hex there — colour management is on. Decoding a
+    // second time here drew the whole catalog several stops dark.
     scratchColor.set(source)
-    scratchColor.convertSRGBToLinear()
     const count = geometry.getAttribute('position').count
     const colors = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {

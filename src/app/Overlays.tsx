@@ -114,7 +114,11 @@ export const ShortcutSheet = ({ onClose }: { onClose: () => void }) => (
         <div className="shortcut-group" key={group.group}>
           <h3>{group.group}</h3>
           {group.items.map(([label, keys]) => (
-            <div className="shortcut-row" key={label}>
+            // Keyed on the keys as well as the label: panning is on the middle
+            // button and on Space-drag, so two rows share a label, and siblings
+            // sharing a key are ones React is free to omit — the row it dropped
+            // would be the only place that way of panning is written down.
+            <div className="shortcut-row" key={`${label} ${keys.join(' ')}`}>
               <span>{label}</span>
               <span>
                 {keys.map((key) => (

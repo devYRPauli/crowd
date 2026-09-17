@@ -164,25 +164,24 @@ describe('the object browser', () => {
     expect(useEditor.getState().selection).toEqual([{ kind: 'zone', id: 'zone-out' }])
   })
 
-  it('adds a row to the selection a second time when it is shift-clicked twice', () => {
+  it('takes a row back out of the selection when it is shift-clicked again', () => {
     openWith(plan)
     render(<LayersPanel />)
 
     fireEvent.click(screen.getByText('Fire exit'), { shiftKey: true })
-    fireEvent.click(screen.getByText('Fire exit'), { shiftKey: true })
-
-    // SUSPECTED BUG: the row appends unconditionally —
-    // `setSelection(event.shiftKey ? [...selection, refObject] : [refObject])`,
-    // src/app/panels/LayersPanel.tsx:45 — with none of the identity check that
-    // `toggleSelection` in the store does. Shift-clicking something already in
-    // the selection therefore stores it twice: the inspector then says "2
-    // selected" and offers "Delete 2 objects" for one area, and a shift-click in
-    // this list cannot take anything back out, which is what a shift-click in
-    // every other list does. I believe the row should call `toggleSelection`.
+    fireEvent.click(screen.getByText('Round table (6)'), { shiftKey: true })
     expect(useEditor.getState().selection).toEqual([
       { kind: 'zone', id: 'zone-out' },
-      { kind: 'zone', id: 'zone-out' },
+      { kind: 'furniture', id: 'furn-1' },
     ])
+
+    fireEvent.click(screen.getByText('Fire exit'), { shiftKey: true })
+
+    // Shift in this list means the same as shift in the 3D view — add or take
+    // away — and nothing may end up in the selection twice: the inspector
+    // counts what is in it, so a duplicate had it offering "Delete 2 objects"
+    // over one area, with no way to click the extra copy back out.
+    expect(useEditor.getState().selection).toEqual([{ kind: 'furniture', id: 'furn-1' }])
   })
 
   it('shows a padlock only against the things that carry one', () => {

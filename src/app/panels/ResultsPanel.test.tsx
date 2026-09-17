@@ -152,6 +152,7 @@ const statDelta = (
   return null
 }
 
+/** A run that has just finished over the plan currently in the editor. */
 const finished = (patch: Partial<RunSummary> = {}) =>
   useSimulation.setState({
     phase: 'done',
@@ -159,6 +160,9 @@ const finished = (patch: Partial<RunSummary> = {}) =>
     series: series(),
     totalPeople: 200,
     progress: 1,
+    // `run` keeps the document it was handed, and the panel reads it to tell
+    // whether the plan on screen is still the one these numbers came from.
+    runDocument: useEditor.getState().document,
   })
 
 beforeEach(() => {
@@ -176,6 +180,7 @@ beforeEach(() => {
     totalPeople: 0,
     savedRuns: [],
     comparisonId: null,
+    runDocument: null,
   })
 })
 
@@ -356,13 +361,14 @@ describe('comparing against a saved run', () => {
 })
 
 describe('results and the plan they came from', () => {
-  it('keeps showing the last run after the plan it describes has been changed', () => {
+  it('keeps the run on screen when the plan is edited, and says the plan has moved under it', () => {
     openWith({ walls: [wall], openings: [pair] }, 600)
     finished()
     const { container } = show()
     expect(statValue(container, 'Completed')).toBe('195/200')
     // 1.829 m of doorway at the Green Guide rate over the default 8 minutes.
     expect(screen.getByText('1199')).toBeDefined()
+    expect(screen.queryByText('The plan has changed since this run')).toBeNull()
 
     // Widen the only way out. Nothing about the run on screen was measured
     // through this door any more.
@@ -372,25 +378,29 @@ describe('results and the plan they came from', () => {
         .apply((doc) => updateOpening(doc, 'door-1', { width: 3.658 }), 'Set width'),
     )
 
-    // SUSPECTED BUG: the hand calculation below the run has moved and the run
-    // has not, and nothing says which of the two belongs to the plan on screen.
-    // Results are cleared when a project is opened (`stop()` in
-    // src/state/simulationStore.ts:213) but never when the plan is edited
-    // underneath them, while `CompliancePanel` recomputes from the live plan on
-    // every render — so the panel shows simulated and hand-calculated figures
-    // for two different venues one above the other, which is exactly the
-    // comparison its own preamble invites. I believe an edit to the plan or the
-    // scenario should clear the run or mark it stale; the cost of leaving it is
-    // a planner reading a clearance time for a door they have since widened.
-    expect(screen.getByText('2399')).toBeDefined()
-    expect(screen.queryByText('1199')).toBeNull()
+    // Decided, having been flagged as a bug: an edit does not throw the run
+    // away. The panel is read while the change it argues for is being drawn —
+    // widening this door is what the findings asked for — and a run is minutes
+    // of nav grid and simulation to get back, with no undo for having cleared
+    // it. What is not defensible is saying nothing: the code check below
+    // recomputes from the live plan on every render, so the two halves of the
+    // panel are answering for different venues the moment anything is moved.
+    // The notice is what makes that readable; clearing the run instead would
+    // cost the planner the numbers they are acting on.
+    expect(screen.getByText('The plan has changed since this run')).toBeDefined()
     expect(statValue(container, 'Completed')).toBe('195/200')
     expect(statValue(container, '95% cleared by')).toBe('5 min')
-    expect(screen.queryByText(/out of date|stale|previous plan/i)).toBeNull()
+    expect(screen.getByText('2399')).toBeDefined()
+    expect(screen.queryByText('1199')).toBeNull()
+
+    // And running again over the plan as it now stands settles it: the two sets
+    // of figures describe one venue, so the notice goes.
+    act(() => finished())
+    expect(screen.queryByText('The plan has changed since this run')).toBeNull()
   })
 
-  it('saves a baseline against whatever the plan is now, not the plan that was run', () => {
-    openWith()
+  it('saves a baseline against the venue that was run, not the one being drawn now', () => {
+    const ran = openWith()
     finished()
     show()
 
@@ -399,20 +409,14 @@ describe('results and the plan they came from', () => {
 
     const saved = useSimulation.getState().savedRuns[0]
     expect(saved.summary.completed).toBe(195)
-    // SUSPECTED BUG: `SavedRun.document` is documented as "the document the run
-    // was produced from, so a comparison can explain itself"
-    // (src/state/simulationStore.ts:50), but the panel hands `saveCurrentRun`
-    // the live editor document (src/app/panels/ResultsPanel.tsx:314). The
-    // summary saved here came from a plan with no walls and the document saved
-    // beside it carries one. Nothing reads the field yet, so nothing on screen
-    // is wrong today — that is what makes it worth pinning: the store never
-    // keeps the document it was handed at `run()`, so the plan the run was
-    // actually produced from is already gone by the time anything wants it, and
-    // whatever first uses this field to "explain" a comparison will describe the
-    // wrong venue with no way to tell. I believe `run()` should keep the
-    // document and `saveCurrentRun` should save that one.
-    expect(saved.document.plan.walls).toHaveLength(1)
-    expect(saved.document).toBe(useEditor.getState().document)
+    // A baseline is saved after reading the results, which is to say after the
+    // first change has already been tried. The document beside the numbers is
+    // what a later comparison explains itself with, so it has to be the plan
+    // these 195 journeys were walked through — a wall that went up afterwards
+    // would have the baseline describing a venue nobody ever simulated.
+    expect(saved.document).toBe(ran)
+    expect(saved.document.plan.walls).toHaveLength(0)
+    expect(useEditor.getState().document.plan.walls).toHaveLength(1)
   })
 })
 

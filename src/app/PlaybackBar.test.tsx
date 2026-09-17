@@ -195,27 +195,25 @@ describe('starting and stopping a run', () => {
     expect(sim().runId).toBe(runId)
   })
 
-  it('offers a dead Resume while the navigation grid is still being built', () => {
+  it('offers nothing to press on the primary while the navigation grid is built', () => {
     render(<PlaybackBar />)
     fireEvent.click(screen.getByRole('button', { name: 'Run' }))
     expect(sim().phase).toBe('preparing')
+    const runId = sim().runId
 
-    // SUSPECTED BUG (src/app/PlaybackBar.tsx:44-62). While the phase is
-    // 'preparing' the bar falls into the pause/resume branch, so the primary
-    // button reads "Resume" with a play icon — and `resume()` refuses any phase
-    // that is not 'paused', so pressing it does nothing at all. The
-    // `disabled={busy}` guard that was meant to cover this sits on the Run
-    // button in the *other* branch, which is never rendered while busy, so it
-    // is dead code. What the user should see here is a disabled Run, or a
-    // button that cancels; what they get is a play button that ignores them for
-    // as long as the grid takes.
-    expect(primary()).toHaveProperty('textContent', 'Resume')
+    // The store refuses resume in any phase but 'paused', so a live play button
+    // here would take the press and do nothing for as long as the grid takes —
+    // seconds on a large venue — and read as a product that has hung.
+    expect(primary()).toHaveProperty('disabled', true)
     fireEvent.click(primary())
-    expect(sim().phase).toBe('preparing')
     expect(posted.some((request) => request.type === 'resume')).toBe(false)
+    expect(sim().phase).toBe('preparing')
 
-    // The progress ring is the only thing telling them anything is happening.
+    // The ring says something is happening, and Stop is what cancels it.
     expect(screen.getByLabelText('Preparing')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(sim().phase).toBe('idle')
+    expect(posted.at(-1)).toEqual({ type: 'stop', runId })
   })
 
   it('invites another run once the last one finished', () => {

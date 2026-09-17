@@ -126,8 +126,12 @@ const FRAGMENT_BODY = /* glsl */ `
   diffuseColor.rgb *= vZoneColor;
 `
 
-const toLinearArray = (colors: readonly string[]): Color[] =>
-  colors.map((hex) => new Color(hex).convertSRGBToLinear())
+/**
+ * Palette hexes as the shader reads them. `Color` decodes an sRGB hex into the
+ * linear working space on its own — colour management is on — so converting
+ * again here painted the crowd several stops darker than its own legend.
+ */
+const toLinearArray = (colors: readonly string[]): Color[] => colors.map((hex) => new Color(hex))
 
 export interface CrowdFrameInput {
   agents: Float32Array
@@ -290,7 +294,7 @@ export class CrowdRenderer {
       this.pose[i] = state === 4 ? 1 : 0
       this.skin[i] = ((id * 2654435761) % 1000) / 1000
 
-      this.color.set(this.colorFor(input, base)).convertSRGBToLinear()
+      this.color.set(this.colorFor(input, base))
       this.tint[i * 3] = this.color.r
       this.tint[i * 3 + 1] = this.color.g
       this.tint[i * 3 + 2] = this.color.b

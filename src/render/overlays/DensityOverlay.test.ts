@@ -156,25 +156,21 @@ describe('the density overlay', () => {
     const overlay = new DensityOverlay()
     overlay.setFacility('walkway')
 
-    // SUSPECTED BUG: the same double decode as GroundGrid and the furniture
-    // builder. `Color.set('#1a9850')` already gives linear working values under
-    // r180's colour management, and `convertSRGBToLinear()`
-    // (DensityOverlay.ts:116 and 124-125) decodes again; the shader's
-    // `<colorspace_fragment>` encodes once on the way out, so Fruin's level A
-    // green paints as #035014 — near black — and level F's red as #ad0805. The
-    // heat map is a legend the user reads a number off, and the panel puts the
-    // table's hex straight into CSS, so the paint and the key beside it no
-    // longer name the same colour. Dropping the conversion fixes it.
+    // The map is a legend the user reads a density off, and the panel beside it
+    // puts the table's hex straight into CSS — so the floor has to be painted
+    // the colour the key names. Decoding the hex a second time on the way into
+    // the shader took Fruin's level A green to #035014, near black, and level
+    // F's red to #ad0805.
     expect(LOS_TABLES.walkway[0].color).toBe('#1a9850')
     expect(LOS_TABLES.walkway[5].color).toBe('#d73027')
-    expect(bandHex(overlay, 0)).toBe('035014')
-    expect(bandHex(overlay, 5)).toBe('ad0805')
+    expect(bandHex(overlay, 0)).toBe('1a9850')
+    expect(bandHex(overlay, 5)).toBe('d73027')
 
-    // The safety colours go through the same call (DensityOverlay.ts:124-125),
-    // and they are the ones a steward is looking for.
+    // The safety colours go the same way, and they are the ones a steward is
+    // looking for.
     const warn = materialOf(overlay).uniforms.uWarnColor.value as Vector3
-    expect(new Color(warn.x, warn.y, warn.z).getHexString()).toBe('ce315c')
     expect(CROWD_SAFETY.warnColor).toBe('#e879a2')
+    expect(new Color(warn.x, warn.y, warn.z).getHexString()).toBe('e879a2')
   })
 
   it('fades the whole map without rebuilding it', () => {

@@ -281,29 +281,23 @@ describe('a message the worker has no case for', () => {
     expect(frameTimes(overWallClock(1000)).length).toBe(2)
   })
 
-  it('breaks inside its own error handler when a message carries nothing', () => {
+  it('ignores a payload that is not a request at all', () => {
     deliver(watchedRun())
 
-    // SUSPECTED BUG: `request.type` is read inside the try, so an empty payload
-    // throws there — and the catch then applies `in` to that same payload and
-    // throws a second time, out of the catch and out of `onmessage`. The guard
-    // is written for a request carrying no run id, and the only payload that
-    // can arrive without one is the one `in` cannot be applied to. The store's
-    // typed `send` is the only sender today, so this takes a stray
-    // `postMessage` from elsewhere on the page — but when it comes, the worker
-    // throws at global scope, `worker.onerror` reports it with an empty run id,
-    // and `simulationStore.ts:154` puts a run that was fine into its error
-    // state. Guarding on `typeof request === 'object' && request !== null`
-    // makes the catch the no-op it was meant to be.
-    expect(() => send(undefined as unknown as WorkerRequest)).toThrow(TypeError)
-    expect(() => send(null as unknown as WorkerRequest)).toThrow(TypeError)
-    // A string gets away with it only by accident: it is boxed, so `.type` is
-    // merely undefined and the switch falls through to nothing.
+    // The worker hears every `postMessage` aimed at it, and anything else on
+    // the page can hand it a string or nothing at all. Reading `.type` off one
+    // of those threw inside the try, and the catch threw a second time
+    // applying `in` to the same payload — out of the catch and out of
+    // `onmessage`, so the store heard `worker.onerror` with an empty run id,
+    // read that as the worker itself dying, and put a run that was perfectly
+    // healthy into its error state.
+    expect(deliver(undefined as unknown as WorkerRequest)).toEqual([])
+    expect(deliver(null as unknown as WorkerRequest)).toEqual([])
     expect(deliver('stop' as unknown as WorkerRequest)).toEqual([])
 
-    // Nothing was posted, either: building the error message is what throws,
-    // so the catch never reaches `post` or the `stop()` under it — which is
-    // why the run underneath is still ticking.
+    // Silence rather than an error, for the same reason an unknown request
+    // kind is ignored: an error is what puts the run on screen into the
+    // store's error state, and nothing has happened to it.
     expect(kindsOf(posted)).not.toContain('error')
     expect(frameTimes(overWallClock(1000)).length).toBe(2)
   })
@@ -372,36 +366,33 @@ describe('the playback controls', () => {
     expect(lastMessage(after).type).toBe('done')
   })
 
-  it('plays faster for every extra resume it is sent', () => {
+  it('keeps to one speed however many times it is told to resume', () => {
     deliver(watchedRun('doubled'))
-    const once = frameTimes(overWallClock(1000))
+    const playing = frameTimes(overWallClock(1000))
 
-    // SUSPECTED BUG: `resume` calls `tick` without checking whether the run is
-    // already ticking, and `tick` overwrites `run.timer` with the timer it
-    // schedules. The chain that was already pending is never cleared, so it
-    // goes on firing alongside the new one and the run plays back at twice the
-    // speed it reports — and three times after another, indefinitely. The
-    // store guards it today (`resume` returns unless the phase is `paused`),
-    // so the worker is safe only because of a check in its one caller. A
-    // `!current.running` test in the `resume` case fixes it at the seam it
-    // belongs to.
+    // A resume for a run that never paused used to start a second tick chain
+    // beside the one already pending, and `tick` overwrites `run.timer` with
+    // whatever it schedules, so the older chain could no longer be cancelled:
+    // the crowd walked at twice the speed the playback controls reported, and
+    // three times after another resume. The store cannot send that today — its
+    // own `resume` returns unless the phase is `paused` — but the timer is the
+    // worker's, and the speed a crowd plays back at is too central to rest on
+    // a guard in the one caller.
     send({ type: 'resume', runId: 'doubled' })
-    const twice = frameTimes(overWallClock(1000))
+    const resumed = frameTimes(overWallClock(1000))
     send({ type: 'resume', runId: 'doubled' })
-    const thrice = frameTimes(overWallClock(1000))
+    const resumedAgain = frameTimes(overWallClock(1000))
 
     // At one simulated second per second and a frame every half second, one
-    // chain is two frames a second. The crowd's clock keeps pace with them, so
-    // this is playback speed and not merely a doubled repaint: the second wall
-    // second carries about two simulated seconds and the third about three.
-    expect([once.length, twice.length, thrice.length]).toEqual([2, 4, 6])
-    const reached = [once, twice, thrice].map((frames) => frames[frames.length - 1])
+    // chain is two frames a wall second, and the crowd's clock keeps pace with
+    // them: three wall seconds is three simulated seconds, not six.
+    expect([playing.length, resumed.length, resumedAgain.length]).toEqual([2, 2, 2])
+    const reached = [playing, resumed, resumedAgain].map((frames) => frames[frames.length - 1])
     expect(reached[0]).toBeCloseTo(1.1, 6)
-    expect(reached[1] - reached[0]).toBeGreaterThan(1.8)
-    expect(reached[2] - reached[1]).toBeGreaterThan(2.8)
+    expect(reached[1]).toBeCloseTo(2, 6)
+    expect(reached[2]).toBeCloseTo(3, 6)
 
-    // The damage is bounded: `stop` drops the run, and every chain checks that
-    // before it steps, so one stop still ends all three.
+    // And the run is still the single thing a stop has to end.
     send({ type: 'stop', runId: 'doubled' })
     expect(overWallClock(5000)).toEqual([])
   })
@@ -560,7 +551,7 @@ describe('what a finished run hands back', () => {
     }
   })
 
-  it('sends the final frame twice when a run ends on a frame boundary', () => {
+  it('sends the instant a run ends on once, even when it lands on a frame boundary', () => {
     const plan = hall()
     plan.zones = plan.zones.filter((zone) => zone.kind !== 'exit')
     const messages = deliver({
@@ -569,32 +560,36 @@ describe('what a finished run hands back', () => {
       scenario: { ...crossing(), durationS: 6 },
     })
     const done = lastMessage(messages) as DoneMessage
-    const [penultimate, last] = framesOf(messages).slice(-2)
+    const frames = framesOf(messages)
+    const [penultimate, last] = frames.slice(-2)
 
-    // SUSPECTED BUG: the step that ends the run can also cross a frame
-    // boundary, and then `tick` sends that frame from inside its loop and
-    // sends it again on the way out, because the finishing branch posts a
-    // frame unconditionally. Here the run is cut off at six seconds and the
-    // last two frames are the same instant, with a duplicate sample in every
-    // series behind them. It costs little — a repainted frame, and a sample
-    // the charts draw on top of itself — but anything reading the series as
-    // distinct samples (a rate, an area under the curve) counts that instant
-    // twice, and the fix is to send the closing frame only when the loop did
-    // not already send one at this time.
-    expect(last.time).toBe(penultimate.time)
-    // The same crowd, not a last step that happened to land on the same time:
-    // eight people still inside, in both, at the instant the clock ran out.
-    expect([last.count, last.stats.active]).toEqual([penultimate.count, 8])
-    expect(penultimate.stats.active).toBe(8)
-    const series = done.series.time
-    expect(series[series.length - 1]).toBe(series[series.length - 2])
-    // A run that empties before the clock runs out does not do it, which is
-    // why this has gone unnoticed: the common case ends between boundaries.
-    const early = frameTimes(deliver(wholeRun('early')))
-    expect(early[early.length - 1]).not.toBe(early[early.length - 2])
+    // The step that ends a run can cross a frame boundary as well, and this
+    // one does: cut off at six seconds, on the step that carries the clock
+    // past the last boundary. The closing frame used to go out regardless of
+    // the frame the loop had just sent, so the same instant crossed twice and
+    // every series carried the sample twice — the run reads as one frame
+    // longer than it was, the charts draw its last point on top of itself, and
+    // the series the results panel writes out ends on the same row printed
+    // twice.
+    expect(last.time).toBeCloseTo(6.1, 6)
+    expect(last.time - penultimate.time).toBeCloseTo(1, 6)
+    // Still the instant the clock ran out, with all eight shut in: it is the
+    // repeat that has gone, not the end of the run.
+    expect([last.count, last.stats.active]).toEqual([8, 8])
+    expect(last.progress).toBe(1)
+    // One sample per frame sent, and the charts are plotted against those
+    // times, so the last two are a second apart there too.
+    expect(done.series.time.length).toBe(frames.length)
+    expect(Array.from(done.series.active)).toEqual([0, 8, 8, 8, 8, 8, 8])
+
+    // A run that empties between boundaries still gets its closing frame: the
+    // last thing on screen has to be the floor emptying, not the frame before.
+    const early = framesOf(deliver(wholeRun('early')))
+    expect(early[early.length - 1].time).not.toBe(early[early.length - 2].time)
+    expect(early[early.length - 1].stats.active).toBe(0)
   })
 
-  it('leaves a background comparison missing the end of its own time series', () => {
+  it('draws a background comparison on the same curve the screen was shown', () => {
     const watched = deliver(wholeRun('watched'))
     const watchedDone = lastMessage(watched) as DoneMessage
     const compared = deliver(backgroundRun())
@@ -603,28 +598,24 @@ describe('what a finished run hands back', () => {
     expect(kindsOf(compared)).toEqual(['ready', 'done'])
     expect(comparedDone.summary).toEqual(watchedDone.summary)
 
-    // SUSPECTED BUG: `tick` records a sample from the final frame it sends and
-    // the chunk loop in `batch` does not — it leaves the loop the moment the
-    // simulation is finished and posts `done` without a last sample. So the
-    // two runs agree on every summary figure and disagree about the shape of
-    // the run: the comparison's curve stops at seven people out against a
-    // summary that says eight, so it never reaches the total it is being
-    // compared on. Nothing sends `batch` yet — the store's comparison is
-    // between saved runs — so this costs nothing today and everything the
-    // first time a background run is plotted. A `recordSeries(run,
-    // sim.stats())` before `sendDone` is the same line `tick` already has.
-    const watchedCompleted = watchedDone.series.completed
-    const comparedCompleted = comparedDone.series.completed
-    expect(watchedCompleted[watchedCompleted.length - 1]).toBe(8)
-    expect(watchedDone.summary.completed).toBe(8)
-    expect(comparedCompleted[comparedCompleted.length - 1]).toBe(7)
+    // The whole product of a run nobody watched is its summary and its series,
+    // and the series is only worth anything plotted against the run it is
+    // being compared with — so the two are sampled on one grid: the crowd
+    // before the first step, then every interval, then the instant the run
+    // ended. The chunk loop used to start at the first step and stop at the
+    // last whole interval, which left the two curves a step out of step at one
+    // end, and left the comparison ending on seven people out against its own
+    // summary of eight at the other. Nothing sends `batch` yet — the store
+    // compares saved runs — so it cost nothing until the first comparison was
+    // run off screen, and then it cost the whole shape of the curve.
+    expect(Array.from(comparedDone.series.time)).toEqual(Array.from(watchedDone.series.time))
+    expect(Array.from(comparedDone.series.completed)).toEqual(
+      Array.from(watchedDone.series.completed),
+    )
+    expect(comparedDone.series.time[0]).toBe(0)
+    const completed = comparedDone.series.completed
+    expect(completed[completed.length - 1]).toBe(8)
     expect(comparedDone.summary.completed).toBe(8)
-
-    // The two curves do not line up at the other end either: the watched run
-    // samples the frame it sends before the first step, the background run
-    // only after it.
-    expect(watchedDone.series.time[0]).toBe(0)
-    expect(comparedDone.series.time[0]).toBeCloseTo(0.1, 6)
   })
 
   it('records a background comparison no finer than a quarter of a second', () => {
@@ -639,7 +630,10 @@ describe('what a finished run hands back', () => {
     expect(times.length).toBeGreaterThan(50)
     expect(times.length).toBeLessThan(times[times.length - 1] / 0.2)
     // Samples land on the 0.1 s step grid, so a quarter-second floor spaces
-    // them two or three steps apart and never one.
+    // them two or three steps apart and never one. The instant a run ends on
+    // is sampled whatever the floor says — it is the end of the curve, not a
+    // point on the grid — and this crowd empties on one of the grid's own
+    // instants, so every gap here is a spacing the floor chose.
     expect(Math.min(...gaps)).toBeGreaterThan(0.19)
     expect(Math.max(...gaps)).toBeLessThan(0.31)
   })

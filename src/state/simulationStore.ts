@@ -66,13 +66,20 @@ interface SimulationState {
   totalPeople: number
   savedRuns: SavedRun[]
   comparisonId: string | null
+  /**
+   * The document `run` was handed. Kept because the results outlive the plan
+   * they were measured on — the panel needs it to say the plan has moved since,
+   * and a baseline has to be saved against the venue that was simulated rather
+   * than whatever is on screen when the button is pressed.
+   */
+  runDocument: CrowdDocument | null
 
   run: (doc: CrowdDocument, label?: string) => void
   pause: () => void
   resume: () => void
   stop: () => void
   setSpeed: (speed: number) => void
-  saveCurrentRun: (label: string, doc: CrowdDocument) => void
+  saveCurrentRun: (label: string) => void
   removeRun: (id: string) => void
   setComparison: (id: string | null) => void
   clearError: () => void
@@ -171,6 +178,7 @@ export const useSimulation = create<SimulationState>()((set, get) => {
     totalPeople: 0,
     savedRuns: [],
     comparisonId: null,
+    runDocument: null,
 
     run: (doc, label = 'Run') => {
       ensureWorker(handle)
@@ -181,6 +189,7 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         runLabel: label,
         progress: 0,
         frame: null,
+        runDocument: doc,
         // The heat map goes with them, for the same reason and by the same
         // route as in `stop` below. Building the nav grid is the slow part of a
         // run, so "preparing" can last seconds — and the overlay is sized and
@@ -238,6 +247,7 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         series: null,
         warnings: [],
         totalPeople: 0,
+        runDocument: null,
       })
     },
 
@@ -247,16 +257,19 @@ export const useSimulation = create<SimulationState>()((set, get) => {
       if (runId) send({ type: 'speed', runId, speed })
     },
 
-    saveCurrentRun: (label, doc) => {
-      const { summary, series } = get()
-      if (!summary || !series) return
+    saveCurrentRun: (label) => {
+      const { summary, series, runDocument } = get()
+      if (!summary || !series || !runDocument) return
       const saved: SavedRun = {
         id: `saved-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
         label,
         at: new Date().toISOString(),
         summary,
         series,
-        document: doc,
+        // The plan that produced these numbers, not the one being edited: a
+        // baseline is saved after looking at the results, by which time the
+        // user may already be trying the change they are about to compare.
+        document: runDocument,
       }
       set((state) => {
         const savedRuns = [saved, ...state.savedRuns].slice(0, 12)

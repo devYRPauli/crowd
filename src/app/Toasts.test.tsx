@@ -12,6 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { StrictMode } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { Toasts } from './Toasts'
 import { useEditor, type Toast } from '../state/editorStore'
@@ -110,24 +111,49 @@ describe('toasts', () => {
     expect(editor().toasts.map((toast) => toast.tone)).toEqual(['warn'])
   })
 
-  it('restarts the countdown on every message already on screen', () => {
+  it('counts each message down from the moment it appeared', () => {
     render(<Toasts />)
     say('Project saved.', 'success')
     tick(4000)
 
+    // The save was 200 ms from clearing when the warning landed beside it.
     say('Two doorways overlap on the north wall.', 'warn')
-    tick(400)
+    tick(200)
 
-    // SUSPECTED BUG (src/app/Toasts.tsx:17-22). The effect depends on the whole
-    // `toasts` array, so every new message tears down and re-creates the timers
-    // for the messages already showing. "Project saved." was 200 ms from
-    // clearing; a warning arriving beside it gives it a fresh 4.2 seconds, and
-    // a run that emits warnings steadily can hold an unrelated success on
-    // screen indefinitely. The timer belongs to the toast — started once when
-    // it appears — not to the array.
+    // A countdown that restarted whenever anything else arrived would never
+    // finish: a run that reports its findings one after another would leave
+    // "Project saved." sitting under them for as long as the findings keep
+    // coming, and the user reads a stale success beside a fresh warning.
+    expect(screen.queryByText('Project saved.')).toBeNull()
+    expect(screen.queryByText('Two doorways overlap on the north wall.')).not.toBeNull()
+
+    // A second message of its own starts its own countdown, from now.
+    say('Copied 2 objects.', 'info')
+    tick(4199)
+    expect(screen.queryByText('Copied 2 objects.')).not.toBeNull()
+    tick(1)
+    expect(editor().toasts.map((toast) => toast.message)).toEqual([
+      'Two doorways overlap on the north wall.',
+    ])
+  })
+
+  it('clears a message that was already waiting when the app mounted', () => {
+    say('Project saved.', 'success')
+
+    // The app's root is StrictMode, which creates every effect, tears it down
+    // and creates it again before the first paint. The countdown outlives that
+    // teardown, so a message the editor said something about while the panel
+    // was still mounting still goes away by itself — otherwise it would sit
+    // there for the rest of the session in the only build anybody runs.
+    render(
+      <StrictMode>
+        <Toasts />
+      </StrictMode>,
+    )
+
+    tick(4199)
     expect(screen.queryByText('Project saved.')).not.toBeNull()
-
-    tick(3800)
+    tick(1)
     expect(screen.queryByText('Project saved.')).toBeNull()
   })
 })

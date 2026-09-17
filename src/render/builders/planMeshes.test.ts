@@ -172,23 +172,38 @@ describe('wall geometry', () => {
     expect(pane.min.x).toBeCloseTo(2.4 + 0.02, 6)
     expect(pane.max.x).toBeCloseTo(3.6 - 0.02, 6)
 
-    // A window is not a way through, so the wall below the sill stays solid.
+    // A window is a hole in the wall, not a picture hung on it. The band the
+    // glass sits in is cut out of the masonry — left in, the pane is buried
+    // inside a full-height slab and a window reads as blank wall.
+    for (const y of [1.0, 1.5, 2.0]) expect(solidAt(solid!, 3, y)).toBe(false)
+    // A window is not a way through, so the wall below the sill and above the
+    // head stays solid.
     expect(solidAt(solid!, 3, 0.4)).toBe(true)
+    expect(solidAt(solid!, 3, 2.6)).toBe(true)
 
-    // SUSPECTED BUG: the glazed band is never cut out of the wall. `solidSpans`
-    // only opens up walkable openings (planGeometry.ts:93-96, via
-    // `isWalkableOpening` at :27-28), so the span across a window is built at
-    // full height (planMeshes.ts:64-67) and the sill and head slabs
-    // (planMeshes.ts:78-83) are laid over solid wall. The pane is buried inside
-    // that span: a window renders as blank wall, and the plan carries three
-    // slabs of geometry nobody can see. The fix is to split the spans around
-    // every opening, not just the walkable ones, and let the sill and head fill
-    // the rest of the reveal.
-    const glazedBand = [1.0, 1.5, 2.0]
-    for (const y of glazedBand) expect(solidAt(solid!, 3, y)).toBe(true)
-    // One full-height span plus the sill and head laid over it, instead of the
-    // two spans and two reveal slabs a cut-out window would give.
-    expect(slabCount(solid!)).toBe(3)
+    // Two stretches of masonry either side, plus the sill and the head.
+    expect(slabCount(solid!)).toBe(4)
+    const fullHeight = slabs(solid!)
+      .filter((slab) => slab.min.y < 1e-6 && slab.max.y > 3 - 1e-6)
+      .sort((a, b) => a.min.x - b.min.x)
+    expect(fullHeight).toHaveLength(2)
+    expect(fullHeight[0].max.x).toBeCloseTo(2.4, 6)
+    expect(fullHeight[1].min.x).toBeCloseTo(3.6, 6)
+
+    // The reveal is exactly the opening, so the sill and the head line up with
+    // the jambs rather than overhanging them.
+    const [sill, head] = slabs(solid!)
+      .filter((slab) => slab.min.x > 2 && slab.max.x < 4)
+      .sort((a, b) => a.min.y - b.min.y)
+    expect(sill.min.y).toBeCloseTo(0, 6)
+    expect(sill.max.y).toBeCloseTo(0.9, 6)
+    expect(head.min.y).toBeCloseTo(2.1, 6)
+    expect(head.max.y).toBeCloseTo(3, 6)
+    for (const slab of [sill, head]) {
+      expect(slab.min.x).toBeCloseTo(2.4, 6)
+      expect(slab.max.x).toBeCloseTo(3.6, 6)
+    }
+
     expect(bounds(solid!).max.x).toBeCloseTo(6, 6)
     expect(bounds(solid!).min.x).toBeCloseTo(0, 6)
   })
@@ -420,22 +435,17 @@ describe('floor geometry', () => {
     expect(bounds(geometry!).max.x).toBeCloseTo(2, 6)
   })
 
-  it('faces the floor away from the camera that looks at it', () => {
-    // SUSPECTED BUG: `polygonGeometry` turns the plan into the ground plane with
-    // rotateX(+PI/2) (planMeshes.ts:164), which maps plan y to world z but
-    // leaves the shape's +Z face pointing down. Both the normals and the
-    // triangle winding come out downward, so the floor is back-facing from
-    // above — and `MaterialLibrary.floor()` is a front-side material, which is
-    // what `PlanRenderer.rebuildFloors` hands it. The rest of the renderer uses
-    // rotateX(-PI/2) for exactly this job (GroundGrid.ts:81,
-    // DensityOverlay.ts:100). It costs the room floors: they are culled from the
-    // only viewpoint the editor has, and lit from underneath if they are not.
-    // The fix is to face the plane up and mirror the shape, not to rotate the
-    // other way, which would flip every room about the x axis.
+  it('faces the floor up at the camera that looks down on it', () => {
+    // `MaterialLibrary.floor()` is a front-side material and the editor only
+    // ever looks down, so a floor built face-down is culled outright: the rooms
+    // disappear and the ground grid shows through where they were.
     const geometry = polygonGeometry(square(0, 0, 4, 2))
     const normal = geometry.getAttribute('normal')
-    expect(normal.getY(0)).toBeCloseTo(-1, 6)
+    expect(normal.getY(0)).toBeCloseTo(1, 6)
 
+    // Culling goes by winding, not by the normal attribute, so the two have to
+    // agree: a plane rotated up and then mirrored into place is culled just the
+    // same, and lit as though the sun were under the building.
     const index = geometry.index!
     const corner = (i: number) =>
       new Vector3().fromBufferAttribute(geometry.getAttribute('position'), index.getX(i))
@@ -443,6 +453,6 @@ describe('floor geometry', () => {
       .subVectors(corner(1), corner(0))
       .cross(new Vector3().subVectors(corner(2), corner(0)))
       .normalize()
-    expect(facing.y).toBeCloseTo(-1, 6)
+    expect(facing.y).toBeCloseTo(1, 6)
   })
 })

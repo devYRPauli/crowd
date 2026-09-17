@@ -127,12 +127,14 @@ const tick = (run: RunState): void => {
   const started = Date.now()
   const target = Number.isFinite(run.speed) ? run.speed * (budgetMs / 1000) : Infinity
   let advanced = 0
+  let framedAt = Number.NaN
 
   while (!run.sim.isFinished) {
     run.sim.step(step)
     advanced += step
     if (run.sim.currentTime >= run.nextFrameAt) {
       sendFrame(run)
+      framedAt = run.sim.currentTime
       run.nextFrameAt += run.frameIntervalS
     }
     if (advanced >= target) break
@@ -140,7 +142,12 @@ const tick = (run: RunState): void => {
   }
 
   if (run.sim.isFinished) {
-    sendFrame(run)
+    // The step that ends a run can land on a frame boundary too, and the loop
+    // has already sent that instant when it does. Posting the closing frame
+    // regardless repainted it and pushed a second copy of the same sample into
+    // every series, so the run read a frame longer than it was and the series
+    // written out with the results ended on the same row printed twice.
+    if (framedAt !== run.sim.currentTime) sendFrame(run)
     sendDone(run)
     run.running = false
     return
@@ -201,18 +208,28 @@ const batch = (request: BatchRequest): void => {
     sim.summary().warnings,
     request.scenario.populations.reduce((s, p) => s + p.count, 0),
   )
+  // A comparison is plotted against a watched run's curve, so it is sampled on
+  // the same grid: the state before the first step, then every interval, then
+  // the instant the run ended. Starting at the first step instead left the two
+  // curves offset, and stopping at the last whole interval left the background
+  // curve short of the total its own summary reported.
+  recordSeries(run, sim.stats())
+  run.nextFrameAt = run.frameIntervalS
 
   const chunk = () => {
     if (current !== run || !run.running) return
     const started = Date.now()
+    let sampledAt = Number.NaN
     while (!sim.isFinished && Date.now() - started < 30) {
       sim.step(sim.options.timeStep)
       if (sim.currentTime >= run.nextFrameAt) {
         recordSeries(run, sim.stats())
+        sampledAt = sim.currentTime
         run.nextFrameAt += run.frameIntervalS
       }
     }
     if (sim.isFinished) {
+      if (sampledAt !== sim.currentTime) recordSeries(run, sim.stats())
       sendDone(run)
       run.running = false
       return
@@ -235,6 +252,13 @@ const stop = (): void => {
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data
+  // The worker hears every `postMessage` aimed at it, and not all of them are
+  // requests: anything else on the page can send it a string or nothing at all.
+  // Reading `.type` off one of those threw inside the try, and the catch threw
+  // again applying `in` to the same value — out of `onmessage` altogether, so
+  // the store saw `worker.onerror` with no run id and put a perfectly healthy
+  // run into its error state.
+  if (typeof request !== 'object' || request === null) return
   try {
     switch (request.type) {
       case 'start':
@@ -250,7 +274,16 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
         }
         break
       case 'resume':
-        if (current && current.id === request.runId && !current.sim.isFinished) {
+        // `!running` as well as the run id: `tick` overwrites `run.timer` with
+        // the timer it schedules, so a resume sent to a run that is already
+        // playing starts a second chain that nothing can ever clear, and the
+        // crowd then walks at twice the speed the playback controls report.
+        if (
+          current &&
+          current.id === request.runId &&
+          !current.running &&
+          !current.sim.isFinished
+        ) {
           current.running = true
           tick(current)
         }

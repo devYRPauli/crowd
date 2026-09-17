@@ -283,8 +283,18 @@ export const ResultsPanel = ({
   const saveCurrentRun = useSimulation((state) => state.saveCurrentRun)
   const phase = useSimulation((state) => state.phase)
   const totalPeople = useSimulation((state) => state.totalPeople)
+  const runDocument = useSimulation((state) => state.runDocument)
 
   const baseline = savedRuns.find((run) => run.id === comparisonId)
+
+  // A run is kept across an edit on purpose — the whole point of the panel is
+  // to read it while trying the change it suggests — but the code check below
+  // recomputes from the live plan on every render, so the two halves of the
+  // panel can be describing different venues. Identity is enough to notice:
+  // every edit goes through a mutation that returns a new plan or scenario.
+  const stale =
+    runDocument !== null &&
+    (document.plan !== runDocument.plan || document.scenario !== runDocument.scenario)
 
   const findings = useMemo(
     () => (summary && series ? deriveFindings({ summary, series, totalPeople }) : []),
@@ -311,7 +321,7 @@ export const ResultsPanel = ({
         {summary ? (
           <button
             className="btn is-ghost"
-            onClick={() => saveCurrentRun(document.name || 'Run', document)}
+            onClick={() => saveCurrentRun(document.name || 'Run')}
             title="Keep this run to compare against"
           >
             Save as baseline
@@ -327,6 +337,21 @@ export const ResultsPanel = ({
           </div>
         ) : (
           <>
+            {stale ? (
+              <div className="section">
+                <div className="finding is-medium">
+                  <div className="body">
+                    <div className="headline">The plan has changed since this run</div>
+                    <div className="detail">
+                      These figures were measured on the plan as it stood when Run was pressed. The
+                      code check below is calculated from the plan as it is now, so the two answer
+                      for different venues until this is run again.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {findings.length > 0 ? (
               <div className="section">
                 <div className="section-title">What happened</div>

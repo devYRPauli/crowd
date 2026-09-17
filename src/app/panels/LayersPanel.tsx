@@ -21,6 +21,7 @@ export const LayersPanel = () => {
   const setView = useEditor((state) => state.setView)
   const selection = useEditor((state) => state.selection)
   const setSelection = useEditor((state) => state.setSelection)
+  const toggleSelection = useEditor((state) => state.toggleSelection)
   const apply = useEditor((state) => state.apply)
   const units = document.settings.units
 
@@ -42,7 +43,12 @@ export const LayersPanel = () => {
   }) => (
     <div
       className={`list-row${isSelected(refObject) ? ' is-active' : ''}`}
-      onClick={(event) => setSelection(event.shiftKey ? [...selection, refObject] : [refObject])}
+      onClick={(event) =>
+        // Shift adds and removes, the way it does on a click in the 3D view.
+        // Appending unconditionally stored the same object twice, and the
+        // inspector then offered to delete two things when one was selected.
+        event.shiftKey ? toggleSelection(refObject) : setSelection([refObject])
+      }
     >
       {color ? <span className="swatch" style={{ background: color }} /> : null}
       <span className="label">{label}</span>

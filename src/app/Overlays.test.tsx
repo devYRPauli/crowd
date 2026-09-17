@@ -279,17 +279,27 @@ describe('the shortcut sheet', () => {
     expect(keysFor(navigate, 'Plan / 3D view')).toEqual([['Tab']])
     expect(keysFor(navigate, 'Density heat map')).toEqual([['H']])
 
+    expect(keysFor(navigate, 'Orbit')).toEqual([['right-drag']])
+  })
+
+  it('prints both ways of panning, as two rows React can tell apart', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const { container } = render(<ShortcutSheet onClose={() => undefined} />)
+    // Put the console back before anything can throw, or a failure here would
+    // swallow React's complaints for every test after it in this file.
+    const complaints = logged.mock.calls.map((args) => String(args[0]))
+    logged.mockRestore()
+
     // The left mouse button belongs to the active tool, always, so the two ways
     // of panning the sheet offers are the middle button and Space-drag — never
     // a bare left drag. Both rows have to be printed, not one.
-    //
-    // SUSPECTED BUG (src/app/Overlays.tsx:117). The rows are keyed on their
-    // label, and these two share one, so React logs "Encountered two children
-    // with the same key, `Pan`" and warns that duplicates may be omitted. They
-    // both render today; the key should be the group and the keys, not the
-    // label, before a React version makes good on the warning.
-    expect(keysFor(navigate, 'Orbit')).toEqual([['right-drag']])
+    const navigate = rowsOf(container, 'Navigate')
     expect(keysFor(navigate, 'Pan')).toEqual([['middle-drag'], ['Space', 'drag']])
+
+    // They share a label, so a row keyed on its label alone is a duplicate key
+    // among siblings: React is free to drop one of the two, and the row it
+    // dropped would be the only place Space-drag is written down.
+    expect(complaints.filter((text) => text.includes('same key'))).toEqual([])
   })
 
   it('promises nothing about editing that the keyboard does not do', () => {

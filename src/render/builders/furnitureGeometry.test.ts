@@ -53,22 +53,17 @@ describe('building a primitive list', () => {
     for (let i = 0; i < color.count; i++)
       expect(vertexHex(geometry, i)).toBe(vertexHex(geometry, 0))
 
-    // SUSPECTED BUG: three's colour management is on by default in r180, so
-    // `Color.set('#b08356')` already decodes to the linear working space. The
-    // extra `convertSRGBToLinear()` (furnitureGeometry.ts:77) decodes a second
-    // time, and the vertex colour reaches the shader as #6f3a18 — a dark brown
-    // where the catalog asked for tan. Everything drawn from the role table is
-    // affected, and the same double decode is in CrowdRenderer.ts:130,293,
-    // DensityOverlay.ts:116,124-125 and GroundGrid.ts:71-73,93-95, while
-    // `MaterialLibrary` (theme.ts) decodes once and is right. The fix is to drop
-    // the `convertSRGBToLinear()` calls, not to add one in the theme.
+    // The vertex colour is the colour the catalog named. Three decodes the hex
+    // into the working space once, on `set`, and the shader encodes once on the
+    // way out; a second decode here drew every piece of furniture in the room
+    // several stops dark, tan wood arriving as #6f3a18.
     expect(roleColor('wood')).toBe('#b08356')
-    expect(vertexHex(geometry, 0)).toBe('6f3a18')
-    expect(new Color(roleColor('wood')).convertSRGBToLinear().getHexString()).toBe('6f3a18')
+    expect(vertexHex(geometry, 0)).toBe('b08356')
   })
 
   it('replaces only the role the catalog marks as tintable', () => {
-    // Pure red survives both decodes unchanged, so this measures the tint alone.
+    // Pure red is the same in either colour space, so this measures which
+    // primitive got the tint rather than what was done to the colour.
     const geometry = buildPrimGeometry(
       [box({ color: 'fabric', y: 1 }), box({ color: 'wood', y: -1 })],
       '#ff0000',
