@@ -405,4 +405,41 @@ describe('autosave', () => {
     expect(vi.mocked(rememberLastProject)).toHaveBeenCalledWith(editor().document.id)
     expect(editor().dirty).toBe(false)
   })
+
+  it('says so when the browser will not take the save', async () => {
+    // This used to be swallowed whole. A browser that had stopped accepting
+    // writes — a full quota, a blocked database — looked exactly like one that
+    // was saving, and because the effect only re-runs when the document changes
+    // it would not try again until the next edit either. The user had no reason
+    // to distrust it and so no reason to export.
+    vi.useFakeTimers()
+    vi.mocked(saveProject).mockRejectedValue(new Error('QuotaExceededError'))
+    render(<App />)
+    await act(async () => undefined)
+
+    act(() => editor().apply((doc) => ({ ...doc, name: 'Riverside Hall' }), 'Rename project'))
+    act(() => vi.advanceTimersByTime(2000))
+    await act(async () => undefined)
+
+    const shouted = editor().toasts.filter((toast) => toast.tone === 'error')
+    expect(shouted).toHaveLength(1)
+    expect(shouted[0].message).toMatch(/could not be saved/i)
+    // And it still reads as unsaved, because it is.
+    expect(editor().dirty).toBe(true)
+  })
+
+  it('does not repeat itself every two seconds while the failure lasts', () => {
+    // A toast that comes back until the problem is fixed is a toast people
+    // learn to dismiss without reading.
+    vi.useFakeTimers()
+    vi.mocked(saveProject).mockRejectedValue(new Error('QuotaExceededError'))
+    render(<App />)
+
+    for (const name of ['One', 'Two', 'Three']) {
+      act(() => editor().apply((doc) => ({ ...doc, name }), 'Rename project'))
+      act(() => vi.advanceTimersByTime(2000))
+    }
+
+    expect(editor().toasts.filter((toast) => toast.tone === 'error').length).toBeLessThanOrEqual(1)
+  })
 })

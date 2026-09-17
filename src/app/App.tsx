@@ -196,7 +196,21 @@ export const App = () => {
     }
   }, [replaceDocument])
 
-  // Autosave, quietly, a couple of seconds after the last edit.
+  /**
+   * Autosave, quietly, a couple of seconds after the last edit.
+   *
+   * Quietly while it works, and audibly when it does not. This used to swallow
+   * the failure whole, and because the effect only re-runs when the document
+   * changes it would not try again until the next edit either — so a browser
+   * that had stopped accepting writes, through a full quota or a blocked
+   * database, went on looking exactly like one that was saving. The "Unsaved"
+   * badge stayed up, which is something, but nothing said why, and a user with
+   * no reason to distrust it had no reason to export.
+   *
+   * It is said once per spell of failure rather than every two seconds, because
+   * a toast that repeats until it is fixed is a toast people learn to dismiss.
+   */
+  const autosaveFailed = useRef(false)
   useEffect(() => {
     if (!dirty) return
     const timer = setTimeout(() => {
@@ -204,8 +218,18 @@ export const App = () => {
         .then(() => {
           rememberLastProject(document.id)
           markSaved()
+          autosaveFailed.current = false
         })
-        .catch(() => undefined)
+        .catch(() => {
+          if (autosaveFailed.current) return
+          autosaveFailed.current = true
+          useEditor
+            .getState()
+            .toast(
+              'This venue could not be saved in your browser. Download a copy to be safe.',
+              'error',
+            )
+        })
     }, 2000)
     return () => clearTimeout(timer)
   }, [document, dirty, markSaved])
