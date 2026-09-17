@@ -171,36 +171,39 @@ wall, with the floor laid out five different ways.
 
 | layout | items | floor left | clearance | mean journey | % of time at LOS E/F | µs/person/step |
 | --- | --- | --- | --- | --- | --- | --- |
-| empty | 0 | 589.6 m² | 109.1 s ±5.7 | 53.3 s ±2.7 | 92.6 ±0.2 | 15.3 |
-| standing reception | 8 | 586.4 m² | 110.1 s ±5.3 | 53.2 s ±2.6 | 92.6 ±0.3 | 19.4 |
-| classroom | 350 | 511.4 m² | 119.7 s ±4.7 | 60.9 s ±1.4 | 92.9 ±0.6 | 22.9 |
-| banquet rounds | 360 | 474.2 m² | 116.0 s ±7.3 | 56.7 s ±1.7 | 94.7 ±0.3 | 34.1 |
-| theatre | 28 | 589.6 m² | 109.1 s ±5.7 | 53.3 s ±2.7 | 92.6 ±0.2 | 15.4 |
+| empty | 0 | 590 m² | 109.1 s ±5.7 | 53.3 s ±2.7 | 92.6 ±0.2 | 15.5 |
+| standing reception | 8 | 586 m² | 110.1 s ±5.3 | 53.2 s ±2.6 | 92.6 ±0.3 | 19.3 |
+| classroom | 350 | 511 m² | 126.6 s ±1.6 | 62.1 s ±0.6 | 92.7 ±0.5 | 21.5 |
+| banquet rounds | 360 | 474 m² | 116.0 s ±7.3 | 56.7 s ±1.7 | 94.7 ±0.3 | 33.3 |
+| theatre | 28 | 590 m² | 109.1 s ±5.7 | 53.3 s ±2.7 | 92.6 ±0.2 | 15.3 |
 
 **Furniture costs much less than the floor it takes away.** The banquet layout
-removes 19% of the floor and adds 6% to the clearance time; the classroom removes
-13% and adds 10%. For this hall the exits dominate so completely that what is on
-the floor barely matters — which is itself the finding, and the reason to be
-suspicious of a plan that has been optimised by moving tables around.
+removes 20% of the floor and adds 6% to the clearance time; the classroom removes
+13% and adds 16%. For this hall the exits dominate so completely that what is on
+the floor matters far less than the 43% swing between exit arrangements in E1 —
+which is itself the finding, and the reason to be suspicious of a plan that has
+been optimised by moving tables around.
 
-**The two furnished layouts invert.** Banquet rounds block *more* floor than the
-classroom (474.2 m² left against 511.4 m²) and yet clear *faster* (116.0 s
-against 119.7 s), and the gap is about the size of the seed spread so it is
-marginal — but the direction is worth understanding. Round tables leave diagonal
+**The two furnished layouts invert, and the inversion is real.** Banquet rounds
+block *more* floor than the classroom — 474 m² left against 511 — and yet clear
+*faster*, 116.0 s against 126.6 s. The 10.6-second gap is larger than either
+seed spread, so this is a finding rather than noise. Round tables leave diagonal
 routes between them; rectangular ranks in rows create corridors that people have
-to follow to their ends. The classroom's mean journey is 60.9 s against the
-banquet's 56.7 s, which says the same thing: people walk further in the
-classroom, not slower.
+to follow to their ends. The mean journeys say the same thing from the other
+side — 62.1 s in the classroom against 56.7 s at the banquet — so people are
+walking further, not slower.
+
+The practical reading is that **how furniture is shaped matters more than how
+much of the floor it covers**, which is the opposite of what an area calculation
+would tell you.
 
 **Theatre is identical to empty in every column**, because seat rows are
 deliberately not navigation obstacles. See the caveat under "What the study found
 about the tool itself" below — for a theatre this is a large simplification.
 
 **Furniture is what costs compute, not people.** Per-person step cost more than
-doubles from the empty room to the banquet layout, 15.3 to 34.1 µs, on the same
-crowd. Every item is an obstacle the avoidance layer tests against. These figures
-were taken with other work on the machine and so are high in absolute terms; the
-ratio between rows is the part to trust.
+doubles from the empty room to the banquet layout, 15.5 to 33.3 µs, on the same
+crowd. Every item is an obstacle the avoidance layer tests against.
 
 ---
 
@@ -379,15 +382,15 @@ this is the cost of the physics alone.
 
 | venue | asked | simulated | ms/step | µs/person/step | × real time |
 | --- | --- | --- | --- | --- | --- |
-| coffee bar | 50 | 50 | 2.15 | 42.9 | 47 |
-| conference | 200 | 200 | 4.16 | 20.8 | 24 |
-| conference | 500 | 222 | 3.98 | 18.0 | 25 |
-| concourse | 500 | 359 | 7.18 | 20.0 | 14 |
-| concourse | 1000 | 359 | 6.81 | 19.0 | 15 |
-| banquet | 1000 | 258 | 5.85 | 22.7 | 17 |
+| coffee bar | 50 | 50 | 2.20 | 44.0 | 45 |
+| conference | 200 | 200 | 4.03 | 20.2 | 25 |
+| conference | 500 | 222 | 3.95 | 17.8 | 25 |
+| concourse | 500 | 359 | 6.83 | 19.0 | 15 |
+| concourse | 1000 | 359 | 6.62 | 18.4 | 15 |
+| banquet | 1000 | 258 | 5.73 | 22.2 | 17 |
 
-**Cost per person is flat to falling as the crowd grows** — 42.9 µs at fifty
-people, 18–23 µs from two hundred up. The fixed work in a step, the flow fields
+**Cost per person is flat to falling as the crowd grows** — 44.0 µs at fifty
+people, 18–22 µs from two hundred up. The fixed work in a step, the flow fields
 and the grid and the density pass, is amortised over more people. This is the
 property that matters: an all-pairs avoidance would show the opposite, and by
 five hundred people it would be unusable.
@@ -397,7 +400,7 @@ simulates 359, because that is what its arrival doors and itineraries deliver
 inside the run. The µs/person figure is against the number actually simulated.
 
 **Real-time factor is the honest weak spot.** Playback offers speeds up to × 60,
-and these venues run at × 14 to × 47 on this machine, so the fastest setting does
+and these venues run at × 15 to × 45 on this machine, so the fastest setting does
 not keep up for the larger ones — it runs as fast as it can and the clock stretches.
 On a normal laptop core rather than a shared cloud one, the numbers are better,
 but × 60 with a thousand people is not something this engine does today.
