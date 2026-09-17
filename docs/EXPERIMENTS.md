@@ -410,15 +410,15 @@ this is the cost of the physics alone.
 
 | venue | asked | simulated | ms/step | µs/person/step | × real time |
 | --- | --- | --- | --- | --- | --- |
-| coffee bar | 50 | 50 | 2.20 | 44.0 | 45 |
-| conference | 200 | 200 | 4.03 | 20.2 | 25 |
-| conference | 500 | 222 | 3.95 | 17.8 | 25 |
-| concourse | 500 | 359 | 6.83 | 19.0 | 15 |
-| concourse | 1000 | 359 | 6.62 | 18.4 | 15 |
-| banquet | 1000 | 258 | 5.73 | 22.2 | 17 |
+| coffee bar | 50 | 50 | 1.91 | 38.1 | 52 |
+| conference | 200 | 200 | 3.46 | 17.3 | 29 |
+| conference | 500 | 213 | 3.27 | 15.4 | 31 |
+| concourse | 500 | 359 | 5.83 | 16.2 | 17 |
+| concourse | 1000 | 359 | 5.72 | 15.9 | 17 |
+| banquet | 1000 | 245 | 4.95 | 20.2 | 20 |
 
-**Cost per person is flat to falling as the crowd grows** — 44.0 µs at fifty
-people, 18–22 µs from two hundred up. The fixed work in a step, the flow fields
+**Cost per person is flat to falling as the crowd grows** — 38.1 µs at fifty
+people, 15–20 µs from two hundred up. The fixed work in a step, the flow fields
 and the grid and the density pass, is amortised over more people. This is the
 property that matters: an all-pairs avoidance would show the opposite, and by
 five hundred people it would be unusable.
@@ -428,7 +428,7 @@ simulates 359, because that is what its arrival doors and itineraries deliver
 inside the run. The µs/person figure is against the number actually simulated.
 
 **Real-time factor is the honest weak spot.** Playback offers speeds up to × 60,
-and these venues run at × 15 to × 45 on this machine, so the fastest setting does
+and these venues run at × 17 to × 52 on this machine, so the fastest setting does
 not keep up for the larger ones — it runs as fast as it can and the clock stretches.
 On a normal laptop core rather than a shared cloud one, the numbers are better,
 but × 60 with a thousand people is not something this engine does today.
