@@ -3,6 +3,24 @@
   "version": "1.0.0",
   "private": true,
   "description": "CROWD — Constraint-aware Rehearsal and Optimisation of Walking Dynamics. Design a space in 3D, then rehearse how people move through it.",
+  "keywords": [
+    "crowd-simulation",
+    "pedestrian-dynamics",
+    "egress",
+    "evacuation",
+    "floor-plan",
+    "orca",
+    "fast-marching",
+    "threejs",
+    "react",
+    "typescript"
+  ],
+  "homepage": "https://github.com/devYRPauli/crowd#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devYRPauli/crowd.git"
+  },
+  "bugs": "https://github.com/devYRPauli/crowd/issues",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -16,8 +34,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --max-warnings 0",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "check": "npm run typecheck && npm run lint && npm run test",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\"",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
     "smoke": "vite build && vite preview --port 4173 --host 127.0.0.1 & sleep 4 && node scripts/smoke.mjs",
     "bench": "vite-node scripts/benchmark.mjs"
   },

@@ -40,7 +40,7 @@ npm run dev          # http://localhost:5173
 ```sh
 npm run build        # typecheck + production bundle into dist/
 npm run preview      # serve the build
-npm run check        # typecheck, lint and unit tests
+npm run check        # typecheck, lint, format check and unit tests
 npm run smoke        # build, serve, and drive the real app in a real browser
 ```
 

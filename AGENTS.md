@@ -105,6 +105,6 @@ somewhere else.
 
 ## Working on it
 
-- `npm run check` before committing: typecheck, lint, tests.
+- `npm run check` before committing: typecheck, lint, formatting, tests.
 - `npm run smoke` before claiming the app works. A unit suite cannot tell you
   that WebGL initialised, that the worker started or that a shader compiled.
