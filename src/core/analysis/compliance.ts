@@ -13,7 +13,8 @@
  */
 
 import type { Plan } from '../model/types'
-import { isWalkableOpening } from '../model/planGeometry'
+import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
+import { pointInPolygon, polygonCentroid } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
 
 const SQFT_PER_SQM = 10.7639
@@ -107,11 +108,22 @@ export const computeCompliance = ({
   const calculatedOccupantLoad = Math.ceil(floorAreaSqft / factor.sqft)
   const designOccupantLoad = Math.max(calculatedOccupantLoad, Math.round(plannedAttendance))
 
-  // Exits: openings at floor level that reach the outside are counted through
-  // the exit zones the user drew, because only they say where "out" is.
+  // Exits are what the engine sends people to: exit zones, and walkable doors
+  // marked as a way out. Counting zones alone reported every template, whose
+  // exits are all marked doors, as having none. A zone drawn over a marked door
+  // is still one exit, so the door is not counted again.
   const exitZones = plan.zones.filter((zone) => zone.kind === 'exit')
+  const wallsById = new Map(plan.walls.map((wall) => [wall.id, wall]))
+  const exitDoors = plan.openings.filter((opening) => {
+    if (!isWalkableOpening(opening)) return false
+    if (opening.use !== 'exit' && opening.use !== 'both') return false
+    const wall = wallsById.get(opening.wallId)
+    if (!wall) return false
+    const centre = polygonCentroid(openingThreshold(wall, opening))
+    return !exitZones.some((zone) => pointInPolygon(centre, zone.polygon))
+  })
   const doorWidths = plan.openings.filter(isWalkableOpening).map((opening) => opening.width)
-  const exitsProvided = Math.max(exitZones.length, 0)
+  const exitsProvided = exitZones.length + exitDoors.length
   const totalExitWidthM = doorWidths.reduce((sum, width) => sum + width, 0)
 
   const widthPerOccupantInches = sprinklered ? 0.15 : 0.2

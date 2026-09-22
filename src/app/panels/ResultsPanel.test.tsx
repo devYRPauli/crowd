@@ -442,20 +442,17 @@ describe('the code check', () => {
     expect(screen.getByText('Occupant load (IBC)')).toBeDefined()
   })
 
-  it('counts the exit areas the plan marks, not the doors marked as ways out', () => {
+  it('counts the doors marked as ways out as well as the exit areas', () => {
     openWith({ walls: [wall], openings: [pair] }, 600)
     const first = show()
 
-    // The pair is marked `use: 'exit'` in the inspector and still counts for
-    // nothing here: `computeCompliance` counts exit *zones*, because only a zone
-    // says where "out" is — a door marked "Way out" could open onto another
-    // room. The message's "marked on the plan" means something narrower than the
-    // inspector's wording does, and a planner who has marked their doors reads
-    // zero exits with no clue what it wants.
+    // The engine sends people out through a door marked "Way out", so the code
+    // check counts it too. Counting only zones told a planner who had marked
+    // their doors that they had no exits at all.
     expect(pair.use).toBe('exit')
     expect(screen.getByText('600')).toBeDefined()
     expect(
-      screen.getByText('3 exits are required for 600 occupants; 0 are marked on the plan.'),
+      screen.getByText('3 exits are required for 600 occupants; 1 is marked on the plan.'),
     ).toBeDefined()
 
     first.unmount()
@@ -463,7 +460,7 @@ describe('the code check', () => {
     show()
 
     expect(
-      screen.getByText('3 exits are required for 600 occupants; 1 is marked on the plan.'),
+      screen.getByText('3 exits are required for 600 occupants; 2 are marked on the plan.'),
     ).toBeDefined()
   })
 

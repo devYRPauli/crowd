@@ -78,6 +78,39 @@ describe('compliance calculator', () => {
     expect(cliff.issues.some((issue) => issue.message.includes('50-person threshold'))).toBe(true)
   })
 
+  it('counts doors marked as a way out, as the engine does', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 2, 1.83, 'door', 'both')
+    b.door(room.north, 2, 1.83, 'door', 'exit')
+    b.door(room.east, 2, 1.83, 'door', 'entry')
+    b.door(room.west, 2, 1.83)
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 100,
+      targetEgressMinutes: 8,
+    })
+    expect(result.exitsProvided).toBe(2)
+    expect(result.issues.some((issue) => issue.message.includes('marked on the plan'))).toBe(false)
+  })
+
+  it('counts an exit zone drawn over a marked door once', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 2.5, 1.0, 'door', 'exit')
+    b.zone('exit', 1.5, 0, 3.5, 1.2, 'Exit')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 20,
+      targetEgressMinutes: 8,
+    })
+    expect(result.exitsProvided).toBe(1)
+  })
+
   it('flags a door below the clear minimum', () => {
     const result = computeCompliance({
       plan: hall(10, 10, [0.7]),
