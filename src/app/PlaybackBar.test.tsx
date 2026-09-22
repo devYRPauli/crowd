@@ -307,6 +307,11 @@ describe('the live readout', () => {
     // under the same label.
     expect(chart.textContent).toBe('96.0')
     expect(container.querySelector('.timeline-track')?.contains(chart)).toBe(true)
+    // The results-panel chart height once overrode this, stretching a 92 px
+    // chart and its label through the 26 px track.
+    expect(chart.style.height).toBe('26px')
+    // Text inside the SVG is stretched along with the plot, so the peak is not.
+    expect(chart.querySelector('svg text')).toBeNull()
   })
 
   it('never lets the progress bar run past its own track', () => {

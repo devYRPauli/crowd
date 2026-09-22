@@ -401,26 +401,22 @@ export const Sparkline = ({
     .join(' ')
   const area = `${path} L${width},${height} L0,${height} Z`
 
+  // The peak sits outside the SVG: the plot stretches to fill its box, and text
+  // drawn inside it stretched with it, badly so across the wide timeline track.
   return (
-    <svg
-      className="chart"
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={label}
-    >
-      {fill ? <path d={area} fill={color} opacity={0.14} /> : null}
-      <path
-        d={path}
-        fill="none"
-        stroke={color}
-        strokeWidth={1.6}
-        vectorEffect="non-scaling-stroke"
-      />
-      <text x={2} y={11} fontSize={9} fill="var(--text-faint)" fontFamily="var(--font-mono)">
-        {maxY >= 100 ? maxY.toFixed(0) : maxY.toFixed(1)}
-      </text>
-    </svg>
+    <div className="chart" style={{ height }} role="img" aria-label={label}>
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+        {fill ? <path d={area} fill={color} opacity={0.14} /> : null}
+        <path
+          d={path}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.6}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      <span className="chart-peak">{maxY >= 100 ? maxY.toFixed(0) : maxY.toFixed(1)}</span>
+    </div>
   )
 }
 
