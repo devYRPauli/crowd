@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Simulation } from './engine'
+import { AGENT_FIELD, AGENT_STRIDE } from './types'
 import type { Plan, Scenario, Wall, Zone } from '../core/model/types'
 import { createScenario, createPopulation } from '../core/model/defaults'
 
@@ -108,13 +109,25 @@ describe('Simulation', () => {
     expect(worstOverlap).toBeLessThan(0.24)
   })
 
-  it('clears a crowd through a single exit and reports it (RiMEA TC11)', () => {
+  it('clears a crowd through a single exit and reports it', () => {
     const entry = zone('entry', 2, 0.4, 30, 1.6)
     const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
     const scenario = scenarioFor(entry.id, 120, 1.34)
     const sim = new Simulation(corridorPlan(entry, exit), { ...scenario, durationS: 1200 })
-    const summary = runToCompletion(sim, 1200)
+    // A shove in the crush at the exit once carried somebody through the
+    // corridor wall, and outside it nothing leads back to the way out.
+    let outside = 0
+    for (let step = 0; !sim.isFinished && step < 12000; step++) {
+      sim.step(0.1)
+      const { agents, count } = sim.snapshot()
+      for (let i = 0; i < count; i++) {
+        const y = agents[i * AGENT_STRIDE + AGENT_FIELD.y]
+        if (y < 0 || y > 2) outside++
+      }
+    }
+    const summary = sim.summary()
 
+    expect(outside).toBe(0)
     expect(summary.completed).toBe(120)
     expect(summary.clearanceTime).toBeGreaterThan(0)
     // Arrivals block when the doorway is full, so they are not all inside at once.

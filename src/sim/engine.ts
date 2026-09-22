@@ -1677,6 +1677,28 @@ export class Simulation {
   }
 
   /** Direction of increasing clearance, i.e. away from the nearest wall. */
+  /**
+   * How much of the move from (x0, y0) to (x1, y1) happens before it first
+   * enters solid geometry, sampled every half cell. A move that starts inside
+   * geometry may leave it; only entering from free floor stops it.
+   */
+  private freeFraction(x0: number, y0: number, x1: number, y1: number): number {
+    const { grid, solid } = this.world
+    const isSolid = (x: number, y: number) => {
+      const { col, row } = worldToCell(grid, x, y)
+      return solid[gridIndex(grid, col, row)] === 1
+    }
+    const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (grid.cellSize * 0.5))
+    let inside = isSolid(x0, y0)
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps
+      const hit = isSolid(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
+      if (hit && !inside) return (i - 1) / steps
+      inside = inside && hit
+    }
+    return 1
+  }
+
   private clearanceGradient(x: number, y: number): Vec2 {
     const h = this.world.grid.cellSize
     const left = sampleField(this.world.grid, this.world.clearance, x - h, y, 0)
@@ -1692,8 +1714,19 @@ export class Simulation {
   private integrate(dt: number): void {
     for (const id of this.live) {
       const agent = this.agents[id]
-      const nextX = agent.x + agent.vx * dt
-      const nextY = agent.y + agent.vy * dt
+      let nextX = agent.x + agent.vx * dt
+      let nextY = agent.y + agent.vy * dt
+      // A shove in a crush can outrun a wall's thickness: contact resolution
+      // once sent somebody 0.46 m in one step, clean through a corridor wall,
+      // and the push-out below then eased them on out the far side, where no
+      // field leads to an exit. A move shorter than the clearance it starts
+      // from cannot reach geometry, so most steps skip the sweep.
+      const reach = Math.hypot(nextX - agent.x, nextY - agent.y)
+      if (reach > sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10)) {
+        const free = this.freeFraction(agent.x, agent.y, nextX, nextY)
+        nextX = agent.x + (nextX - agent.x) * free
+        nextY = agent.y + (nextY - agent.y) * free
+      }
       const moved = Math.hypot(nextX - agent.x, nextY - agent.y)
       agent.x = nextX
       agent.y = nextY
