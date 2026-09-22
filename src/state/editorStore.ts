@@ -48,6 +48,7 @@ export type ToolId =
   | 'service'
   | 'queue'
   | 'measure'
+  | 'view'
 
 export type ZoneToolKind =
   'entry' | 'exit' | 'waypoint' | 'obstacle' | 'keep-clear' | 'seating' | 'measure'

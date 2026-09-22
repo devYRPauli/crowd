@@ -18,6 +18,7 @@ import { useEditor } from '../state/editorStore'
 import { createDocument } from '../core/model/defaults'
 import { renameDocument } from '../core/document/mutations'
 import type { ToolId } from '../state/editorStore'
+import { ViewTool } from './tools/viewTool'
 import type { Tool, ToolContext } from './types'
 import type { SnapResult } from './snapping'
 import type {
@@ -37,6 +38,7 @@ const METRES_PER_PIXEL = 0.01
 interface FakeViewport {
   handlers: ViewportHandlers
   canvas: { style: { cursor: string } }
+  leftButtonNavigates: boolean
   worldPerPixel: number
   hover: PlanObjectRef | null
   hoverUpdates: number
@@ -53,6 +55,7 @@ const createViewport = (log: string[]): FakeViewport => {
   const viewport: FakeViewport = {
     handlers: {},
     canvas: { style: { cursor: 'auto' } },
+    leftButtonNavigates: false,
     worldPerPixel: METRES_PER_PIXEL,
     hover: null,
     hoverUpdates: 0,
@@ -190,6 +193,7 @@ const TOOL_IDS: readonly ToolId[] = [
   'service',
   'queue',
   'measure',
+  'view',
 ]
 
 const TOOL_SETUP: Partial<Record<ToolId, FakeToolOptions>> = {
@@ -470,6 +474,19 @@ describe('switching tools', () => {
     // rather than inheriting the last tool's crosshair.
     h.controller.setTool('measure')
     expect(h.viewport.canvas.style.cursor).toBe('default')
+  })
+
+  it('hands the left button to the camera only while the view tool is active', () => {
+    const h = harness()
+    h.replaceTool('view', new ViewTool())
+
+    h.controller.setTool('view')
+    expect(h.viewport.leftButtonNavigates).toBe(true)
+    expect(h.viewport.canvas.style.cursor).toBe('grab')
+
+    // Leaving it must give the button back, or the next tool could never edit.
+    h.controller.setTool('select')
+    expect(h.viewport.leftButtonNavigates).toBe(false)
   })
 
   it('falls back to select when handed a tool id it does not have', () => {

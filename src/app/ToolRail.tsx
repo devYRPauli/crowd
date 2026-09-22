@@ -13,6 +13,7 @@ import {
   DoorIcon,
   FurnitureIcon,
   MeasureIcon,
+  OrbitIcon,
   QueueIcon,
   RoomIcon,
   ServiceIcon,
@@ -29,7 +30,10 @@ interface ToolSpec {
 }
 
 const GROUPS: ToolSpec[][] = [
-  [{ id: 'select', label: 'Select and move', shortcut: 'V', Icon: CursorIcon }],
+  [
+    { id: 'select', label: 'Select and move', shortcut: 'V', Icon: CursorIcon },
+    { id: 'view', label: 'Look around', shortcut: 'O', Icon: OrbitIcon },
+  ],
   [
     { id: 'wall', label: 'Draw walls', shortcut: 'W', Icon: WallIcon },
     { id: 'room', label: 'Draw a room', shortcut: 'R', Icon: RoomIcon },

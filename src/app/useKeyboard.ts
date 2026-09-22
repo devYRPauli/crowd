@@ -55,6 +55,7 @@ const TOOL_KEYS: Record<string, ToolId> = {
   s: 'service',
   q: 'queue',
   m: 'measure',
+  o: 'view',
 }
 
 const isTypingTarget = (target: EventTarget | null): boolean => {

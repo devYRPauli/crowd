@@ -55,6 +55,7 @@ shaped several decisions below.
 |           |                                                                               |
 | --------- | ----------------------------------------------------------------------------- |
 | `V`       | Select and move                                                               |
+| `O`       | Look around: the left button orbits, Shift pans, and nothing is edited        |
 | `W`       | Walls — click to chain, **type a length and press Enter** to place it exactly |
 | `R`       | Room — drag a rectangle and get four walls                                    |
 | `D` / `N` | Doorway / window — move onto a wall and click; it cuts the wall               |

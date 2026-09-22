@@ -134,6 +134,8 @@ export class Viewport {
   private navigating: 'orbit' | 'pan' | null = null
   private lastPointer = { x: 0, y: 0 }
   private spaceHeld = false
+  /** Set by the controller while the active tool hands the left button to the camera. */
+  leftButtonNavigates = false
   private capturedPointerId: number | null = null
 
   handlers: ViewportHandlers = {}
@@ -608,7 +610,9 @@ export class Viewport {
     const canvas = this.renderer.domElement
     canvas.focus({ preventScroll: true })
     const navigate =
-      event.button === 2 || event.button === 1 || (event.button === 0 && this.spaceHeld)
+      event.button === 2 ||
+      event.button === 1 ||
+      (event.button === 0 && (this.spaceHeld || this.leftButtonNavigates))
     if (navigate) {
       event.preventDefault()
       this.navigating = event.button === 1 || this.spaceHeld || event.shiftKey ? 'pan' : 'orbit'

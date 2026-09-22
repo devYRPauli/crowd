@@ -15,6 +15,7 @@ import { snapPoint, type SnapOptions } from './snapping'
 import { SelectTool } from './tools/selectTool'
 import { MeasureTool, RoomTool, WallTool, ZoneTool } from './tools/drawTools'
 import { DoorTool, FurnitureTool, QueueTool, ServiceTool, WindowTool } from './tools/placementTools'
+import { ViewTool } from './tools/viewTool'
 import type { Vec2 } from '../core/math/vec2'
 
 const createTools = (): Record<ToolId, Tool> => ({
@@ -28,6 +29,7 @@ const createTools = (): Record<ToolId, Tool> => ({
   service: new ServiceTool(),
   queue: new QueueTool(),
   measure: new MeasureTool(),
+  view: new ViewTool(),
 })
 
 export class ToolController {
@@ -67,6 +69,7 @@ export class ToolController {
     this.active.onActivate?.(this.context())
     useEditor.getState().setHint(this.active.hint)
     this.viewport.canvas.style.cursor = this.active.cursor ?? 'default'
+    this.viewport.leftButtonNavigates = this.active.leftButtonNavigates ?? false
   }
 
   /**

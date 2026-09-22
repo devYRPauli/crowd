@@ -55,6 +55,7 @@ const SHORTCUTS: Array<{ group: string; items: Array<[string, string[]]> }> = [
     group: 'Tools',
     items: [
       ['Select and move', ['V']],
+      ['Look around', ['O']],
       ['Draw walls', ['W']],
       ['Draw a room', ['R']],
       ['Add a doorway', ['D']],

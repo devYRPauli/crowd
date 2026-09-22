@@ -57,7 +57,9 @@ somewhere else.
 - The crowd is one instanced draw call; per-person work on the main thread is a
   matrix write, not a skeleton update.
 - The left mouse button belongs to the active tool, always. Navigation lives on
-  the right and middle buttons, the wheel and Space-drag.
+  the right and middle buttons, the wheel and Space-drag. The one tool whose
+  left button is the camera is Look around (`O`), which edits nothing; people
+  reached for the left button to orbit and moved walls instead.
 
 ## Tools
 

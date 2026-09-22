@@ -25,6 +25,14 @@ export const CursorIcon = (p: IconProps) => (
   </svg>
 )
 
+export const OrbitIcon = (p: IconProps) => (
+  <svg {...base} {...p}>
+    <ellipse cx="12" cy="12" rx="9.5" ry="4.2" />
+    <path d="M16.6 5.2l2.2 3-3.6.6" />
+    <circle cx="12" cy="12" r="2.2" />
+  </svg>
+)
+
 export const WallIcon = (p: IconProps) => (
   <svg {...base} {...p}>
     <path d="M3 17h18" />

@@ -41,6 +41,11 @@ export interface Tool {
   /** One-line instruction shown in the status bar while the tool is active. */
   readonly hint: string
   readonly cursor?: string
+  /**
+   * The left button drives the camera instead of editing. It is how a mouse or
+   * trackpad with no spare button looks around without moving the plan.
+   */
+  readonly leftButtonNavigates?: boolean
   onActivate?(ctx: ToolContext): void
   onDeactivate?(ctx: ToolContext): void
   /**

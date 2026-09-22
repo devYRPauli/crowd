@@ -40,6 +40,7 @@ const Shell = () => {
 
 const RAIL: Array<{ label: string; tool: ToolId }> = [
   { label: 'Select and move', tool: 'select' },
+  { label: 'Look around', tool: 'view' },
   { label: 'Draw walls', tool: 'wall' },
   { label: 'Draw a room', tool: 'room' },
   { label: 'Add a doorway', tool: 'door' },
