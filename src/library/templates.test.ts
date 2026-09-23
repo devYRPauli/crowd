@@ -136,4 +136,30 @@ describe('starter templates', () => {
       expect(planSeats(doc.plan).length).toBeGreaterThan(0)
     }
   })
+
+  it('turns every theatre seat towards the stage', () => {
+    // The conference rows were turned half round, and the delegates sat with
+    // their backs to the stage, facing the doors.
+    let checked = 0
+    for (const template of TEMPLATES) {
+      const { plan } = template.build()
+      const stage = plan.furniture.find((item) => item.catalogId === 'stage')
+      if (!stage) continue
+      const rows = new Set(
+        plan.furniture.filter((item) => item.catalogId === 'seat-row').map((item) => item.id),
+      )
+      for (const seat of planSeats(plan)) {
+        if (!rows.has(seat.furnitureId)) continue
+        const toStage = {
+          x: stage.position.x - seat.position.x,
+          y: stage.position.y - seat.position.y,
+        }
+        expect(
+          Math.cos(seat.facing) * toStage.x + Math.sin(seat.facing) * toStage.y,
+        ).toBeGreaterThan(0)
+        checked++
+      }
+    }
+    expect(checked).toBe(360)
+  })
 })

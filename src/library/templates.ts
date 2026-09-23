@@ -202,9 +202,11 @@ const conference = (): CrowdDocument => {
     size: { width: ft(16), depth: 0.2, height: ft(9) },
   })
   b.place('lectern', 19.5, 23.1)
+  // Unturned, a row faces north, at the stage. Turned half round, the
+  // delegates sat with their backs to it, facing the doors.
   for (let row = 0; row < 9; row++) {
     for (const x of [7.8, 22.2]) {
-      b.place('seat-row', x, 13.4 + row * 0.95, Math.PI, {
+      b.place('seat-row', x, 13.4 + row * 0.95, 0, {
         size: { width: 11, depth: 0.7, height: 0.95 },
       })
     }
