@@ -12,6 +12,14 @@ npx vite-node scripts/study.mjs              # all of it
 npx vite-node scripts/study.mjs exits crowd  # named experiments only
 ```
 
+**These numbers are from an older engine.** They were taken at 15e844e, and the
+commits since changed how people route through seating and theatre rows. A
+re-run of E2 at 4524fb7 no longer matches its table: the empty hall clears in
+110.2 s, the classroom in 107.0 s rather than 126.6 s, the banquet in 108.8 s,
+and theatre rows now add 5 s over the empty room instead of nothing. The other
+experiments have not been re-run. Until the study is re-measured, read the
+findings below as describing that older engine.
+
 ## How to read these numbers
 
 **The venues are built, not loaded.** `scripts/study/harness.mjs` draws each hall
