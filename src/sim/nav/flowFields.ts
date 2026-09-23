@@ -71,6 +71,7 @@ export class FlowFieldCache {
   private fields = new Map<string, RouteField>()
   private speedScratch: Float32Array
   private queue: string[] = []
+  private seated: Uint8Array | null = null
 
   constructor(
     private grid: NavGrid,
@@ -117,6 +118,7 @@ export class FlowFieldCache {
    * on cells somebody is sitting on.
    */
   update(time: number, density: Float32Array, seated: Uint8Array): void {
+    this.seated = seated
     if (this.options.congestionWeight <= 0) return
     const due = this.queue
       .map((id) => this.fields.get(id))
@@ -172,7 +174,20 @@ export class FlowFieldCache {
     if (awareness <= 0.01 || field.refreshedAt === -Infinity) {
       return shortest ? { dx: shortest.dx, dy: shortest.dy, cost: shortest.value } : null
     }
-    const congested = sampleGradient(this.grid, field.congestedPotential, point.x, point.y)
+    // The seated are priced as nearly impassable, not walled off, so every seat
+    // keeps a route. But that prices a seatway as a valley one cell wide with
+    // sides twenty times steeper than its floor, and the gradient there points
+    // across it, not along it: walkers stood at the end of a row stepping from
+    // one side to the other. Steering reads the seated as the walls they are to
+    // a walker, and only somebody hemmed in on every side falls back on price.
+    const congested =
+      sampleGradient(
+        this.grid,
+        field.congestedPotential,
+        point.x,
+        point.y,
+        this.seated ?? undefined,
+      ) ?? sampleGradient(this.grid, field.congestedPotential, point.x, point.y)
     if (!congested)
       return shortest ? { dx: shortest.dx, dy: shortest.dy, cost: shortest.value } : null
     if (!shortest) return { dx: congested.dx, dy: congested.dy, cost: congested.value }
@@ -419,13 +434,22 @@ export class DensityField {
    * amount of themselves taken off rather than all of it.
    */
   othersAt(x: number, y: number, sampled: number, distance = 0): number {
+    return Math.max(0, sampled - this.weightAt(x, y, distance))
+  }
+
+  /**
+   * What one person `distance` away contributes to the field at a point, in
+   * persons per square metre, so that a caller can take somebody off it.
+   * Zero beyond the kernel's reach, as it is in the field.
+   */
+  weightAt(x: number, y: number, distance: number): number {
     const { cols, rows, cellSize, originX, originY } = this.grid
     const col = Math.round((x - originX) / cellSize - 0.5)
     const row = Math.round((y - originY) / cellSize - 0.5)
-    if (col < 0 || row < 0 || col >= cols || row >= rows) return Math.max(0, sampled)
-    const own =
-      this.peakWeight * Math.exp(-(distance * distance) / (2 * this.bandwidth * this.bandwidth))
-    return Math.max(0, sampled - own / this.coverage[row * cols + col])
+    if (col < 0 || row < 0 || col >= cols || row >= rows) return 0
+    const falloff = Math.exp(-(distance * distance) / (2 * this.bandwidth * this.bandwidth))
+    if (falloff < 0.01) return 0
+    return (this.peakWeight * falloff) / this.coverage[row * cols + col]
   }
 
   reset(): void {

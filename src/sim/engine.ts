@@ -76,6 +76,19 @@ const ARRIVE_RADIUS = 0.34
 const SEAT_ARRIVE_RADIUS = 0.1
 
 /**
+ * How deep a body is side-on, as a share of how broad it is.
+ *
+ * Nobody walks along a theatre row face first. They turn side-on and sidle,
+ * and the people already sitting draw their knees in, so across the seatway
+ * each of them takes up their depth rather than their breadth: a chest is
+ * about 0.25 m deep on shoulders 0.45 m across. As discs of full breadth, two
+ * seated rows 0.95 m apart left 0.50 m between them, and nobody broader than
+ * 0.48 m could get along a row past somebody already in it. A wheelchair has
+ * no side-on, and keeps its width.
+ */
+const SIDLING_DEPTH = 0.6
+
+/**
  * How far past the doorway somebody goes on taking up room.
  *
  * A doorway meters a crowd because the people already through it are still
@@ -135,6 +148,8 @@ interface Agent {
   groupId: number
 
   radius: number
+  /** Can turn side-on to get past somebody sitting down; see `SIDLING_DEPTH`. */
+  sidles: boolean
   preferredSpeed: number
   maxSpeed: number
   caution: number
@@ -194,6 +209,22 @@ interface Agent {
   finishedAt: number | null
   straightLineFrom: Vec2
 }
+
+/** The room somebody takes up across a gap they are getting past a seated person in. */
+const passingRadius = (agent: Agent): number => agent.radius * (agent.sidles ? SIDLING_DEPTH : 1)
+
+/**
+ * How far apart two people's centres are when they touch.
+ *
+ * Their radii, except between somebody sitting down and somebody getting past
+ * them, who each give up the depth `SIDLING_DEPTH` describes. Every rule that
+ * keeps bodies apart measures contact here, so that squeezing past a seated
+ * person is contact and not overlap, and anything nearer still is.
+ */
+const contactDistance = (a: Agent, b: Agent): number =>
+  (a.state === 'seated') === (b.state === 'seated')
+    ? a.radius + b.radius
+    : passingRadius(a) + passingRadius(b)
 
 interface PendingArrival {
   time: number
@@ -579,6 +610,7 @@ export class Simulation {
       profileIndex: arrival.profileIndex,
       groupId: arrival.groupId,
       radius: profile.radius,
+      sidles: profile.mobility !== 'wheelchair',
       preferredSpeed: speed,
       maxSpeed: speed * 1.35,
       caution: profile.caution,
@@ -933,6 +965,7 @@ export class Simulation {
       if (this.seatTaken[i]) continue
       const seat = this.world.seats[i]
       if (zone && !pointInPolygon(seat.position, zone.polygon)) continue
+      if (!this.seatingSpot(agent.radius, seat.position)) continue
       // Prefer near seats, but jitter so a table fills plausibly rather than in index order.
       const score = distance(seat.position, { x: agent.x, y: agent.y }) * rng.uniform(0.85, 1.25)
       if (score < bestScore) {
@@ -1530,18 +1563,75 @@ export class Simulation {
    * Seats in a row are 0.55 m apart and a wheelchair user is 0.76 m across, so
    * whoever sits next to one cannot reach the middle of their own seat. Asked
    * to anyway, they stood a fifth of a metre off it until they gave up.
+   *
+   * Sitting down is measured at seated breadth, which is the room they take up
+   * once they are down. Sidling in, somebody can stand nearer a seated
+   * neighbour than that, and sitting down where they stood put them inside
+   * that neighbour.
    */
   private atSeat(agent: Agent, seat: Vec2): boolean {
     let reach = SEAT_ARRIVE_RADIUS
+    let fits = true
     this.hash.query(seat.x, seat.y, agent.radius + 0.6, (id) => {
       const other = this.agents[id]
       if (other?.state !== 'seated') return
-      reach = Math.max(
-        reach,
-        SEAT_ARRIVE_RADIUS + agent.radius + other.radius - distance(other, seat),
-      )
+      const touching = agent.radius + other.radius
+      reach = Math.max(reach, SEAT_ARRIVE_RADIUS + touching - distance(other, seat))
+      if (distance(agent, other) < touching) fits = false
     })
-    return distance(agent, seat) <= reach
+    return fits && distance(agent, seat) <= reach
+  }
+
+  /**
+   * Where somebody this broad can sit at a seat beside the people already
+   * sitting either side of it, sliding along it as far as `atSeat` lets them,
+   * or null when they cannot.
+   *
+   * Seats were handed out by distance alone. Beside a wheelchair user, with a
+   * neighbour already down on the other side, a 0.46 m body has 0.42 m to sit
+   * in: they stood on the seat unable to sit, gave up, and the next person was
+   * sent to the same seat. And steered to the middle of a seat they could only
+   * sit in off-centre, they stood inside the neighbour's reach until they gave
+   * up there too.
+   */
+  private seatingSpot(radius: number, seat: Vec2): Vec2 | null {
+    const seated: Agent[] = []
+    this.hash.query(seat.x, seat.y, radius + 0.6, (id) => {
+      const other = this.agents[id]
+      if (other?.state === 'seated') seated.push(other)
+    })
+    let reach = SEAT_ARRIVE_RADIUS
+    for (const other of seated) {
+      reach = Math.max(reach, SEAT_ARRIVE_RADIUS + radius + other.radius - distance(other, seat))
+    }
+    // Clear of contact by a margin, so easing in on the spot stops on the side
+    // of it where they fit.
+    const margin = 0.02
+    let spot = { x: seat.x, y: seat.y }
+    for (let pass = 0; pass < 4; pass++) {
+      for (const other of seated) {
+        const gap = distance(spot, other)
+        const clear = radius + other.radius + margin
+        if (gap >= clear || gap === 0) continue
+        spot = {
+          x: other.x + ((spot.x - other.x) * clear) / gap,
+          y: other.y + ((spot.y - other.y) * clear) / gap,
+        }
+      }
+    }
+    const fits = seated.every((other) => distance(spot, other) >= radius + other.radius)
+    return fits && distance(spot, seat) <= reach ? spot : null
+  }
+
+  /** Whether anybody is getting past this seated person nearer than standing contact. */
+  private beingPassed(agent: Agent): boolean {
+    let passed = false
+    this.hash.query(agent.x, agent.y, agent.radius + 0.6, (id) => {
+      const other = this.agents[id]
+      if (passed || !other || other === agent || other.state === 'seated') return
+      if (distance(agent, other) < agent.radius + other.radius) passed = true
+    })
+    return passed
   }
 
   private updateStates(dt: number): void {
@@ -1581,6 +1671,16 @@ export class Simulation {
               this.aimAtQueue(queue, agent, slot)
             }
             break
+          }
+          if (agent.seatIndex >= 0 && !arrived) {
+            const spot = this.seatingSpot(agent.radius, this.world.seats[agent.seatIndex].position)
+            // Somebody sat down beside the seat they were heading for and left
+            // them no room, so they pick another rather than stand on this one.
+            if (!spot) {
+              this.beginStep(agent)
+              break
+            }
+            agent.exactTarget = spot
           }
           const step = this.itineraryOf(agent)[agent.stepIndex]
           if (agent.stepIndex >= this.itineraryOf(agent).length) {
@@ -1622,7 +1722,9 @@ export class Simulation {
         case 'seated':
         case 'dwelling': {
           agent.timer -= dt
-          if (agent.timer <= 0) {
+          // Somebody sidling past is nearer than two standing bodies can be,
+          // so getting up into them is an overlap. They wait until the way is clear.
+          if (agent.timer <= 0 && !(agent.state === 'seated' && this.beingPassed(agent))) {
             if (agent.seatIndex >= 0) {
               this.seatTaken[agent.seatIndex] = 0
               agent.seatIndex = -1
@@ -1797,9 +1899,11 @@ export class Simulation {
           // is for shoulders, and a seated person's are below yours. Kept, it
           // shut the half metre between two rows of a seated audience, and
           // delegates stood at the end of a row they could not get along.
+          // ORCA adds this walker's own radius back, so what is left of the
+          // contact distance goes on the seated neighbour.
           radius:
             other.state === 'seated'
-              ? other.radius
+              ? contactDistance(agent, other) - agent.radius
               : other.radius + ownSpace + personalSpace(localDensity, other.assertiveness),
           maxSpeed: other.maxSpeed,
           prefVelocity: { x: other.vx, y: other.vy },
@@ -2109,12 +2213,7 @@ export class Simulation {
             // one neighbour standing nearby excuse any amount of not getting
             // anywhere. People pressed against geometry sat there for the rest
             // of the run without ever being counted as stuck.
-            const others = this.density.othersAt(
-              agent.x,
-              agent.y,
-              sampleField(this.world.grid, this.density.values, agent.x, agent.y, 0),
-            )
-            if (others <= 0.8) this.replan(agent)
+            if (this.movingCrowdAt(agent) <= 0.8) this.replan(agent)
           }
         }
       } else {
@@ -2122,6 +2221,30 @@ export class Simulation {
         agent.bestDistance = Infinity
       }
     }
+  }
+
+  /**
+   * Density of the people around somebody who could still get out of their way.
+   *
+   * The field counts the seated, because they occupy floor, but a seated
+   * audience is not a queue that will move up. Counted in, it excused anybody
+   * held at the end of a row by the people already in it from ever being
+   * re-planned, and they stood there for the rest of the run.
+   */
+  private movingCrowdAt(agent: Agent): number {
+    const { grid } = this.world
+    let density = this.density.othersAt(
+      agent.x,
+      agent.y,
+      sampleField(grid, this.density.values, agent.x, agent.y, 0),
+    )
+    this.hash.query(agent.x, agent.y, NEIGHBOUR_RANGE, (id) => {
+      const other = this.agents[id]
+      if (other?.state === 'seated') {
+        density -= this.density.weightAt(agent.x, agent.y, distance(agent, other))
+      }
+    })
+    return Math.max(0, density)
   }
 
   /**
@@ -2166,7 +2289,7 @@ export class Simulation {
           const distanceSq = dx * dx + dy * dy
           if (distanceSq < 1e-12) return
           const length = Math.sqrt(distanceSq)
-          const touching = agent.radius + other.radius
+          const touching = contactDistance(agent, other)
           const nx = dx / length
           const ny = dy / length
           // Along the line between them, positive is separating.
@@ -2230,7 +2353,7 @@ export class Simulation {
           const other = this.agents[otherId]
           const dx = other.x - agent.x
           const dy = other.y - agent.y
-          const minimum = agent.radius + other.radius
+          const minimum = contactDistance(agent, other)
           const distanceSq = dx * dx + dy * dy
           if (distanceSq >= minimum * minimum || distanceSq < 1e-12) return
           const length = Math.sqrt(distanceSq)

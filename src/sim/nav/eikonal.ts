@@ -402,13 +402,17 @@ const blendFinite = (
   return weight > 0 ? sum / weight : fallback
 }
 
-/** Bilinear sample of any Float32Array field over the grid. Out-of-range returns `fallback`. */
+/**
+ * Bilinear sample of any Float32Array field over the grid. Out-of-range returns
+ * `fallback`. Cells set in `excluded` are left out, as unreachable cells are.
+ */
 export const sampleField = (
   grid: NavGrid,
   field: Float32Array,
   x: number,
   y: number,
   fallback: number,
+  excluded?: Uint8Array,
 ): number => {
   const { cols, rows, cellSize } = grid
   const gx = (x - grid.originX) / cellSize - 0.5
@@ -428,10 +432,10 @@ export const sampleField = (
 
   const base0 = r0 * cols
   const base1 = r1 * cols
-  const v00 = field[base0 + c0]
-  const v10 = field[base0 + c1]
-  const v01 = field[base1 + c0]
-  const v11 = field[base1 + c1]
+  const v00 = excluded?.[base0 + c0] ? Infinity : field[base0 + c0]
+  const v10 = excluded?.[base0 + c1] ? Infinity : field[base0 + c1]
+  const v01 = excluded?.[base1 + c0] ? Infinity : field[base1 + c0]
+  const v11 = excluded?.[base1 + c1] ? Infinity : field[base1 + c1]
   const top = v00 + (v10 - v00) * tx
   const bottom = v01 + (v11 - v01) * tx
   const value = top + (bottom - top) * ty
@@ -453,14 +457,17 @@ const centreBand = (v: number, origin: number, cellSize: number, n: number): num
  * world point (the direction of travel towards the goal), plus the sampled
  * potential. Returns null when the sample point sits in an unreachable region;
  * the direction is (0, 0) where the potential is flat, such as on the goal itself.
+ * Cells set in `excluded` are read as unreachable, so the gradient runs along
+ * them the way it runs along a wall.
  */
 export const sampleGradient = (
   grid: NavGrid,
   potential: Float32Array,
   x: number,
   y: number,
+  excluded?: Uint8Array,
 ): { dx: number; dy: number; value: number } | null => {
-  const value = sampleField(grid, potential, x, y, Infinity)
+  const value = sampleField(grid, potential, x, y, Infinity, excluded)
   if (!Number.isFinite(value)) return null
 
   const { originX, originY, cellSize, cols, rows } = grid
@@ -478,10 +485,10 @@ export const sampleGradient = (
   const ys = centreBand(py - h, originY, cellSize, rows)
   const yn = centreBand(py + h, originY, cellSize, rows)
 
-  const west = sampleField(grid, potential, xw, py, Infinity)
-  const east = sampleField(grid, potential, xe, py, Infinity)
-  const south = sampleField(grid, potential, px, ys, Infinity)
-  const north = sampleField(grid, potential, px, yn, Infinity)
+  const west = sampleField(grid, potential, xw, py, Infinity, excluded)
+  const east = sampleField(grid, potential, xe, py, Infinity, excluded)
+  const south = sampleField(grid, potential, px, ys, Infinity, excluded)
+  const north = sampleField(grid, potential, px, yn, Infinity, excluded)
 
   // One-sided wherever the far side is walled off, or where the band ran out and
   // the probe collapsed back onto the sample point. Each difference is divided by

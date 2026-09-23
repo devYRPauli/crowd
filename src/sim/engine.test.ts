@@ -510,4 +510,179 @@ describe('Simulation', () => {
       expect(runToCompletion(sim, 900).warnings).toEqual([])
     }
   }, 60_000)
+
+  it('fills a theatre block to the last seat', () => {
+    // As discs of full breadth, two seated rows 0.95 m apart left half a metre
+    // between them, and nobody broader than 0.48 m could get along a row past
+    // somebody already in it. Held at the end of the row, they were never
+    // re-planned either: the audience beside them counted as a crowd that
+    // would move up. On half the seeds somebody stood there until the people
+    // in the row got up again. Only bodies that fit a 0.55 m seat are sent:
+    // a wheelchair or somebody with luggage is broader than the seat by the
+    // wall, and is broader than one seat between two occupied ones.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(1.7, 3, 3, 3.3)
+    const seating = b.zone('seating', 0, 2.4, 3.4, 5.9, 'Rows')
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const plan = b.build()
+    const seats = 18
+    const seatedState = agentStateIndex('seated')
+
+    for (let seed = 1; seed <= 8; seed++) {
+      const population = createPopulation(0)
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 900,
+        populations: [
+          {
+            ...population,
+            count: seats,
+            entryIds: [entry.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 60 },
+            profileMix: population.profileMix.filter(
+              (entry) => entry.profileId !== 'wheelchair' && entry.profileId !== 'luggage',
+            ),
+            itinerary: [
+              {
+                id: 'step-seat',
+                kind: 'seat',
+                targetId: seating.id,
+                duration: { kind: 'constant', mean: 300 },
+              },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const sim = new Simulation(plan, scenario)
+      const sat = new Set<number>()
+      while (sat.size < seats && sim.currentTime < 150) {
+        sim.step(0.1)
+        const { agents, count } = sim.snapshot()
+        for (let i = 0; i < count; i++) {
+          const base = i * AGENT_STRIDE
+          if (agents[base + AGENT_FIELD.state] === seatedState)
+            sat.add(agents[base + AGENT_FIELD.id])
+        }
+      }
+      expect(sat.size).toBe(seats)
+      expect(runToCompletion(sim, 900).warnings).toEqual([])
+    }
+  }, 120_000)
+
+  it('does not send somebody to a seat too narrow for them', () => {
+    // Seats were handed out by distance alone. Between two wheelchair users an
+    // adult has 0.34 m to sit in: in the conference hall they stood on the
+    // seat unable to sit down, gave up, and the next delegate was sent to the
+    // same seat. The nearest seat on offer here is that one.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(1.7, 3, 3, 3.3)
+    const zones = [
+      b.zone('seating', 1.2, 2.4, 1.7, 3.4, 'Front row, third seat'),
+      b.zone('seating', 2.3, 2.4, 2.8, 3.4, 'Front row, fifth seat'),
+      b.zone('seating', 1.8, 2.4, 2.1, 4.4, 'Fourth seat, front two rows'),
+    ]
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const population = createPopulation(0)
+    const group = (index: number, profileId: string, startS: number) => ({
+      ...population,
+      id: `pop-${index}`,
+      count: 1,
+      entryIds: [entry.id],
+      arrival: { kind: 'uniform' as const, startS, windowS: 10 },
+      profileMix: [{ profileId, weight: 1 }],
+      itinerary: [
+        {
+          id: `step-seat-${index}`,
+          kind: 'seat' as const,
+          targetId: zones[index].id,
+          duration: { kind: 'constant' as const, mean: 300 },
+        },
+        { id: `step-exit-${index}`, kind: 'exit' as const },
+      ],
+    })
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 900,
+      populations: [group(0, 'wheelchair', 0), group(1, 'wheelchair', 0), group(2, 'adult', 60)],
+    }
+    const sim = new Simulation(b.build(), scenario)
+    const seatedState = agentStateIndex('seated')
+    const seatedAt = () => {
+      const { agents, count } = sim.snapshot()
+      for (let i = 0; i < count; i++) {
+        const base = i * AGENT_STRIDE
+        if (agents[base + AGENT_FIELD.population] !== 2) continue
+        if (agents[base + AGENT_FIELD.state] !== seatedState) return null
+        return agents[base + AGENT_FIELD.y]
+      }
+      return null
+    }
+    while (seatedAt() === null && sim.currentTime < 200) sim.step(0.1)
+    // Sat in the second row, behind the gap it could not fit.
+    expect(seatedAt()).toBeCloseTo(3.91, 0)
+    expect(runToCompletion(sim, 900).warnings).toEqual([])
+  }, 60_000)
+
+  it('does not take a seated audience for a queue that will move up', () => {
+    // A wheelchair cannot turn side-on, so it cannot get along a row past
+    // people already sitting in it. Held at the end of the row it is not
+    // closing on its seat, and the seated around it once excused that as a
+    // crowd it was waiting behind, so it was never re-planned.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(1.7, 3, 3, 3.3)
+    const zones = [
+      b.zone('seating', 0, 2.4, 3.4, 3.4, 'Front row'),
+      b.zone('seating', 0, 4.4, 3.4, 5.9, 'Back row'),
+      b.zone('seating', 1.7, 3.4, 3.4, 4.4, 'Middle row, aisle end'),
+      b.zone('seating', 0.6, 3.4, 1.7, 4.4, 'Middle row, far end'),
+    ]
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const population = createPopulation(0)
+    const group = (index: number, count: number, profileId: string, startS: number) => ({
+      ...population,
+      id: `pop-${index}`,
+      count,
+      entryIds: [entry.id],
+      arrival: { kind: 'uniform' as const, startS, windowS: 30 },
+      profileMix: [{ profileId, weight: 1 }],
+      itinerary: [
+        {
+          id: `step-seat-${index}`,
+          kind: 'seat' as const,
+          targetId: zones[index].id,
+          duration: { kind: 'constant' as const, mean: 600 },
+        },
+        { id: `step-exit-${index}`, kind: 'exit' as const },
+      ],
+    })
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 900,
+      populations: [
+        group(0, 6, 'adult', 0),
+        group(1, 6, 'adult', 0),
+        group(2, 3, 'adult', 0),
+        group(3, 1, 'wheelchair', 45),
+      ],
+    }
+    const sim = new Simulation(b.build(), scenario)
+    while (sim.currentTime < 200) sim.step(0.1)
+    const { agents, count } = sim.snapshot()
+    let wheelchair = -1
+    for (let i = 0; i < count; i++) {
+      const base = i * AGENT_STRIDE
+      if (agents[base + AGENT_FIELD.population] === 3) wheelchair = agents[base + AGENT_FIELD.id]
+    }
+    const inspected = sim.inspect(wheelchair)
+    expect(inspected?.state).toBe('walking')
+    expect(inspected?.replanCount).toBeGreaterThan(0)
+  }, 60_000)
 })
