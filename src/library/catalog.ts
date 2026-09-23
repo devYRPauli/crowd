@@ -51,6 +51,12 @@ export interface CatalogItem {
   tintRole?: MaterialRole
   build: (size: Size) => Prim[]
   seats?: (size: Size) => SeatSlot[]
+  /**
+   * Fixed seats in a row, reached along the front of the row from one end or
+   * the other. A row is not an obstacle, so without this people walked to their
+   * seats across the rows behind it and left the same way.
+   */
+  rowSeating?: boolean
 }
 
 const TAU = Math.PI * 2
@@ -441,6 +447,7 @@ const SEATING: CatalogItem[] = [
     // gap between rows once the navigation grid adds body clearance, and then
     // nobody can sit down at all.
     blocking: false,
+    rowSeating: true,
     footprint: 'rect',
     inset: 0.04,
     resize: 'free',

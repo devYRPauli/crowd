@@ -18,6 +18,7 @@
 
 import type { ItineraryStep, Plan, Scenario } from '../core/model/types'
 import type { Vec2 } from '../core/math/vec2'
+import type { SeatRowAccess } from '../core/model/planGeometry'
 import { Rng, distributionMean, sampleDistribution } from '../core/math/random'
 import { distance, normalize } from '../core/math/vec2'
 import type { Bounds } from '../core/math/geometry'
@@ -123,6 +124,12 @@ const EXIT_TAIL_TIMEOUT = 10
  * is not what either the jam detector or the give-up check is looking for.
  */
 const DIRECT_RANGE = 3.5
+/** How near a point along a row somebody has to come before heading for the next. */
+const ROW_POINT_REACH = 0.2
+/** Half the depth of the passage in front of a row; rows are pitched about 0.95 m. */
+const ROW_PASSAGE_HALF_WIDTH = 0.4
+/** Metres of extra walk somebody accepts rather than sidle past one seated person. */
+const ROW_PASS_COST = 2
 /** Steps in half a turn when looking round for a place behind somebody. */
 const PLACE_TURNS = 8
 const NEIGHBOUR_RANGE = 5.0
@@ -179,6 +186,14 @@ interface Agent {
   queueSlot: number
   serverIndex: number
   seatIndex: number
+  /** The end of the row they are walking to before they go along it to their seat. */
+  rowEntry: Vec2 | null
+  /**
+   * Points along a row of seats, walked at in order. The people seated in it
+   * are passed side-on, so the route along it ignores them where every other
+   * route goes round.
+   */
+  along: { row: SeatRowAccess; points: Vec2[] } | null
   joinedQueueAt: number
 
   distance: number
@@ -636,6 +651,8 @@ export class Simulation {
       queueSlot: -1,
       serverIndex: -1,
       seatIndex: -1,
+      rowEntry: null,
+      along: null,
       joinedQueueAt: 0,
       leftAt: null,
       leftFrom: null,
@@ -674,6 +691,8 @@ export class Simulation {
     const rng = this.rng.branch(`step:${agent.id}:${agent.stepIndex}`)
     // Whatever they were walking towards before, this step replaces it.
     agent.pendingQueueId = null
+    agent.rowEntry = null
+    agent.along = null
     // Patience is per destination. Somebody who struggled to reach the bar has
     // not used up their allowance for finding the door afterwards.
     if (agent.lastStepBegun !== agent.stepIndex) {
@@ -748,15 +767,9 @@ export class Simulation {
           const record = this.world.seats[seat]
           agent.state = 'walking'
           agent.seatIndex = seat
-          agent.exactTarget = record.position
           agent.facingTarget = record.facing
           agent.timer = step.duration ? sampleDistribution(rng, step.duration) : 900
-          // One field per place, not per piece of furniture. Keyed on the table,
-          // its eight guests shared a field that led to whichever of them asked
-          // first, and the rest were brought to that side of the table and
-          // left to find their own place through the chairs.
-          const fieldId = `seat:${record.id}`
-          agent.fieldTarget = this.ensurePointField(fieldId, record.position) ? fieldId : null
+          this.approachSeat(agent)
           return
         }
         case 'exit': {
@@ -957,6 +970,152 @@ export class Simulation {
     agent.bestDistance = Infinity
   }
 
+  /**
+   * Head for the seat this person holds, by way of the end of its row if it is
+   * in one. Sent straight at a seat in a row, people crossed the rows behind
+   * it, which a grid a cell a row cannot tell from the passage in front.
+   */
+  private approachSeat(agent: Agent): void {
+    const record = this.world.seats[agent.seatIndex]
+    agent.rowEntry = null
+    agent.along = null
+    if (record.row && this.inRow(agent, record.row)) {
+      agent.along = { row: record.row, points: [record.row.front] }
+    } else if (record.row) {
+      const here = { x: agent.x, y: agent.y }
+      const end = this.rowEnd(agent, agent.seatIndex, here, record.row.front)
+      const fieldId = end ? `row:${record.id}:${end.index}` : ''
+      if (end && this.ensurePointField(fieldId, end.point)) {
+        agent.rowEntry = end.point
+        agent.exactTarget = end.point
+        agent.fieldTarget = fieldId
+        return
+      }
+    }
+    this.aimAtSeat(agent)
+  }
+
+  /** Head straight for the seat this person holds. */
+  private aimAtSeat(agent: Agent): void {
+    const record = this.world.seats[agent.seatIndex]
+    agent.exactTarget = record.position
+    // One field per place, not per piece of furniture. Keyed on the table,
+    // its eight guests shared a field that led to whichever of them asked
+    // first, and the rest were brought to that side of the table and
+    // left to find their own place through the chairs.
+    const fieldId = `seat:${record.id}`
+    agent.fieldTarget = this.ensurePointField(fieldId, record.position) ? fieldId : null
+  }
+
+  /**
+   * The way out along a row for somebody leaving it, or null if they are not in
+   * one. Walked straight out of a row the way anybody leaves anything, people
+   * climbed across the rows behind them to the nearest door.
+   */
+  private wayOutOfRow(agent: Agent): Agent['along'] {
+    const seated = agent.state === 'seated' && agent.seatIndex >= 0
+    const seatIndex = seated
+      ? agent.seatIndex
+      : this.world.seats.findIndex((seat) => seat.row && this.inRow(agent, seat.row))
+    const row = this.world.seats[seatIndex]?.row
+    if (!row) return null
+    const start = seated ? row.front : { x: agent.x, y: agent.y }
+    const end = this.rowEnd(agent, seatIndex, start, start)
+    if (!end) return null
+    return { row, points: seated ? [row.front, end.point] : [end.point] }
+  }
+
+  /** Whether somebody is standing in the passage along the front of this row. */
+  private inRow(agent: Agent, row: SeatRowAccess): boolean {
+    const [a, b] = row.ends
+    const length = distance(a, b)
+    const ux = (b.x - a.x) / length
+    const uy = (b.y - a.y) / length
+    const along = (agent.x - a.x) * ux + (agent.y - a.y) * uy
+    const across = Math.abs((agent.x - a.x) * uy - (agent.y - a.y) * ux)
+    return (
+      along > -ROW_PASSAGE_HALF_WIDTH &&
+      along < length + ROW_PASSAGE_HALF_WIDTH &&
+      across < ROW_PASSAGE_HALF_WIDTH
+    )
+  }
+
+  /**
+   * The end of a row to come in or go out by, seen from `from`.
+   *
+   * The nearer end, unless it means getting past more of the row: every seat
+   * taken between the end and the seat is somebody to sidle past, and people
+   * will walk round to the far end rather than squeeze past half a row. Nobody
+   * gets past a wheelchair, which fills the passage in front of its seat: sent
+   * that way anyway, people stood at it until they gave up.
+   */
+  private rowEnd(
+    agent: Agent,
+    seatIndex: number,
+    from: Vec2,
+    start: Vec2,
+  ): { point: Vec2; index: number } | null {
+    const seat = this.world.seats[seatIndex]
+    const row = seat.row
+    if (!row) return null
+    const [a, b] = row.ends
+    const length = distance(a, b)
+    const at = (p: Vec2): number => ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / length
+    const here = at(start)
+    let best: { point: Vec2; index: number } | null = null
+    let bestCost = Infinity
+    row.ends.forEach((end, index) => {
+      // A row whose end is against a wall is only reached from the other one.
+      if (sampleField(this.world.grid, this.world.clearance, end.x, end.y, 10) < agent.radius) {
+        return
+      }
+      const edge = index === 0 ? 0 : length
+      const between = (p: Vec2): boolean => (at(p) - here) * (at(p) - edge) < 0
+      for (const id of this.live) {
+        const other = this.agents[id]
+        if (!other || other === agent || other.sidles || other.seatIndex < 0) continue
+        const held = this.world.seats[other.seatIndex]
+        if (held.furnitureId === seat.furnitureId && between(held.position)) return
+      }
+      let passes = 0
+      for (let i = 0; i < this.world.seats.length; i++) {
+        const other = this.world.seats[i]
+        if (i === seatIndex || !this.seatTaken[i] || other.furnitureId !== seat.furnitureId)
+          continue
+        if (between(other.position)) passes++
+      }
+      const cost = distance(from, end) + passes * ROW_PASS_COST
+      if (cost < bestCost) {
+        bestCost = cost
+        best = { point: end, index }
+      }
+    })
+    return best
+  }
+
+  /**
+   * Whether the rest of a row can still be reached with somebody who cannot go
+   * along it sitting at this end. A wheelchair at the only open end of a row,
+   * with the other end against a wall, shut everybody else out of it, and
+   * they gave up with the seats in front of them empty.
+   */
+  private rowStaysOpen(agent: Agent, seatIndex: number): boolean {
+    const seat = this.world.seats[seatIndex]
+    const row = seat.row
+    if (!row) return true
+    const [a, b] = row.ends
+    const far = distance(seat.position, a) > distance(seat.position, b) ? a : b
+    if (sampleField(this.world.grid, this.world.clearance, far.x, far.y, 10) < agent.radius) {
+      return false
+    }
+    for (const id of this.live) {
+      const other = this.agents[id]
+      if (!other || other === agent || other.sidles || other.seatIndex < 0) continue
+      if (this.world.seats[other.seatIndex].furnitureId === seat.furnitureId) return false
+    }
+    return true
+  }
+
   private claimSeat(agent: Agent, zoneId: string | undefined, rng: Rng): number {
     const zone = zoneId ? this.world.waypoints.find((w) => w.id === zoneId) : undefined
     let best = -1
@@ -965,13 +1124,20 @@ export class Simulation {
       if (this.seatTaken[i]) continue
       const seat = this.world.seats[i]
       if (zone && !pointInPolygon(seat.position, zone.polygon)) continue
+      // A wheelchair does not go along a row. Seated in the middle of one, its
+      // user could not leave, and sat half in the passage behind, where nobody
+      // could get past them to the rest of that row either.
+      if (!agent.sidles && seat.row && !seat.row.atEnd) continue
+      if (!agent.sidles && seat.row && !this.rowStaysOpen(agent, i)) continue
       if (!this.seatingSpot(agent.radius, seat.position)) continue
       // Prefer near seats, but jitter so a table fills plausibly rather than in index order.
       const score = distance(seat.position, { x: agent.x, y: agent.y }) * rng.uniform(0.85, 1.25)
-      if (score < bestScore) {
-        bestScore = score
-        best = i
-      }
+      if (score >= bestScore) continue
+      // Checked last because it is the costly test: a seat in a row with no end
+      // this person can get in by is not a seat they can take.
+      if (seat.row && !this.rowEnd(agent, i, { x: agent.x, y: agent.y }, seat.row.front)) continue
+      bestScore = score
+      best = i
     }
     if (best >= 0) this.seatTaken[best] = 1
     return best
@@ -1030,6 +1196,7 @@ export class Simulation {
     agent.state = 'queuing'
     agent.queueId = queue.record.id
     agent.pendingQueueId = null
+    agent.along = null
     agent.joinedQueueAt = this.time
     queue.waiting.push(agent.id)
     queue.maxQueue = Math.max(queue.maxQueue, queue.waiting.length)
@@ -1485,10 +1652,13 @@ export class Simulation {
       const agent = this.agents[id]
       if (!agent || agent.state === 'done') continue
       this.leaveQueue(agent)
+      const out = this.wayOutOfRow(agent)
       if (agent.seatIndex >= 0) {
         this.seatTaken[agent.seatIndex] = 0
         agent.seatIndex = -1
       }
+      agent.rowEntry = null
+      agent.along = out
       // Under evacuation everyone moves with urgency, as observed in drills.
       agent.preferredSpeed = Math.min(agent.maxSpeed, agent.preferredSpeed * 1.25)
       agent.caution = Math.max(0.6, agent.caution * 0.8)
@@ -1507,6 +1677,9 @@ export class Simulation {
     agent.bestDistance = Infinity
     const itinerary = this.itineraryOf(agent)
     agent.replanCount++
+    // Stuck on the way along a row, they stop trying to follow it.
+    agent.along = null
+    agent.rowEntry = null
     // Stuck on the usual way, somebody looks at what is actually in front of
     // them. Most people follow the shortest route in good part, and the
     // shortest route does not know a seated guest has filled the gap it runs
@@ -1672,6 +1845,22 @@ export class Simulation {
             }
             break
           }
+          if (agent.along && !this.inRow(agent, agent.along.row)) {
+            // Pushed out of the row, they go back to the end of it. Still
+            // steering along it, they walked at their seat across the row in
+            // front and stood against it.
+            agent.along = null
+            if (agent.seatIndex >= 0) this.approachSeat(agent)
+          } else if (agent.along && distance(agent, agent.along.points[0]) <= ROW_POINT_REACH) {
+            agent.along.points.shift()
+            if (agent.along.points.length === 0) agent.along = null
+          }
+          if (
+            agent.rowEntry &&
+            distance(agent, agent.rowEntry) <= ARRIVE_RADIUS + agent.radius * 0.5
+          ) {
+            this.approachSeat(agent)
+          }
           if (agent.seatIndex >= 0 && !arrived) {
             const spot = this.seatingSpot(agent.radius, this.world.seats[agent.seatIndex].position)
             // Somebody sat down beside the seat they were heading for and left
@@ -1680,7 +1869,7 @@ export class Simulation {
               this.beginStep(agent)
               break
             }
-            agent.exactTarget = spot
+            if (!agent.rowEntry) agent.exactTarget = spot
           }
           const step = this.itineraryOf(agent)[agent.stepIndex]
           if (agent.stepIndex >= this.itineraryOf(agent).length) {
@@ -1698,6 +1887,7 @@ export class Simulation {
           if (!arrived) break
           if (agent.seatIndex >= 0) {
             agent.state = 'seated'
+            agent.along = null
             agent.vx = 0
             agent.vy = 0
             break
@@ -1725,12 +1915,14 @@ export class Simulation {
           // Somebody sidling past is nearer than two standing bodies can be,
           // so getting up into them is an overlap. They wait until the way is clear.
           if (agent.timer <= 0 && !(agent.state === 'seated' && this.beingPassed(agent))) {
+            const out = this.wayOutOfRow(agent)
             if (agent.seatIndex >= 0) {
               this.seatTaken[agent.seatIndex] = 0
               agent.seatIndex = -1
             }
             agent.stepIndex++
             this.beginStep(agent)
+            if (out && !agent.along) agent.along = out
           }
           break
         }
@@ -1975,7 +2167,12 @@ export class Simulation {
     const target = agent.exactTarget
     const toTarget = target ? distance({ x: agent.x, y: agent.y }, target) : Infinity
 
-    if (target && toTarget <= DIRECT_RANGE && this.lineIsWalkable(agent, target)) {
+    const pass = agent.state === 'walking' ? agent.along?.points[0] : undefined
+    if (pass) {
+      const d = normalize({ x: pass.x - agent.x, y: pass.y - agent.y })
+      dirX = d.x
+      dirY = d.y
+    } else if (target && toTarget <= DIRECT_RANGE && this.lineIsWalkable(agent, target)) {
       const d = normalize({ x: target.x - agent.x, y: target.y - agent.y })
       dirX = d.x
       dirY = d.y

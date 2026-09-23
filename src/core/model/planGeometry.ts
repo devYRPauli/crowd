@@ -201,7 +201,24 @@ export interface WorldSeat {
   /** Direction the seated person faces, in world radians. */
   facing: number
   kind: SeatSlot['kind']
+  /** How a seat in a row of fixed seats is reached; absent for any other seat. */
+  row?: SeatRowAccess
 }
+
+export interface SeatRowAccess {
+  /** Where the passage along the front of the row meets the aisle, one per end. */
+  ends: readonly [Vec2, Vec2]
+  /** The point on that passage in front of this seat. */
+  front: Vec2
+  /** Whether this is a seat at one end of the row, next to the aisle. */
+  atEnd: boolean
+}
+
+/**
+ * How far past the end of a row its passage reaches: far enough that somebody
+ * standing there is in the aisle, not on the end seat.
+ */
+const ROW_END_REACH = 0.3
 
 /** Two places closer than this are one place. */
 const SAME_SEAT = 0.2
@@ -216,11 +233,22 @@ export const planSeats = (plan: Plan): WorldSeat[] => {
     const slots = entry.seats(size)
     const c = Math.cos(item.rotation)
     const s = Math.sin(item.rotation)
+    const toWorld = (x: number, z: number): Vec2 => ({
+      x: item.position.x + x * c - z * s,
+      y: item.position.y + x * s + z * c,
+    })
+    // The passage runs along the front edge of the row. Standing there a body
+    // is clear of the seated knees it sidles past and of the backs of the row
+    // in front.
+    const passage = size.depth / 2
+    const ends = entry.rowSeating
+      ? ([
+          toWorld(-size.width / 2 - ROW_END_REACH, passage),
+          toWorld(size.width / 2 + ROW_END_REACH, passage),
+        ] as const)
+      : null
     slots.forEach((slot, index) => {
-      const position = {
-        x: item.position.x + slot.x * c - slot.z * s,
-        y: item.position.y + slot.x * s + slot.z * c,
-      }
+      const position = toWorld(slot.x, slot.z)
       // A table offers its covers and a chair set at one offers its seat, at
       // the same spot. Counted twice, two guests claimed every chair and the
       // one pushed off it sat down wherever they were shoved.
@@ -231,6 +259,15 @@ export const planSeats = (plan: Plan): WorldSeat[] => {
         position,
         facing: slot.facing + item.rotation,
         kind: slot.kind,
+        ...(ends
+          ? {
+              row: {
+                ends,
+                front: toWorld(slot.x, passage),
+                atEnd: index === 0 || index === slots.length - 1,
+              },
+            }
+          : {}),
       })
     })
   }
