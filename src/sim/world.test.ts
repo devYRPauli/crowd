@@ -466,6 +466,23 @@ describe('what is solid', () => {
     )
     expect(ids(stranded)).toEqual([])
   })
+
+  it('prices a loose chair above open floor, so routes go round a ring of them', () => {
+    const b = new PlanBuilder()
+    b.room(0, 0, 10, 10)
+    b.tableWithChairs('table-round-8', 5, 5)
+    const plan = b.build()
+    const world = compile(plan)
+
+    const chair = plan.furniture.find((item) => item.catalogId !== 'table-round-8')!
+    const onChair = world.baseSpeed[cellAt(world, chair.position.x, chair.position.y)]
+    const onFloor = world.baseSpeed[cellAt(world, 1.5, 1.5)]
+    // Walkable, because you pull a chair out to sit on it, but dearer than the
+    // floor beside it: at the same price the way to a place across the table
+    // ran through the chairs, and seated guests closed it.
+    expect(onChair).toBeGreaterThan(0)
+    expect(onChair).toBeLessThan(onFloor / 2)
+  })
 })
 
 describe('keep-clear zones', () => {

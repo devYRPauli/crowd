@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Simulation } from './engine'
-import { AGENT_FIELD, AGENT_STRIDE } from './types'
+import { AGENT_FIELD, AGENT_STRIDE, agentStateIndex } from './types'
 import type { Plan, Scenario, Wall, Zone } from '../core/model/types'
 import { createScenario, createPopulation } from '../core/model/defaults'
 import { PlanBuilder } from '../library/planBuilder'
@@ -244,5 +244,67 @@ describe('Simulation', () => {
     // Two servers at 20 s each cannot clear sixty in under 600 s; a queue that
     // keeps them busy finishes not long after.
     expect(summary.clearanceTime).toBeLessThan(900)
+  }, 60_000)
+
+  it('brings each guest at a table round to a place of their own', () => {
+    // A field to the table led everybody to the place of whoever asked first,
+    // and the guests seated across from it found their way round from there
+    // through the chairs: the last of eight sat down after 140 to 330 s. In the
+    // banquet hall some never did. Averaged over seeds, because who is last to
+    // a table and how long they take turns on the order people arrive in.
+    //
+    // Not yet fixed: on about half the seeds one guest still steps into the
+    // ring beside two seated neighbours and waits there until one of them gets
+    // up after their two minutes, which is most of this mean.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 8, 8)
+    b.door(room.south, 4, 1.83, 'door', 'both')
+    b.tableWithChairs('table-round-8', 4, 4.5)
+    const seating = b.zone('seating', 2, 2.5, 6, 6.5, 'Table')
+    const entry = b.zone('entry', 2.5, 0.3, 5.5, 1.5, 'In')
+    const plan = b.build()
+    const seatedState = agentStateIndex('seated')
+
+    const lastSeated: number[] = []
+    for (let seed = 1; seed <= 8; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 600,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 8,
+            entryIds: [entry.id],
+            arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
+            itinerary: [
+              {
+                id: 'step-seat',
+                kind: 'seat',
+                targetId: seating.id,
+                duration: { kind: 'constant', mean: 120 },
+              },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const sim = new Simulation(plan, scenario)
+      const sat = new Set<number>()
+      while (sat.size < 8 && sim.currentTime < 300) {
+        sim.step(0.1)
+        const { agents, count } = sim.snapshot()
+        for (let i = 0; i < count; i++) {
+          const base = i * AGENT_STRIDE
+          if (agents[base + AGENT_FIELD.state] === seatedState)
+            sat.add(agents[base + AGENT_FIELD.id])
+        }
+      }
+      expect(sat.size).toBe(8)
+      lastSeated.push(sim.currentTime)
+      expect(runToCompletion(sim, 900).warnings).toEqual([])
+    }
+    const mean = lastSeated.reduce((sum, t) => sum + t, 0) / lastSeated.length
+    expect(mean).toBeLessThan(120)
   }, 60_000)
 })

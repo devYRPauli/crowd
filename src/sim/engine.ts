@@ -28,6 +28,7 @@ import {
   pointInPolygon,
 } from '../core/math/geometry'
 import {
+  NAV_CLEARANCE,
   buildWorld,
   nearestFreeCell,
   queueSlotFacing,
@@ -283,6 +284,9 @@ export class Simulation {
    */
   private exitLoads = new Map<string, ExitLoad>()
   private seatTaken: Uint8Array
+  private seatedCells: Uint8Array
+  /** Destinations people choose between, whose fields are kept for good. */
+  private routeIds = new Set<string>()
 
   private time = 0
   private completed = 0
@@ -325,6 +329,7 @@ export class Simulation {
     this.obstacleIndex = new ObstacleIndex(this.world.obstacles, this.world.bounds, 2)
     this.hash = new SpatialHash(NEIGHBOUR_RANGE)
     this.seatTaken = new Uint8Array(this.world.seats.length)
+    this.seatedCells = new Uint8Array(this.world.grid.cols * this.world.grid.rows)
     for (const exit of this.world.exits) {
       this.exitLoads.set(exit.id, { heading: 0, through: 0, firstAt: 0, lastAt: 0 })
     }
@@ -376,15 +381,20 @@ export class Simulation {
   // --- setup -----------------------------------------------------------------
 
   private prepareFields(): void {
-    for (const record of [...this.world.exits, ...this.world.waypoints]) {
+    for (const record of [...this.world.exits, ...this.world.waypoints, ...this.world.queues]) {
       this.fields.ensure(record.id, record.goalCells)
-    }
-    for (const queue of this.world.queues) {
-      this.fields.ensure(queue.id, queue.goalCells)
+      this.routeIds.add(record.id)
     }
   }
 
-  /** A field to a specific point, solved once and never congestion-refreshed. */
+  /**
+   * A field to a specific point, kept while somebody is walking it.
+   *
+   * A field to one chair is needed by one guest for one walk. Kept after it,
+   * the banquet's eighty-odd chairs shared the refresh budget with the routes
+   * people were actually on, nearly doubled the cost of a run, and made every
+   * route in use wait twice as long to see the crowd.
+   */
   private ensurePointField(id: string, point: Vec2): boolean {
     if (this.fields.has(id)) return true
     if (this.fields.size > 96) return false
@@ -670,6 +680,13 @@ export class Simulation {
           return
         }
         case 'seat': {
+          // Re-planned on the way to a chair, somebody lets go of it before
+          // choosing again. Held on to, it stayed taken for the rest of the run
+          // and they sat down wherever the floor spot they were given next was.
+          if (agent.seatIndex >= 0) {
+            this.seatTaken[agent.seatIndex] = 0
+            agent.seatIndex = -1
+          }
           const seat = this.claimSeat(agent, step.targetId, rng)
           if (seat === -1) {
             // No seat free: walk onto the floor and carry on from there, rather
@@ -690,7 +707,11 @@ export class Simulation {
           agent.exactTarget = record.position
           agent.facingTarget = record.facing
           agent.timer = step.duration ? sampleDistribution(rng, step.duration) : 900
-          const fieldId = `seat:${record.furnitureId}`
+          // One field per place, not per piece of furniture. Keyed on the table,
+          // its eight guests shared a field that led to whichever of them asked
+          // first, and the rest were brought to that side of the table and
+          // left to find their own place through the chairs.
+          const fieldId = `seat:${record.id}`
           agent.fieldTarget = this.ensurePointField(fieldId, record.position) ? fieldId : null
           return
         }
@@ -1071,6 +1092,33 @@ export class Simulation {
     return out.x === 0 && out.y === 0 ? toTarget : out
   }
 
+  /**
+   * Move somebody's spot in a destination they are already standing in to one
+   * they can walk to in a straight line.
+   *
+   * Inside its own goal a destination's field is flat, so it cannot lead
+   * anybody round anything. A spot drawn from anywhere on the banquet's dining
+   * floor was usually behind a table: the guests sent to one walked into the
+   * table, stood there, and in the end gave up and left. Inside is tested on
+   * the zone itself, because at its edge the field still reads a faint slope
+   * from the floor outside, and a guest there followed it nowhere.
+   */
+  private retargetInside(agent: Agent): void {
+    const target = agent.exactTarget
+    if (agent.state !== 'walking' || !target || !agent.fieldTarget) return
+    const destination = this.world.waypoints.find((w) => w.id === agent.fieldTarget)
+    if (!destination || !pointInPolygon(agent, destination.polygon)) return
+    if (this.lineIsWalkable(agent, target)) return
+    const rng = this.rng.branch(`retarget:${agent.id}:${Math.round(this.time * 10)}`)
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const spot = samplePointInDestination(this.world, destination, () => rng.next())
+      if (this.lineIsWalkable(agent, spot)) {
+        agent.exactTarget = spot
+        return
+      }
+    }
+  }
+
   /** Is this point somewhere the navigation grid never solved a route for? */
   private inNavDeadZone(x: number, y: number): boolean {
     const { cols, rows, cellSize, originX, originY } = this.world.grid
@@ -1248,7 +1296,8 @@ export class Simulation {
     this.updateQueues(dt)
     this.updateStates(dt)
     this.updateDensity()
-    this.fields.update(this.time, this.density.values)
+    this.dropUnusedFields()
+    this.fields.update(this.time, this.density.values, this.markSeated())
     this.steer(dt)
     this.resolveContacts(dt)
     this.integrate(dt)
@@ -1256,6 +1305,45 @@ export class Simulation {
     this.relaxOverlaps()
     this.accumulateAreas(dt)
     this.accumulateLos(dt)
+  }
+
+  private dropUnusedFields(): void {
+    if (this.fields.size === this.routeIds.size) return
+    const kept = new Set(this.routeIds)
+    for (const id of this.live) {
+      const agent = this.agents[id]
+      if (!agent?.fieldTarget || agent.state === 'seated' || agent.state === 'served') continue
+      kept.add(agent.fieldTarget)
+    }
+    this.fields.retain(kept)
+  }
+
+  /**
+   * Cells somebody is sitting on, for the congested routes to go round.
+   *
+   * Grown by a walker's clearance, as geometry is: a route is a line for
+   * somebody's centre. Marked at the seated body alone, it ran through a gap
+   * between a seated guest and the table that nobody fits through.
+   */
+  private markSeated(): Uint8Array {
+    const cells = this.seatedCells
+    const { grid } = this.world
+    cells.fill(0)
+    for (const id of this.live) {
+      const agent = this.agents[id]
+      if (agent?.state !== 'seated') continue
+      const reach = agent.radius + NAV_CLEARANCE
+      const { col, row } = worldToCell(grid, agent.x, agent.y)
+      const span = Math.ceil(reach / grid.cellSize)
+      for (let r = Math.max(0, row - span); r <= Math.min(grid.rows - 1, row + span); r++) {
+        for (let c = Math.max(0, col - span); c <= Math.min(grid.cols - 1, col + span); c++) {
+          if (distance(cellCenter(grid, c, r), agent) <= reach) {
+            cells[gridIndex(grid, c, r)] = 1
+          }
+        }
+      }
+    }
+    return cells
   }
 
   private applyEvacuation(): void {
@@ -1288,6 +1376,11 @@ export class Simulation {
     agent.bestDistance = Infinity
     const itinerary = this.itineraryOf(agent)
     agent.replanCount++
+    // Stuck on the usual way, somebody looks at what is actually in front of
+    // them. Most people follow the shortest route in good part, and the
+    // shortest route does not know a seated guest has filled the gap it runs
+    // through.
+    if (this.scenario.routing.adaptive) agent.routeAwareness = 1
     // After a few attempts, accept that this person cannot do what they came
     // for and send them to an exit. Leaving them wandering would quietly skew
     // every average for the rest of the run, and a plan that strands people is
@@ -1642,6 +1735,7 @@ export class Simulation {
     let dirY = 0
     let speed = agent.preferredSpeed
 
+    this.retargetInside(agent)
     const target = agent.exactTarget
     const toTarget = target ? distance({ x: agent.x, y: agent.y }, target) : Infinity
 

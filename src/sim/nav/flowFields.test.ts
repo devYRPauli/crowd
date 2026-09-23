@@ -86,6 +86,8 @@ const room = (
   return { grid, cache: new FlowFieldCache(grid, blocked, speed) }
 }
 
+const nobodySeated = (grid: NavGrid): Uint8Array => new Uint8Array(cellCount(grid))
+
 const congestionAt = (
   grid: NavGrid,
   density: number,
@@ -513,6 +515,30 @@ describe('FlowFieldCache', () => {
     expect(cache.direction('nowhere', { x: 8, y: 3 }, 1)).toBeNull()
   })
 
+  it('goes round somebody sitting in the way, not through them', () => {
+    // The south door again, with one guest seated in it. As density they are
+    // about one person per square metre, which Weidmann barely slows; as a
+    // body they are there for the meal.
+    const { grid, cache } = room(
+      (x, y) => x > 5.9 && x < 6.2 && !(y > 1 && y < 2) && !(y > 4 && y < 5),
+    )
+    cache.ensure('east', [cellAt(grid, 11.5, 3)])
+    const from = { x: 2, y: 1.5 }
+    const shortest = requireRoute(cache.direction('east', from, 0))
+    const inDoor = (x: number, y: number) => x > 5.6 && x < 6.5 && y > 1 && y < 2
+    const guest = congestionAt(grid, 1, inDoor)
+
+    cache.update(10, guest, nobodySeated(grid))
+    expect(requireRoute(cache.direction('east', from, 1)).dy).toBeCloseTo(shortest.dy, 1)
+
+    const seated = new Uint8Array(cellCount(grid))
+    guest.forEach((density, cell) => {
+      if (density > 0) seated[cell] = 1
+    })
+    cache.update(20, guest, seated)
+    expect(requireRoute(cache.direction('east', from, 1)).dy).toBeGreaterThan(shortest.dy + 0.3)
+  })
+
   it('bends around a crowd once density is fed in, and not before', () => {
     // Two doors through one wall. The walker starts level with the south door,
     // which is the shortest way through by a clear margin.
@@ -531,7 +557,7 @@ describe('FlowFieldCache', () => {
     expect(requireRoute(cache.direction('east', from, 1)).dy).toBeCloseTo(shortest.dy, 12)
 
     const jam = congestionAt(grid, 5, (x, y) => x > 4.5 && x < 7.5 && y < 3)
-    cache.update(10, jam)
+    cache.update(10, jam, nobodySeated(grid))
 
     const aware = requireRoute(cache.direction('east', from, 1))
     // The whole point of carrying two potentials: same walker, same instant, a
@@ -572,7 +598,7 @@ describe('FlowFieldCache', () => {
     const empty = cache.cost('east', from, 0)
     const clear = requireRoute(cache.direction('east', from, 0))
     const crush = congestionAt(grid, 6, () => true)
-    cache.update(10, crush)
+    cache.update(10, crush, nobodySeated(grid))
 
     // What a route costs is what walking it costs: the scenario's share of the
     // walk repriced on the same Weidmann curve the engine sets pace from, the
@@ -593,7 +619,7 @@ describe('FlowFieldCache', () => {
     // times as long and finite.
     expect(weidmannFactor(6)).toBe(0.12)
     cache.setOptions({ congestionWeight: 1 })
-    cache.update(20, crush)
+    cache.update(20, crush, nobodySeated(grid))
     expect(cache.cost('east', from, 1) / empty).toBeCloseTo(1 / 0.12, 3)
 
     // And a crowd that is everywhere is no reason to walk anywhere else: the
@@ -611,7 +637,7 @@ describe('FlowFieldCache', () => {
     const jam = congestionAt(grid, 4, (x) => x > 5 && x < 7)
 
     // Default budget is two per tick, so a third destination waits a tick.
-    cache.update(10, jam)
+    cache.update(10, jam, nobodySeated(grid))
     expect(refreshedAt(cache, 'a')).toBe(10)
     expect(refreshedAt(cache, 'b')).toBe(10)
     expect(refreshedAt(cache, 'c')).toBe(-Infinity)
@@ -619,12 +645,12 @@ describe('FlowFieldCache', () => {
     // Oldest first: the destination that has never been solved goes next tick,
     // ahead of the two that just ran — and those two are inside the replan
     // interval, so they do not re-solve on every tick to keep it company.
-    cache.update(10.5, jam)
+    cache.update(10.5, jam, nobodySeated(grid))
     expect(refreshedAt(cache, 'c')).toBe(10.5)
     expect(refreshedAt(cache, 'a')).toBe(10)
 
     // Two ticks later the first pair is overdue and the newcomer is not.
-    cache.update(12, jam)
+    cache.update(12, jam, nobodySeated(grid))
     expect(refreshedAt(cache, 'a')).toBe(12)
     expect(refreshedAt(cache, 'b')).toBe(12)
     expect(refreshedAt(cache, 'c')).toBe(10.5)
@@ -633,7 +659,7 @@ describe('FlowFieldCache', () => {
     // overdue goes at once — which is what a venue does on its first tick, and
     // why the default is two.
     cache.setOptions({ budgetPerTick: 3 })
-    cache.update(14, jam)
+    cache.update(14, jam, nobodySeated(grid))
     expect(refreshedAt(cache, 'a')).toBe(14)
     expect(refreshedAt(cache, 'b')).toBe(14)
     expect(refreshedAt(cache, 'c')).toBe(14)
@@ -642,7 +668,7 @@ describe('FlowFieldCache', () => {
     expect(cache.size).toBe(1)
     expect(cache.has('b')).toBe(false)
     // A dropped destination stops consuming the budget entirely.
-    cache.update(20, jam)
+    cache.update(20, jam, nobodySeated(grid))
     expect(refreshedAt(cache, 'a')).toBe(20)
     expect(refreshedAt(cache, 'c')).toBeNaN()
   })
@@ -728,18 +754,18 @@ describe('FlowFieldCache', () => {
     expect(cache.get('east')?.staticPotential).toBe(potential)
 
     const jam = congestionAt(grid, 4, (x) => x > 5 && x < 7)
-    cache.update(10, jam)
+    cache.update(10, jam, nobodySeated(grid))
     const congested = field.congestedPotential
     expect(congested).not.toBe(potential)
 
     // Inside the two-second replan interval nothing is re-solved at all: this is
     // the budget that keeps a tick from turning into a dozen eikonal solves.
-    cache.update(11.5, jam)
+    cache.update(11.5, jam, nobodySeated(grid))
     expect(field.congestedPotential).toBe(congested)
     expect(field.refreshedAt).toBe(10)
 
     // When it does come due, only the congested field is rebuilt.
-    cache.update(12.5, jam)
+    cache.update(12.5, jam, nobodySeated(grid))
     expect(field.congestedPotential).not.toBe(congested)
     expect(field.staticPotential).toBe(potential)
     expect(field.refreshedAt).toBe(12.5)
@@ -754,6 +780,7 @@ describe('FlowFieldCache', () => {
     cache.update(
       100,
       congestionAt(grid, 5, () => true),
+      nobodySeated(grid),
     )
     expect(field.congestedPotential).toBe(congested)
     expect(field.refreshedAt).toBe(-Infinity)

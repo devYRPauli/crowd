@@ -64,6 +64,9 @@ export const DEFAULT_FLOW_OPTIONS: FlowFieldOptions = {
  */
 export const speedFromDensity = (density: number): number => weidmannFactor(density)
 
+/** Share of a cell's speed left when somebody is sitting on it. */
+const SEATED_SPEED = 0.05
+
 export class FlowFieldCache {
   private fields = new Map<string, RouteField>()
   private speedScratch: Float32Array
@@ -110,9 +113,10 @@ export class FlowFieldCache {
 
   /**
    * Refresh the congested fields that are most overdue, up to the per-tick
-   * budget. `density` is persons per square metre, per cell.
+   * budget. `density` is persons per square metre, per cell, and `seated` is 1
+   * on cells somebody is sitting on.
    */
-  update(time: number, density: Float32Array): void {
+  update(time: number, density: Float32Array, seated: Uint8Array): void {
     if (this.options.congestionWeight <= 0) return
     const due = this.queue
       .map((id) => this.fields.get(id))
@@ -126,7 +130,12 @@ export class FlowFieldCache {
     const cells = this.grid.cols * this.grid.rows
     for (let i = 0; i < cells; i++) {
       const crowdFactor = speedFromDensity(density[i])
-      this.speedScratch[i] = this.baseSpeed[i] * (1 - weight + weight * crowdFactor)
+      const speed = this.baseSpeed[i] * (1 - weight + weight * crowdFactor)
+      // Somebody sitting down is not a crowd that thins as you press into it.
+      // Weidmann's curve priced the gap behind one seated guest barely above an
+      // empty one, and staff routed through it stood behind that guest for the
+      // rest of the dinner.
+      this.speedScratch[i] = seated[i] ? speed * SEATED_SPEED : speed
     }
     for (const field of due) {
       field.congestedPotential = solveEikonal(

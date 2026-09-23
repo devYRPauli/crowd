@@ -52,6 +52,7 @@ import {
   rasterizePolygon,
   worldToCell,
 } from './nav/eikonal'
+import { resolveCatalogItem } from '../library/catalog'
 import type { OrcaObstacle } from './avoidance/orca'
 import { buildObstacles } from './avoidance/orca'
 
@@ -262,6 +263,9 @@ export const collectObstaclePolygons = (plan: Plan): Polygon[] => {
   return polys
 }
 
+/** How many times open floor it costs to cross a chair rather than go round it. */
+const LOOSE_SEATING_COST = 4
+
 /** Cells wanted across the narrowest doorway people have to walk through. */
 const CELLS_ACROSS_AN_OPENING = 8
 /** Above this the eikonal solve and the density field stop being cheap. */
@@ -357,6 +361,20 @@ export const buildWorld = (
     const mask = new Uint8Array(cells)
     rasterizePolygon(grid, zone.polygon, mask, 1, 0)
     for (let i = 0; i < cells; i++) if (mask[i]) baseSpeed[i] = Math.min(baseSpeed[i], 1 / cost)
+  }
+
+  // A loose chair is walkable, because you pull one out to sit down, but nobody
+  // walks over chairs with floor beside them. Priced like open floor, the
+  // quickest way to a place across a table ran round the table's edge through
+  // its ring of chairs, and once guests sat down there was no way on and none
+  // back.
+  const seating = new Uint8Array(cells)
+  for (const item of plan.furniture) {
+    if (isFurnitureBlocking(item) || !resolveCatalogItem(item.catalogId).seats) continue
+    rasterizePolygon(grid, furniturePolygon(item), seating, 1, 0)
+  }
+  for (let i = 0; i < cells; i++) {
+    if (seating[i]) baseSpeed[i] = Math.min(baseSpeed[i], 1 / LOOSE_SEATING_COST)
   }
 
   // Signed clearance: positive is metres to the nearest solid, negative is
