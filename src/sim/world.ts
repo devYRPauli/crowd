@@ -33,6 +33,7 @@ import {
   openingThreshold,
   planBounds,
   planSeats,
+  rowBackPolygon,
   servicePositions,
   serverPositions,
   serviceFacing,
@@ -128,6 +129,8 @@ export interface SimWorld {
   clearance: Float32Array
   /** Base traversal speed multiplier in (0, 1]; keep-clear zones lower it. */
   baseSpeed: Float32Array
+  /** 1 behind the seat line of a theatre row, which nobody walks over. */
+  rowBacks: Uint8Array
   obstacles: OrcaObstacle[]
   obstaclePolygons: Polygon[]
   entries: DestinationRecord[]
@@ -380,6 +383,15 @@ export const buildWorld = (
   }
   for (let i = 0; i < cells; i++) {
     if (seating[i]) baseSpeed[i] = Math.min(baseSpeed[i], 1 / LOOSE_SEATING_COST)
+  }
+  // Not priced into the field: somebody pushed in among the seated from behind
+  // was then sent forward between two of them rather than back the way they
+  // came, and stood there. It is the straight line to a target that must not
+  // run over a row.
+  const rowBacks = new Uint8Array(cells)
+  for (const item of plan.furniture) {
+    const back = rowBackPolygon(item)
+    if (back) rasterizePolygon(grid, back, rowBacks, 1, 0)
   }
 
   // Signed clearance: positive is metres to the nearest solid, negative is
@@ -663,6 +675,7 @@ export const buildWorld = (
     solid,
     clearance,
     baseSpeed,
+    rowBacks,
     obstacles: buildObstacles(obstaclePolygons),
     obstaclePolygons,
     entries,

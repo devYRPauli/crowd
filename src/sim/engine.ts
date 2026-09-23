@@ -25,6 +25,7 @@ import type { Bounds } from '../core/math/geometry'
 import {
   boundsOf,
   closestPointOnPolyline,
+  closestPointOnSegment,
   pointAlongPolyline,
   pointInPolygon,
 } from '../core/math/geometry'
@@ -980,7 +981,14 @@ export class Simulation {
     agent.rowEntry = null
     agent.along = null
     if (record.row && this.inRow(agent, record.row)) {
-      agent.along = { row: record.row, points: [record.row.front] }
+      // Into the passage first. Come a little past the end of the row, one
+      // person stood in the seat line against the somebody sitting at the end,
+      // steering at their seat through them for the rest of the run.
+      const [a, b] = record.row.ends
+      agent.along = {
+        row: record.row,
+        points: [closestPointOnSegment(agent, a, b), record.row.front],
+      }
     } else if (record.row) {
       const here = { x: agent.x, y: agent.y }
       const end = this.rowEnd(agent, agent.seatIndex, here, record.row.front)
@@ -1281,7 +1289,10 @@ export class Simulation {
       const y = agent.y + dy * t
       if (sampleField(grid, this.world.clearance, x, y, 10) < agent.radius) return false
       const { col, row } = worldToCell(grid, x, y)
-      if (this.seatedCells[gridIndex(grid, col, row)]) return false
+      const cell = gridIndex(grid, col, row)
+      // The field goes round a row, but a door 3 m behind somebody getting up
+      // from the back row was in sight over the backs, and they took it.
+      if (this.seatedCells[cell] || this.world.rowBacks[cell]) return false
     }
     return true
   }
@@ -1846,11 +1857,20 @@ export class Simulation {
             break
           }
           if (agent.along && !this.inRow(agent, agent.along.row)) {
-            // Pushed out of the row, they go back to the end of it. Still
-            // steering along it, they walked at their seat across the row in
-            // front and stood against it.
-            agent.along = null
-            if (agent.seatIndex >= 0) this.approachSeat(agent)
+            const { row, points } = agent.along
+            if (agent.seatIndex >= 0) {
+              // Pushed out of the row, they go back to the end of it. Still
+              // steering along it, they walked at their seat across the row in
+              // front and stood against it.
+              agent.along = null
+              this.approachSeat(agent)
+            } else {
+              // On the way out they step back into it. Left to the way to the
+              // door, somebody shoved off the passage by the back row took it
+              // over the row in front and round, or over the back.
+              const back = closestPointOnSegment(agent, row.ends[0], row.ends[1])
+              agent.along = { row, points: [back, points[points.length - 1]] }
+            }
           } else if (agent.along && distance(agent, agent.along.points[0]) <= ROW_POINT_REACH) {
             agent.along.points.shift()
             if (agent.along.points.length === 0) agent.along = null

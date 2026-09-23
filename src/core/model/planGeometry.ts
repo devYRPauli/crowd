@@ -194,6 +194,26 @@ export const furnitureVisualPolygon = (item: FurnitureItem): Polygon => {
   return rectPolygon(item.position, size.width, size.depth, item.rotation)
 }
 
+/**
+ * The back third of a row of fixed seats, or null for anything else. A row is
+ * not an obstacle, because an audience gets along it to their seats, but
+ * nobody climbs over one.
+ */
+export const rowBackPolygon = (item: FurnitureItem): Polygon | null => {
+  if (!resolveCatalogItem(item.catalogId).rowSeating) return null
+  const size = furnitureSize(item)
+  const depth = size.depth / 3
+  const z = -size.depth / 2 + depth / 2
+  const c = Math.cos(item.rotation)
+  const s = Math.sin(item.rotation)
+  return rectPolygon(
+    { x: item.position.x - z * s, y: item.position.y + z * c },
+    size.width,
+    depth,
+    item.rotation,
+  )
+}
+
 export interface WorldSeat {
   id: string
   furnitureId: string
