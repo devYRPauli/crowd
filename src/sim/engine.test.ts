@@ -4,6 +4,7 @@ import { AGENT_FIELD, AGENT_STRIDE, agentStateIndex } from './types'
 import type { Plan, Scenario, Wall, Zone } from '../core/model/types'
 import { createScenario, createPopulation } from '../core/model/defaults'
 import { PlanBuilder } from '../library/planBuilder'
+import { DEFAULT_DOOR_WIDTH, DEFAULT_DOUBLE_DOOR_WIDTH } from '../core/model/standards'
 
 let counter = 0
 const wall = (ax: number, ay: number, bx: number, by: number): Wall => ({
@@ -245,6 +246,61 @@ describe('Simulation', () => {
     // keeps them busy finishes not long after.
     expect(summary.clearanceTime).toBeLessThan(900)
   }, 60_000)
+
+  it('does not let somebody outside the wall take the head of a queue inside it', () => {
+    // The banquet buffet's queue runs down the east wall past an exit door.
+    // People squeezed out through the door were near enough the line to count
+    // as beside it, through the wall, and ranked by how far along it they
+    // were: the head of the queue stood outside for thirteen minutes with all
+    // three servers idle. In this room it stranded part of the queue on three
+    // seeds of four.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 3, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.door(room.east, 4, DEFAULT_DOOR_WIDTH, 'door', 'exit')
+    const buffet = b.service(
+      'Buffet',
+      7.6,
+      9.4,
+      Math.PI,
+      2,
+      { kind: 'constant', mean: 30 },
+      {
+        width: 4.0,
+        depth: 0.9,
+        queue: [
+          { x: 8.8, y: 8.0 },
+          { x: 8.8, y: 5.4 },
+        ],
+      },
+    )
+    b.place('counter-buffet', 7.6, 9.4, Math.PI, { size: { width: 4.0, depth: 0.8, height: 0.9 } })
+    const entry = b.zone('entry', 1.5, 0.3, 4.5, 1.5, 'In')
+    const plan = b.build()
+
+    for (let seed = 1; seed <= 4; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 1800,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 40,
+            entryIds: [entry.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 120 },
+            itinerary: [
+              { id: 'step-buffet', kind: 'service', targetId: buffet.id },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const summary = runToCompletion(new Simulation(plan, scenario), 1800)
+      expect(summary.services[0].served).toBe(40)
+      expect(summary.warnings).toEqual([])
+    }
+  }, 120_000)
 
   it('brings each guest at a table round to a place of their own', () => {
     // A field to the table led everybody to the place of whoever asked first,

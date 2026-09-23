@@ -785,12 +785,21 @@ export class Simulation {
    * starts metering. Borrowing a rate makes an unknown door fill up like a
    * known one. The slowest is the conservative choice — it will not promise
    * more capacity than anything in this venue has actually delivered.
+   *
+   * The people counted are the others heading there. `heading` includes the
+   * person asking whenever it is the door they are already bound for, and
+   * nobody queues behind themselves. Counted in, every door looked a place
+   * worse from the moment you chose it: the last guest out of a banquet, alone
+   * on the south wall, priced their own door at 55 s against 11 s for the
+   * other, switched, priced that one the same way six seconds later, and paced
+   * between the two for twenty minutes.
    */
-  private expectedExitWait(id: string): number {
+  private expectedExitWait(id: string, agent: Agent): number {
     const load = this.exitLoads.get(id)
     if (!load) return 0
     const rate = this.exitRate(load) ?? this.slowestMeasuredExitRate()
-    return rate === null ? 0 : load.heading / rate
+    const others = load.heading - (agent.fieldTarget === id ? 1 : 0)
+    return rate === null ? 0 : others / rate
   }
 
   /**
@@ -804,14 +813,15 @@ export class Simulation {
    * 26% of them took it, and the hall cleared in 128 s where the same crowd
    * splitting properly clears in 98.
    *
-   * `awareness` is how much of the queue the person is paying attention to at
-   * all. At zero this is just the walk, and they head for the nearest door
-   * whatever is happening at it.
+   * Their `routeAwareness` is how much of the queue they are paying attention
+   * to at all. At zero this is just the walk, and they head for the nearest
+   * door whatever is happening at it.
    */
-  private exitCost(id: string, from: Vec2, awareness: number): number {
-    const walk = this.fields.cost(id, from, awareness)
+  private exitCost(id: string, agent: Agent): number {
+    const awareness = agent.routeAwareness
+    const walk = this.fields.cost(id, { x: agent.x, y: agent.y }, awareness)
     if (!Number.isFinite(walk) || awareness <= 0.01) return walk
-    const throughput = Math.max(walk, this.expectedExitWait(id))
+    const throughput = Math.max(walk, this.expectedExitWait(id, agent))
     return walk * (1 - awareness) + throughput * awareness
   }
 
@@ -860,7 +870,7 @@ export class Simulation {
     let best: DestinationRecord | null = null
     let bestCost = Infinity
     for (const exit of this.exitsFor(agent)) {
-      const cost = this.exitCost(exit.id, { x: agent.x, y: agent.y }, agent.routeAwareness)
+      const cost = this.exitCost(exit.id, agent)
       if (cost < bestCost) {
         bestCost = cost
         best = exit
@@ -882,14 +892,13 @@ export class Simulation {
     agent.exitReviewAt = this.time + EXIT_REVIEW_INTERVAL
     const current = agent.fieldTarget
     if (!current || agent.routeAwareness <= 0.01 || this.exitsFor(agent).length < 2) return
-    const here = { x: agent.x, y: agent.y }
-    const currentCost = this.exitCost(current, here, agent.routeAwareness)
+    const currentCost = this.exitCost(current, agent)
     if (!Number.isFinite(currentCost)) return
     let best: DestinationRecord | null = null
     let bestCost = currentCost * EXIT_SWITCH_MARGIN
     for (const exit of this.exitsFor(agent)) {
       if (exit.id === current) continue
-      const cost = this.exitCost(exit.id, here, agent.routeAwareness)
+      const cost = this.exitCost(exit.id, agent)
       if (cost < bestCost) {
         bestCost = cost
         best = exit
@@ -1047,23 +1056,26 @@ export class Simulation {
    * not fit a body fails. A target the person cannot walk straight to is not
    * necessarily unreachable — it usually just needs going round — so a failure
    * here means keep following the field, not give up.
+   *
+   * Somebody sitting down is in the way as much as the table is. Seen through,
+   * the head of a banquet queue three metres from the counter walked straight
+   * at it through a ring of seated guests, stood there for five minutes, and
+   * two of the three staff behind the counter had nobody to serve.
    */
   private lineIsWalkable(agent: Agent, to: Vec2): boolean {
+    const { grid } = this.world
     const dx = to.x - agent.x
     const dy = to.y - agent.y
     const length = Math.hypot(dx, dy)
     if (length < 1e-6) return true
-    const steps = Math.ceil(length / this.world.grid.cellSize)
+    const steps = Math.ceil(length / grid.cellSize)
     for (let i = 1; i <= steps; i++) {
       const t = i / steps
-      const clearance = sampleField(
-        this.world.grid,
-        this.world.clearance,
-        agent.x + dx * t,
-        agent.y + dy * t,
-        10,
-      )
-      if (clearance < agent.radius) return false
+      const x = agent.x + dx * t
+      const y = agent.y + dy * t
+      if (sampleField(grid, this.world.clearance, x, y, 10) < agent.radius) return false
+      const { col, row } = worldToCell(grid, x, y)
+      if (this.seatedCells[gridIndex(grid, col, row)]) return false
     }
     return true
   }
@@ -1083,13 +1095,22 @@ export class Simulation {
    * cannot reach — and not for every blocked line. A target that is genuinely
    * unreachable has to keep reading as unreachable, so that the person gives up
    * on it and the run reports that it happened.
+   *
+   * Out means the nearest floor the field was solved for, in a line they can
+   * walk. Uphill in clearance is not the same thing: in a slot of even width
+   * clearance is flat along its length, and a banquet guest shoved into the
+   * 0.6 m gap between the bar and the wall followed it into the wall for the
+   * rest of the evening.
    */
   private directHeading(agent: Agent, target: Vec2): Vec2 {
     const toTarget = normalize({ x: target.x - agent.x, y: target.y - agent.y })
     if (!this.inNavDeadZone(agent.x, agent.y)) return toTarget
     if (this.lineIsWalkable(agent, target)) return toTarget
-    const out = this.clearanceGradient(agent.x, agent.y)
-    return out.x === 0 && out.y === 0 ? toTarget : out
+    const { grid, navBlocked } = this.world
+    const cell = nearestFreeCell(grid, navBlocked, agent, (p) => this.lineIsWalkable(agent, p))
+    if (cell < 0) return toTarget
+    const out = cellCenter(grid, cell % grid.cols, (cell / grid.cols) | 0)
+    return normalize({ x: out.x - agent.x, y: out.y - agent.y })
   }
 
   /**
@@ -1162,22 +1183,33 @@ export class Simulation {
       agent.fieldTarget = null
       return
     }
-    const onLine = closestPointOnPolyline(record.line, here)
+    // Past the drawn line the place is behind the person ahead, not on the
+    // line, and the way there is a route to them rather than to the line. Sent
+    // to the line first and straight at their place once near it, a guest
+    // joining the banquet bar's queue as it wound off behind a table bounced
+    // off the table, fell back out of range of the line, walked back to it,
+    // and did that until they gave up.
+    if (slotIndex >= record.slots.length) {
+      const ahead = this.agents[queue.waiting[slotIndex - 1]]
+      const anchor = ahead && ahead !== agent && ahead.state === 'queuing' ? ahead : slotPosition
+      const { col, row } = worldToCell(this.world.grid, anchor.x, anchor.y)
+      const fieldId = `queue:${record.id}:${gridIndex(this.world.grid, col, row)}`
+      agent.exactTarget = slotPosition
+      agent.fieldTarget = this.ensurePointField(fieldId, anchor) ? fieldId : null
+      return
+    }
+    const onLine = this.besideQueueLine(record, agent)
     const tailPosition = record.slots[record.slots.length - 1]
-    const nearLine = onLine.distance <= 2.0 || distance(here, tailPosition) <= 2.5
+    const nearLine =
+      onLine !== null ||
+      (distance(here, tailPosition) <= 2.5 && this.lineIsWalkable(agent, tailPosition))
     if (!nearLine) {
       agent.exactTarget = tailPosition
       agent.fieldTarget = record.id
       return
     }
-    // Past the drawn line the place is behind the person ahead, not on the line.
-    if (slotIndex >= record.slots.length) {
-      agent.exactTarget = slotPosition
-      agent.fieldTarget = null
-      return
-    }
     const slotArc = Math.min(slotIndex * record.spacing, record.lineLength)
-    const startArc = onLine.distance <= 2.0 ? onLine.arc : record.lineLength
+    const startArc = onLine ? onLine.arc : record.lineLength
     const nextArc = Math.max(slotArc, startArc - 1.5)
     agent.exactTarget = pointAlongPolyline(record.line, nextArc)
     agent.fieldTarget = null
@@ -1187,13 +1219,28 @@ export class Simulation {
     this.aimAtQueue(queue, agent, agent.queueSlot)
   }
 
+  /**
+   * Where along a queue's drawn line somebody stands, if they are beside it.
+   *
+   * Beside means within two metres and in plain sight. Measured through walls,
+   * the banquet buffet's queue grew past the hall's east door, the crowd
+   * pressed its tail out through it, and the people filing up the outside of
+   * the wall were ranked ahead of everybody inside. The one who reached the
+   * head could not get to the counter, and all three staff stood idle for
+   * twenty minutes.
+   */
+  private besideQueueLine(record: QueueRecord, agent: Agent): { arc: number } | null {
+    const onLine = closestPointOnPolyline(record.line, agent)
+    if (onLine.distance > 2.0 || !this.lineIsWalkable(agent, onLine.point)) return null
+    return onLine
+  }
+
   /** How far somebody stands from the front of a queue, measured along it. */
   private queueProgress(queue: QueueState, agent: Agent): number {
     const record = queue.record
-    const here = { x: agent.x, y: agent.y }
-    const onLine = closestPointOnPolyline(record.line, here)
-    if (onLine.distance <= 2.0) return onLine.arc
-    return record.lineLength + distance(here, record.slots[record.slots.length - 1])
+    const onLine = this.besideQueueLine(record, agent)
+    if (onLine) return onLine.arc
+    return record.lineLength + distance(agent, record.slots[record.slots.length - 1])
   }
 
   /**

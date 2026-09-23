@@ -21,7 +21,7 @@ import { Simulation } from '../engine'
 import { PlanBuilder } from '../../library/planBuilder'
 import { createScenario } from '../../core/model/defaults'
 import { AGENT_FIELD, AGENT_STRIDE } from '../types'
-import type { Plan, Population, Scenario } from '../../core/model/types'
+import type { ArrivalProfile, Plan, Population, Scenario } from '../../core/model/types'
 
 const DT = 0.1
 /** A hall wide enough that the two doors are a real choice, not a formality. */
@@ -37,6 +37,8 @@ interface ExitSplit {
   completed: number
   total: number
   clearanceS: number
+  /** Longest anybody took from appearing to leaving. */
+  longestS: number
 }
 
 /**
@@ -47,7 +49,11 @@ interface ExitSplit {
  * tick is the one it used. The doors are 40 m apart, so there is nothing
  * marginal about the call.
  */
-const runTwoDoorHall = (people: number, adaptive: boolean): ExitSplit => {
+const runTwoDoorHall = (
+  people: number,
+  adaptive: boolean,
+  arrival: ArrivalProfile = { kind: 'all-at-once', startS: 0, windowS: 0 },
+): ExitSplit => {
   const b = new PlanBuilder()
   const room = b.room(0, 0, WIDTH, HEIGHT)
   b.door(room.west, HEIGHT / 2, DOOR)
@@ -65,7 +71,7 @@ const runTwoDoorHall = (people: number, adaptive: boolean): ExitSplit => {
     count: people,
     color: '#4c7dd4',
     entryIds: [entry.id],
-    arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
+    arrival,
     profileMix: [{ profileId: 'adult', weight: 1 }],
     itinerary: [{ id: 'exit-choice:exit', kind: 'exit' }],
   }
@@ -73,7 +79,7 @@ const runTwoDoorHall = (people: number, adaptive: boolean): ExitSplit => {
   const scenario: Scenario = {
     ...base,
     name: 'exit-choice',
-    durationS: 1200,
+    durationS: Math.max(1200, arrival.startS + arrival.windowS + 300),
     seed: 1,
     routing: { ...base.routing, adaptive },
     populations: [population],
@@ -82,19 +88,23 @@ const runTwoDoorHall = (people: number, adaptive: boolean): ExitSplit => {
   const sim = new Simulation(plan, scenario)
   const lastX = new Map<number, number>()
   const used = new Map<number, 'near' | 'far'>()
+  const appeared = new Map<number, number>()
+  let longestS = 0
 
-  for (let i = 0; i < 12_000 && !sim.isFinished; i++) {
+  for (let i = 0; i < scenario.durationS / DT && !sim.isFinished; i++) {
     sim.step(DT)
     const snapshot = sim.snapshot()
     const present = new Set<number>()
     for (let k = 0; k < snapshot.count; k++) {
       const id = snapshot.agents[k * AGENT_STRIDE + AGENT_FIELD.id]
       present.add(id)
+      if (!appeared.has(id)) appeared.set(id, sim.currentTime)
       lastX.set(id, snapshot.agents[k * AGENT_STRIDE + AGENT_FIELD.x])
     }
     for (const [id, x] of lastX) {
       if (present.has(id) || used.has(id)) continue
       used.set(id, x < WIDTH / 2 ? 'near' : 'far')
+      longestS = Math.max(longestS, sim.currentTime - (appeared.get(id) ?? 0))
     }
   }
 
@@ -111,6 +121,7 @@ const runTwoDoorHall = (people: number, adaptive: boolean): ExitSplit => {
     completed: summary.completed,
     total: summary.totalPeople,
     clearanceS: summary.clearanceTime ?? Infinity,
+    longestS,
   }
 }
 
@@ -191,4 +202,28 @@ describe('choice of exit', () => {
     // And it is worth it: a second door that goes unused saves nobody any time.
     expect(adaptive.clearanceS).toBeLessThan(fixed.clearanceS * 0.9)
   }, 300_000)
+
+  /**
+   * Somebody alone in the hall walks out of the door beside them, however
+   * slowly that door has been passing people.
+   *
+   * A door that has seen a trickle all evening has a low measured rate, and a
+   * person who counted themselves in the queue for it priced their own door as
+   * a long wait. The far door had nobody heading for it, so it looked free; on
+   * the way there they counted themselves at that one instead and turned back.
+   * The last guest out of the banquet paced between two doors for twenty
+   * minutes like that.
+   */
+  it('does not make somebody alone queue behind themselves', () => {
+    const result = runTwoDoorHall(24, true, { kind: 'uniform', startS: 0, windowS: 3000 })
+    report('24 people over 3000 s, congestion-aware', result)
+    console.warn(
+      `Exit choice: the longest anybody took to leave was ${result.longestS.toFixed(1)} s`,
+    )
+
+    expect(result.completed).toBe(result.total)
+    expect(result.far).toBe(0)
+    // The far corner of the entry zone is 12 m from the near door.
+    expect(result.longestS).toBeLessThan(30)
+  }, 180_000)
 })
