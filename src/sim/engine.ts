@@ -110,6 +110,8 @@ const EXIT_TAIL_TIMEOUT = 10
  * is not what either the jam detector or the give-up check is looking for.
  */
 const DIRECT_RANGE = 3.5
+/** Steps in half a turn when looking round for a place behind somebody. */
+const PLACE_TURNS = 8
 const NEIGHBOUR_RANGE = 5.0
 /** Velocity passes spent keeping bodies from walking into each other. */
 const CONTACT_PASSES = 2
@@ -1026,9 +1028,10 @@ export class Simulation {
    *
    * Past the end of the drawn queue line the slots continue in a straight
    * extension, which can run through a wall or off the floor. Anything that
-   * lands outside walkable space is snapped to the nearest cell that is not,
-   * so an overflowing queue backs up into the room instead of pressing a crowd
-   * into the geometry.
+   * lands off the floor a queue may use is snapped to the nearest cell that is
+   * on it, so an overflowing queue backs up into the room instead of pressing
+   * a crowd into the geometry. Snapped to any free cell, a slot clamped into
+   * the south wall could land on the one outside it.
    */
   private slotPosition(queue: QueueState, index: number): Vec2 {
     const record = queue.record
@@ -1037,15 +1040,8 @@ export class Simulation {
     if (cached) return cached
     const ideal = queueSlotPosition(record, index)
     let resolved = ideal
-    const { col, row } = worldToCell(this.world.grid, ideal.x, ideal.y)
-    const inside =
-      col >= 0 &&
-      row >= 0 &&
-      col < this.world.grid.cols &&
-      row < this.world.grid.rows &&
-      !this.world.navBlocked[gridIndex(this.world.grid, col, row)]
-    if (!inside) {
-      const cell = nearestFreeCell(this.world.grid, this.world.navBlocked, ideal)
+    if (!this.onQueueFloor(ideal)) {
+      const cell = nearestFreeCell(this.world.grid, this.world.queueBlocked, ideal)
       if (cell >= 0) {
         const c = cell % this.world.grid.cols
         const r = (cell / this.world.grid.cols) | 0
@@ -1179,9 +1175,54 @@ export class Simulation {
     }
     const dx = agent.x - ahead.x
     const dy = agent.y - ahead.y
-    const gap = Math.hypot(dx, dy)
-    if (gap < 1e-6) return this.slotPosition(queue, slotIndex)
-    return { x: ahead.x + (dx / gap) * record.spacing, y: ahead.y + (dy / gap) * record.spacing }
+    if (Math.hypot(dx, dy) < 1e-6) return this.slotPosition(queue, slotIndex)
+    // Behind the person ahead on the side you are coming from, turned as little
+    // as it takes to stay on floor a queue may use. Unturned, the banquet bar's
+    // queue grew towards the front door because that is where everybody comes
+    // from, and the first guest to join it from outside put the back of the
+    // line outside for the rest of the evening.
+    const heading = Math.atan2(dy, dx)
+    const placeAt = (angle: number): Vec2 => ({
+      x: ahead.x + Math.cos(angle) * record.spacing,
+      y: ahead.y + Math.sin(angle) * record.spacing,
+    })
+    for (let turn = 0; turn <= PLACE_TURNS; turn++) {
+      for (const side of turn === 0 || turn === PLACE_TURNS ? [1] : [1, -1]) {
+        const place = placeAt(heading + (side * turn * Math.PI) / PLACE_TURNS)
+        if (this.queueFloorBetween(ahead, place)) return place
+      }
+    }
+    // Hemmed in, or the person ahead has been shoved off the floor: the nearest
+    // floor to where the place would be. The line's straight extension is
+    // somewhere else entirely by now.
+    const { grid, queueBlocked } = this.world
+    const cell = nearestFreeCell(grid, queueBlocked, placeAt(heading))
+    if (cell < 0) return this.slotPosition(queue, slotIndex)
+    return cellCenter(grid, cell % grid.cols, (cell / grid.cols) | 0)
+  }
+
+  private onQueueFloor(p: Vec2): boolean {
+    const { grid, queueBlocked } = this.world
+    const { col, row } = worldToCell(grid, p.x, p.y)
+    if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false
+    return queueBlocked[gridIndex(grid, col, row)] === 0
+  }
+
+  /**
+   * Whether the way from one place in a queue to the next stays on queue floor,
+   * so the next place is not on the far side of a wall or a table from the one
+   * before it. Where the first stands is not checked: they may have been shoved
+   * off it, and that is no reason to send the person behind anywhere else.
+   */
+  private queueFloorBetween(from: Vec2, to: Vec2): boolean {
+    const length = distance(from, to)
+    const steps = Math.max(1, Math.ceil(length / this.world.grid.cellSize))
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps
+      if (!this.onQueueFloor({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }))
+        return false
+    }
+    return true
   }
 
   private aimAtQueue(queue: QueueState, agent: Agent, slotIndex: number): void {
@@ -1531,7 +1572,10 @@ export class Simulation {
             // behind them and nobody could move up.
             const inLine =
               closestPointOnPolyline(queue.record.line, here).distance <= queue.record.spacing
-            if (inLine || distance(here, target) <= reach) {
+            // Near is not enough from outside the front door, or from among the
+            // tables: joined there, a guest's place was out there too, and the
+            // place of everybody who came after them.
+            if (inLine || (distance(here, target) <= reach && this.onQueueFloor(here))) {
               this.joinQueue(agent, queue)
             } else {
               this.aimAtQueue(queue, agent, slot)

@@ -302,6 +302,84 @@ describe('Simulation', () => {
     }
   }, 120_000)
 
+  it('keeps an overflowing queue inside the building and out of the seating', () => {
+    // The back of an overflowing queue is one place behind the person ahead, on
+    // the side the newcomer comes from, and they come from the front door. In
+    // the banquet hall the bar's queue grew straight at it, across the dining
+    // floor into the gap between two chairs, and out of the door: guests still
+    // outside joined where they stood, everybody after them lined up along the
+    // outside of the wall, and round the corner from the door the head of the
+    // queue could not get back in and both counters stopped.
+    //
+    // What is checked is where each person in the queue is sent, not where the
+    // crowd has shoved them on the way.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 12, 10)
+    const door = b.door(room.south, 8, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    const bar = b.service(
+      'Bar',
+      2.4,
+      9.4,
+      Math.PI,
+      1,
+      { kind: 'constant', mean: 12 },
+      {
+        width: 3.0,
+        depth: 0.7,
+        queue: [
+          { x: 1.2, y: 8.4 },
+          { x: 1.2, y: 6.4 },
+        ],
+      },
+    )
+    b.tableWithChairs('table-round-8', 7, 5.2)
+    b.zone('seating', 3, 2.5, 11, 8, 'Dining floor')
+    const plan = b.build()
+    const inSeating = (p: { x: number; y: number }) => p.x > 3 && p.x < 11 && p.y > 2.5 && p.y < 8
+    const outside = (p: { x: number; y: number }) => p.x < 0 || p.x > 12 || p.y < 0 || p.y > 10
+
+    for (let seed = 1; seed <= 3; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 1200,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 45,
+            entryIds: [door.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 60 },
+            itinerary: [
+              { id: 'step-bar', kind: 'service', targetId: bar.id },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const sim = new Simulation(plan, scenario)
+      const sentOutside = new Set<number>()
+      const sentAmongTables = new Set<number>()
+      while (!sim.isFinished && sim.currentTime < 1200) {
+        sim.step(0.1)
+        const { agents, count } = sim.snapshot()
+        for (let i = 0; i < count; i++) {
+          const person = sim.inspect(agents[i * AGENT_STRIDE + AGENT_FIELD.id])
+          if (person?.state !== 'queuing' || !person.exactTarget) continue
+          if (outside(person.exactTarget)) sentOutside.add(person.id)
+          if (inSeating(person.exactTarget)) sentAmongTables.add(person.id)
+        }
+      }
+      expect({ seed, outside: sentOutside.size, seating: sentAmongTables.size }).toEqual({
+        seed,
+        outside: 0,
+        seating: 0,
+      })
+      const summary = sim.summary()
+      expect(summary.services[0].served).toBe(45)
+      expect(summary.warnings).toEqual([])
+    }
+  }, 120_000)
+
   it('brings each guest at a table round to a place of their own', () => {
     // A field to the table led everybody to the place of whoever asked first,
     // and the guests seated across from it found their way round from there

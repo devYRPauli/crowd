@@ -389,6 +389,15 @@ overflow past the drawn slots is bounded by the building, so a queue longer than
 its floor bunches against the wall instead of continuing through it. The counter
 that served 0 of 30 now serves 30 of 30.
 
+That bound covered the slots but not the chain past them, where each newcomer
+stands behind the person ahead on the side they came from. In the banquet hall
+they came through the front door, so guests still outside joined where they
+stood and 9, 25 and 30 people (seeds 1, 8, 14) queued outside at once; the bar's
+overflow also wound between the tables. **Fixed**: a place past the line is
+turned until it is on floor inside the building, clear of seating and doorways,
+and nobody joins until they are standing on such floor. No place is outside or
+in the seating in those runs now.
+
 **5. Theatre seating costs nothing by default.** In the layout table above, the
 theatre row is identical to the empty room in every column, because loose chairs
 and seat rows ship as passable — eight chairs round a banquet table would seal it

@@ -117,6 +117,11 @@ export interface SimWorld {
   grid: NavGrid
   /** 1 where an agent centre cannot go (solid, dilated by NAV_CLEARANCE). */
   navBlocked: Uint8Array
+  /**
+   * 1 where nobody may wait in a queue: blocked, outside the building, in a
+   * seating zone or among loose chairs.
+   */
+  queueBlocked: Uint8Array
   /** 1 where geometry is solid, undilated. */
   solid: Uint8Array
   /** Metres to the nearest solid cell. */
@@ -463,6 +468,44 @@ export const buildWorld = (
     point.y <= venueBounds.maxY
 
   /**
+   * Floor a queue that has outgrown its line may carry on over.
+   *
+   * The overflow grows towards whoever joins it, and in the banquet hall they
+   * came through the front door: the bar's queue reached the doorway, guests
+   * still outside joined it where they stood, and everybody after them lined
+   * up outside too. Round the corner, at a wall with no door, the head of the
+   * queue could not get back in and both counters stopped. The same queue
+   * wound between the dining tables and wedged a guest between two chairs.
+   *
+   * So a waiting place is inside the building, on floor a body fits, a body
+   * clear of seating, and out of the doorways. A doorway lies within the
+   * walls' extent, so without its own patch a guest standing in it counted as
+   * inside. Only the threshold is kept clear: keeping clear a door's width in
+   * front of it as well left the buffet, whose line ends beside the east exit,
+   * no floor to overflow onto, and it served fewer people.
+   */
+  const queueBlocked = new Uint8Array(cells)
+  for (const opening of plan.openings) {
+    const wall = wallsById.get(opening.wallId)
+    if (!wall || !isWalkableOpening(opening)) continue
+    rasterizePolygon(grid, openingThreshold(wall, opening), queueBlocked, 1, NAV_CLEARANCE)
+  }
+  for (const zone of plan.zones) {
+    if (zone.kind === 'seating')
+      rasterizePolygon(grid, zone.polygon, queueBlocked, 1, NAV_CLEARANCE)
+  }
+  for (const item of plan.furniture) {
+    if (isFurnitureBlocking(item) || !resolveCatalogItem(item.catalogId).seats) continue
+    rasterizePolygon(grid, furniturePolygon(item), queueBlocked, 1, NAV_CLEARANCE)
+  }
+  for (let row = 0; row < grid.rows; row++) {
+    for (let col = 0; col < grid.cols; col++) {
+      const index = gridIndex(grid, col, row)
+      if (navBlocked[index] || !insideVenue(cellCenter(grid, col, row))) queueBlocked[index] = 1
+    }
+  }
+
+  /**
    * The queue line, turned round if the way it points leaves the building.
    *
    * A counter's queue runs out behind it for six metres, and a counter set near
@@ -616,6 +659,7 @@ export const buildWorld = (
     bounds,
     grid,
     navBlocked,
+    queueBlocked,
     solid,
     clearance,
     baseSpeed,
