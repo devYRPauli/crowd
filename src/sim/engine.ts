@@ -66,6 +66,16 @@ import { CROWD_SAFETY, WALKWAY_LOS, losFor, losIndex } from './metrics/los'
 const ARRIVE_RADIUS = 0.34
 
 /**
+ * How close to a chair counts as sitting on it.
+ *
+ * Tighter than `ARRIVE_RADIUS`, because somebody sits down where they are.
+ * Arriving at the edge of that circle, banquet guests sat 0.4 m behind their
+ * chairs, out in the aisle round the table, and a guest walking round to a
+ * place further on was shut in between them and the table.
+ */
+const SEAT_ARRIVE_RADIUS = 0.1
+
+/**
  * How far past the doorway somebody goes on taking up room.
  *
  * A doorway meters a crowd because the people already through it are still
@@ -1446,7 +1456,8 @@ export class Simulation {
     } else {
       this.beginStep(agent)
     }
-    if (agent.exactTarget) {
+    // A chair is where it is; shaken off it, somebody sits beside it.
+    if (agent.exactTarget && agent.seatIndex < 0) {
       agent.exactTarget = {
         x: agent.exactTarget.x + rng.uniform(-0.5, 0.5),
         y: agent.exactTarget.y + rng.uniform(-0.5, 0.5),
@@ -1471,14 +1482,37 @@ export class Simulation {
     agent.queueSlot = -1
   }
 
+  /**
+   * Whether somebody is on their seat, or as near it as the people either side
+   * let them get.
+   *
+   * Seats in a row are 0.55 m apart and a wheelchair user is 0.76 m across, so
+   * whoever sits next to one cannot reach the middle of their own seat. Asked
+   * to anyway, they stood a fifth of a metre off it until they gave up.
+   */
+  private atSeat(agent: Agent, seat: Vec2): boolean {
+    let reach = SEAT_ARRIVE_RADIUS
+    this.hash.query(seat.x, seat.y, agent.radius + 0.6, (id) => {
+      const other = this.agents[id]
+      if (other?.state !== 'seated') return
+      reach = Math.max(
+        reach,
+        SEAT_ARRIVE_RADIUS + agent.radius + other.radius - distance(other, seat),
+      )
+    })
+    return distance(agent, seat) <= reach
+  }
+
   private updateStates(dt: number): void {
     for (let i = this.live.length - 1; i >= 0; i--) {
       const agent = this.agents[this.live[i]]
       if (!agent) continue
       const arrived =
-        agent.exactTarget !== null &&
-        distance({ x: agent.x, y: agent.y }, agent.exactTarget) <=
-          ARRIVE_RADIUS + agent.radius * 0.5
+        agent.seatIndex >= 0
+          ? this.atSeat(agent, this.world.seats[agent.seatIndex].position)
+          : agent.exactTarget !== null &&
+            distance({ x: agent.x, y: agent.y }, agent.exactTarget) <=
+              ARRIVE_RADIUS + agent.radius * 0.5
 
       switch (agent.state) {
         case 'walking': {
@@ -1715,7 +1749,14 @@ export class Simulation {
         this.neighbourScratch.push({
           position: { x: other.x, y: other.y },
           velocity: { x: other.vx, y: other.vy },
-          radius: other.radius + ownSpace + personalSpace(localDensity, other.assertiveness),
+          // Nobody keeps their distance from somebody sitting down: the margin
+          // is for shoulders, and a seated person's are below yours. Kept, it
+          // shut the half metre between two rows of a seated audience, and
+          // delegates stood at the end of a row they could not get along.
+          radius:
+            other.state === 'seated'
+              ? other.radius
+              : other.radius + ownSpace + personalSpace(localDensity, other.assertiveness),
           maxSpeed: other.maxSpeed,
           prefVelocity: { x: other.vx, y: other.vy },
           timeHorizon: 2.5,

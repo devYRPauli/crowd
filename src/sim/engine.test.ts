@@ -306,12 +306,13 @@ describe('Simulation', () => {
     // A field to the table led everybody to the place of whoever asked first,
     // and the guests seated across from it found their way round from there
     // through the chairs: the last of eight sat down after 140 to 330 s. In the
-    // banquet hall some never did. Averaged over seeds, because who is last to
+    // banquet hall some never did. Over several seeds, because who is last to
     // a table and how long they take turns on the order people arrive in.
     //
-    // Not yet fixed: on about half the seeds one guest still steps into the
-    // ring beside two seated neighbours and waits there until one of them gets
-    // up after their two minutes, which is most of this mean.
+    // Guests also sat down 0.4 m short of their chairs, out in the aisle round
+    // the table. On one seed in eight that shut a guest walking round to a
+    // place further on in against the table until a neighbour got up after
+    // their two minutes: the last of the eight sat down at 129 s.
     const b = new PlanBuilder()
     const room = b.room(0, 0, 8, 8)
     b.door(room.south, 4, 1.83, 'door', 'both')
@@ -319,6 +320,7 @@ describe('Simulation', () => {
     const seating = b.zone('seating', 2, 2.5, 6, 6.5, 'Table')
     const entry = b.zone('entry', 2.5, 0.3, 5.5, 1.5, 'In')
     const plan = b.build()
+    const chairs = plan.furniture.filter((f) => f.catalogId === 'chair').map((f) => f.position)
     const seatedState = agentStateIndex('seated')
 
     const lastSeated: number[] = []
@@ -358,9 +360,76 @@ describe('Simulation', () => {
       }
       expect(sat.size).toBe(8)
       lastSeated.push(sim.currentTime)
+      const { agents, count } = sim.snapshot()
+      for (let i = 0; i < count; i++) {
+        const base = i * AGENT_STRIDE
+        const at = { x: agents[base + AGENT_FIELD.x], y: agents[base + AGENT_FIELD.y] }
+        const nearest = Math.min(...chairs.map((c) => Math.hypot(c.x - at.x, c.y - at.y)))
+        expect(nearest).toBeLessThan(0.15)
+      }
       expect(runToCompletion(sim, 900).warnings).toEqual([])
     }
-    const mean = lastSeated.reduce((sum, t) => sum + t, 0) / lastSeated.length
-    expect(mean).toBeLessThan(120)
+    expect(Math.max(...lastSeated)).toBeLessThan(30)
+  }, 60_000)
+
+  it('seats an audience in its rows, along rows already part full', () => {
+    // Sat down 0.4 m short of their seats, an audience sat in the gaps between
+    // the rows. Put on the seat itself, they closed the gap for the delegates
+    // behind them: the margin people keep from strangers, kept from somebody
+    // sitting down, left half a metre between two seated rows too tight to
+    // walk along. And whoever sat beside a wheelchair user could never reach
+    // the middle of their own seat, and stood a fifth of a metre off it.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(1.7, 3, 2, 3.3)
+    const seating = b.zone('seating', 0, 2.4, 3.4, 4.9, 'Rows')
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const plan = b.build()
+    const rows = plan.furniture.filter((f) => f.catalogId === 'seat-row').map((f) => f.position.y)
+    const seatedState = agentStateIndex('seated')
+
+    for (let seed = 1; seed <= 8; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 900,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 8,
+            entryIds: [entry.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 60 },
+            itinerary: [
+              {
+                id: 'step-seat',
+                kind: 'seat',
+                targetId: seating.id,
+                duration: { kind: 'constant', mean: 300 },
+              },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const sim = new Simulation(plan, scenario)
+      const satAt = new Map<number, number>()
+      while (satAt.size < 8 && sim.currentTime < 150) {
+        sim.step(0.1)
+        const { agents, count } = sim.snapshot()
+        for (let i = 0; i < count; i++) {
+          const base = i * AGENT_STRIDE
+          const id = agents[base + AGENT_FIELD.id]
+          if (agents[base + AGENT_FIELD.state] !== seatedState || satAt.has(id)) continue
+          satAt.set(id, agents[base + AGENT_FIELD.y])
+        }
+      }
+      expect(satAt.size).toBe(8)
+      // Half the depth of a row: sitting in it, not in the gap behind it.
+      for (const y of satAt.values()) {
+        expect(Math.min(...rows.map((row) => Math.abs(row - y)))).toBeLessThan(0.35)
+      }
+      expect(runToCompletion(sim, 900).warnings).toEqual([])
+    }
   }, 60_000)
 })
