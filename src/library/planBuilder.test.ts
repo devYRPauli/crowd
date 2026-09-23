@@ -442,9 +442,11 @@ describe('furniture', () => {
     for (const radius of reach) expect(radius).toBeCloseTo(reach[0], 12)
     expect(reach[0]).toBeGreaterThan(1.829 / 2)
 
-    const seats = planSeats(plan)
-    const laid = seats.filter((seat) => seat.furnitureId === table.id).sort(byPlace)
-    const seated = seats.filter((seat) => seat.furnitureId !== table.id).sort(byPlace)
+    // A chair set at a place is that place, so the plan offers eight seats and
+    // not sixteen. Apart, the table's places and the chairs' seats must agree.
+    expect(planSeats(plan)).toHaveLength(8)
+    const laid = planSeats({ ...plan, furniture: [table] }).sort(byPlace)
+    const seated = planSeats({ ...plan, furniture: chairs }).sort(byPlace)
     expect(laid).toHaveLength(8)
     expect(seated).toHaveLength(8)
     laid.forEach((place, index) => {
@@ -472,7 +474,7 @@ describe('furniture', () => {
     ])
     // Every table comes set: four places apiece here, and a chair on each.
     expect(plan.furniture.filter((item) => item.catalogId === 'chair')).toHaveLength(24)
-    expect(planSeats(plan)).toHaveLength(48)
+    expect(planSeats(plan)).toHaveLength(24)
   })
 
   it('stacks rows of theatre seating back from the front row', () => {

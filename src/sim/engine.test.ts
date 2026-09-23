@@ -3,6 +3,7 @@ import { Simulation } from './engine'
 import { AGENT_FIELD, AGENT_STRIDE } from './types'
 import type { Plan, Scenario, Wall, Zone } from '../core/model/types'
 import { createScenario, createPopulation } from '../core/model/defaults'
+import { PlanBuilder } from '../library/planBuilder'
 
 let counter = 0
 const wall = (ax: number, ay: number, bx: number, by: number): Wall => ({
@@ -191,4 +192,57 @@ describe('Simulation', () => {
     expect(summary.services[0].maxWait).toBeGreaterThan(10)
     expect(summary.completed).toBe(12)
   })
+
+  it('keeps serving when the queue outgrows the line drawn for it', () => {
+    // A bar at the head of a lane beside the tables, as in the banquet hall.
+    // Places laid on the line's straight continuation sent people head-on into
+    // the queue they were joining, and people standing in the line who had not
+    // reached their place were kept out of it. The counter stopped with half
+    // the crowd still waiting.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 14)
+    b.door(room.south, 4, 1.83, 'door', 'both')
+    for (const x of [3.5, 6.5])
+      for (const y of [3, 6.5, 10]) b.tableWithChairs('table-round-8', x, y)
+    const bar = b.service(
+      'Bar',
+      1.6,
+      13.4,
+      Math.PI,
+      2,
+      { kind: 'constant', mean: 20 },
+      {
+        width: 2.4,
+        depth: 0.7,
+        queue: [
+          { x: 0.9, y: 12.4 },
+          { x: 0.9, y: 9.4 },
+        ],
+      },
+    )
+    const entry = b.zone('entry', 3, 0.3, 6, 1.5, 'In')
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 1500,
+      populations: [
+        {
+          ...createPopulation(0),
+          count: 60,
+          entryIds: [entry.id],
+          arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
+          itinerary: [
+            { id: 'step-bar', kind: 'service', targetId: bar.id },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    const summary = runToCompletion(new Simulation(b.build(), scenario), 1500)
+
+    expect(summary.services[0].served).toBe(60)
+    expect(summary.completed).toBe(60)
+    // Two servers at 20 s each cannot clear sixty in under 600 s; a queue that
+    // keeps them busy finishes not long after.
+    expect(summary.clearanceTime).toBeLessThan(900)
+  }, 60_000)
 })

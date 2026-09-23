@@ -672,7 +672,9 @@ export class Simulation {
         case 'seat': {
           const seat = this.claimSeat(agent, step.targetId, rng)
           if (seat === -1) {
-            // No seat free: wait nearby rather than teleporting or vanishing.
+            // No seat free: walk onto the floor and carry on from there, rather
+            // than teleporting or vanishing. Standing there for the meal was
+            // tried, and the standing guests kept the seated ones off their chairs.
             const fallback = this.world.waypoints.find((w) => w.id === step.targetId)
             agent.state = 'walking'
             agent.fieldTarget = fallback?.id ?? null
@@ -1078,9 +1080,34 @@ export class Simulation {
     return this.world.navBlocked[row * cols + col] === 1
   }
 
+  /**
+   * Where somebody holding `slotIndex` should stand.
+   *
+   * On the drawn line that is the slot. Past it, it is one place behind the
+   * person ahead, wherever they actually are: a queue that outgrows its line
+   * carries on from its last person, the way a real one does. Fixed overflow
+   * places were a straight extension of the line, and in the banquet hall they
+   * ran twelve metres down a lane the queue itself was shuffling up. Walkers
+   * could only join at the far end of it, so they met the queue head-on, never
+   * joined, and boxed the head in until both counters stopped serving.
+   */
+  private queuePlace(queue: QueueState, agent: Agent, slotIndex: number): Vec2 {
+    const record = queue.record
+    if (slotIndex < record.slots.length) return record.slots[slotIndex]
+    const ahead = this.agents[queue.waiting[slotIndex - 1]]
+    if (!ahead || ahead === agent || ahead.state !== 'queuing') {
+      return this.slotPosition(queue, slotIndex)
+    }
+    const dx = agent.x - ahead.x
+    const dy = agent.y - ahead.y
+    const gap = Math.hypot(dx, dy)
+    if (gap < 1e-6) return this.slotPosition(queue, slotIndex)
+    return { x: ahead.x + (dx / gap) * record.spacing, y: ahead.y + (dy / gap) * record.spacing }
+  }
+
   private aimAtQueue(queue: QueueState, agent: Agent, slotIndex: number): void {
     const record = queue.record
-    const slotPosition = this.slotPosition(queue, slotIndex)
+    const slotPosition = this.queuePlace(queue, agent, slotIndex)
     const here = { x: agent.x, y: agent.y }
     if (distance(here, slotPosition) <= DIRECT_RANGE && this.lineIsWalkable(agent, slotPosition)) {
       agent.exactTarget = slotPosition
@@ -1095,6 +1122,12 @@ export class Simulation {
       agent.fieldTarget = record.id
       return
     }
+    // Past the drawn line the place is behind the person ahead, not on the line.
+    if (slotIndex >= record.slots.length) {
+      agent.exactTarget = slotPosition
+      agent.fieldTarget = null
+      return
+    }
     const slotArc = Math.min(slotIndex * record.spacing, record.lineLength)
     const startArc = onLine.distance <= 2.0 ? onLine.arc : record.lineLength
     const nextArc = Math.max(slotArc, startArc - 1.5)
@@ -1106,10 +1139,47 @@ export class Simulation {
     this.aimAtQueue(queue, agent, agent.queueSlot)
   }
 
+  /** How far somebody stands from the front of a queue, measured along it. */
+  private queueProgress(queue: QueueState, agent: Agent): number {
+    const record = queue.record
+    const here = { x: agent.x, y: agent.y }
+    const onLine = closestPointOnPolyline(record.line, here)
+    if (onLine.distance <= 2.0) return onLine.arc
+    return record.lineLength + distance(here, record.slots[record.slots.length - 1])
+  }
+
+  /**
+   * Keep the queue's order the order people are standing in.
+   *
+   * Service waits for the head to reach the front, so a head who is physically
+   * at the back holds up everybody. It happens: a group joins together, a shove
+   * reorders two people, someone joins from an overflow place further off. In
+   * the banquet hall the bar's head ended up behind twenty people filing along
+   * a wall they could not be overtaken on, the front slots stood empty, and both
+   * counters stopped serving for the rest of the dinner. One adjacent swap per
+   * pair per step, and only when the one behind is a full place ahead, so two
+   * people shuffling side by side do not trade places back and forth.
+   */
+  private reorderQueue(queue: QueueState): void {
+    let changed = false
+    for (let i = 0; i + 1 < queue.waiting.length; i++) {
+      const ahead = this.agents[queue.waiting[i]]
+      const behind = this.agents[queue.waiting[i + 1]]
+      if (ahead?.state !== 'queuing' || behind?.state !== 'queuing') continue
+      const gain = this.queueProgress(queue, ahead) - this.queueProgress(queue, behind)
+      if (gain <= queue.record.spacing) continue
+      queue.waiting[i] = behind.id
+      queue.waiting[i + 1] = ahead.id
+      changed = true
+    }
+    if (changed) this.assignQueueSlots(queue)
+  }
+
   private updateQueues(dt: number): void {
     for (const queue of this.queues.values()) {
       const record = queue.record
       const open = this.time >= record.opensAt && this.time < record.closesAt
+      this.reorderQueue(queue)
       let busy = 0
       for (let s = 0; s < queue.servers.length; s++) {
         const occupant = queue.servers[s]
@@ -1279,9 +1349,15 @@ export class Simulation {
               break
             }
             const slot = this.nextFreeSlot(queue)
-            const target = this.slotPosition(queue, slot)
+            const target = this.queuePlace(queue, agent, slot)
             const reach = Math.max(1.5, queue.record.spacing * 2.5)
-            if (distance({ x: agent.x, y: agent.y }, target) <= reach) {
+            const here = { x: agent.x, y: agent.y }
+            // Somebody standing in the line is in the queue, wherever the back of
+            // it has got to. Kept out, they stood on the slots of the people
+            // behind them and nobody could move up.
+            const inLine =
+              closestPointOnPolyline(queue.record.line, here).distance <= queue.record.spacing
+            if (inLine || distance(here, target) <= reach) {
               this.joinQueue(agent, queue)
             } else {
               this.aimAtQueue(queue, agent, slot)

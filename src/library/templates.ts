@@ -520,7 +520,9 @@ const banquet = (): CrowdDocument => {
     size: { width: ft(18), depth: 0.2, height: ft(10, 2) },
   })
 
-  // Eight banquet rounds of ten, on a 5 m grid with a clear centre aisle.
+  // Ten banquet rounds of eight with a clear centre aisle. The floor stops short
+  // of the top row's back chairs, which face the counters: offered, the guests
+  // making for them jammed the front of the buffet queue.
   const seatingZone = b.zone('seating', 1.5, 3.0, 26.5, 15.5, 'Dining floor')
   for (let row = 0; row < 3; row++) {
     for (let column = 0; column < 4; column++) {
@@ -542,8 +544,8 @@ const banquet = (): CrowdDocument => {
       width: 3.4,
       depth: 0.8,
       queue: [
-        { x: 2.4, y: 16.4 },
-        { x: 2.4, y: 12.4 },
+        { x: 1.2, y: 16.4 },
+        { x: 1.2, y: 12.4 },
       ],
     },
   )
@@ -559,8 +561,8 @@ const banquet = (): CrowdDocument => {
       width: 4.0,
       depth: 0.9,
       queue: [
-        { x: 25.6, y: 16.2 },
-        { x: 25.6, y: 11.0 },
+        { x: 26.8, y: 16.2 },
+        { x: 26.8, y: 11.0 },
       ],
     },
   )

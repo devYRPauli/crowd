@@ -203,6 +203,9 @@ export interface WorldSeat {
   kind: SeatSlot['kind']
 }
 
+/** Two places closer than this are one place. */
+const SAME_SEAT = 0.2
+
 /** Every seat and standing place the plan offers, in world coordinates. */
 export const planSeats = (plan: Plan): WorldSeat[] => {
   const out: WorldSeat[] = []
@@ -214,13 +217,18 @@ export const planSeats = (plan: Plan): WorldSeat[] => {
     const c = Math.cos(item.rotation)
     const s = Math.sin(item.rotation)
     slots.forEach((slot, index) => {
+      const position = {
+        x: item.position.x + slot.x * c - slot.z * s,
+        y: item.position.y + slot.x * s + slot.z * c,
+      }
+      // A table offers its covers and a chair set at one offers its seat, at
+      // the same spot. Counted twice, two guests claimed every chair and the
+      // one pushed off it sat down wherever they were shoved.
+      if (out.some((seat) => distance(seat.position, position) < SAME_SEAT)) return
       out.push({
         id: `${item.id}:${index}`,
         furnitureId: item.id,
-        position: {
-          x: item.position.x + slot.x * c - slot.z * s,
-          y: item.position.y + slot.x * s + slot.z * c,
-        },
+        position,
         facing: slot.facing + item.rotation,
         kind: slot.kind,
       })

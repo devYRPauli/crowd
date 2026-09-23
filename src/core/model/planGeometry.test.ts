@@ -330,6 +330,20 @@ describe('planSeats', () => {
       expect(distance(seat.position, { x: 0, y: 0 })).toBeCloseTo(1.5 + 0.42, 12)
   })
 
+  it('counts a chair set at a table place once', () => {
+    // The table offers its covers and each chair its seat, at the same spots.
+    // Counted twice, two guests were sent to every chair.
+    const b = new PlanBuilder()
+    b.tableWithChairs('table-round-8', 5, 5, 0, 'chair-stacking')
+    const seats = planSeats(b.build())
+    expect(seats).toHaveLength(8)
+    for (const seat of seats) {
+      for (const other of seats) {
+        if (other !== seat) expect(distance(seat.position, other.position)).toBeGreaterThan(0.2)
+      }
+    }
+  })
+
   it('skips furniture with no seats and keys the rest by item and slot', () => {
     const b = new PlanBuilder()
     b.place('column-round', 0, 0)

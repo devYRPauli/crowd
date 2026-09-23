@@ -455,10 +455,10 @@ describe('what is solid', () => {
     // chairs are furniture you pull out: blocking, they would ring the table
     // with obstacle at body clearance and nobody could take their seat.
     expect(world.obstaclePolygons).toHaveLength(6)
-    // Eight places at the table and one on each chair, none of them dropped as
-    // somewhere an agent could never stand.
-    expect(planSeats(plan)).toHaveLength(16)
-    expect(world.seats).toHaveLength(16)
+    // Eight places, one per chair, none of them dropped as somewhere an agent
+    // could never stand.
+    expect(planSeats(plan)).toHaveLength(8)
+    expect(world.seats).toHaveLength(8)
 
     const time = timeFrom(world, world.entries.find((r) => r.id === door.id)!.goalCells)
     const stranded = world.seats.filter(
