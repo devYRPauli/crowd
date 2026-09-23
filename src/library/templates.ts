@@ -153,7 +153,7 @@ const coffeeBar = (): CrowdDocument => {
 
 const conference = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, ft(99), ft(66), { height: ft(14) })
+  const hall = b.room(0, 0, ft(99), ft(86), { height: ft(14) })
   const mainDoor = b.door(hall.south, 4, ft(8), 'door', 'both')
   const sideDoor = b.door(hall.south, 12, ft(8), 'door', 'both')
   // Partition between the foyer and the session room.
@@ -191,25 +191,27 @@ const conference = (): CrowdDocument => {
   b.place('plant-tree', 1.4, 6.0)
   b.place('plant-tree', 28.4, 9.6)
 
-  // Session room.
-  b.place('stage', 15, 18.4, 0, { size: { width: 10, depth: 2.6, height: 0.5 } })
+  // Session room: 360 seats for the 320 delegates, in two blocks of 20 either
+  // side of the centre aisle. It held 210, and 42 of those were under the
+  // stage, so half the delegates had no seat and stood among the full rows
+  // until they gave up.
+  b.place('stage', 15, 23.9, 0, { size: { width: 10, depth: 2.6, height: 0.5 } })
   // 16 ft wide, 16:9, and it has to fit under a 14 ft ceiling: this one used
   // to be 3.4 m tall in a 3.2 m room.
-  b.place('projector-screen', 15, 19.4, 0, {
+  b.place('projector-screen', 15, 24.9, 0, {
     size: { width: ft(16), depth: 0.2, height: ft(9) },
   })
-  b.place('lectern', 19.5, 18.6)
-  for (let row = 0; row < 7; row++) {
-    b.place('seat-row', 9.5, 13.4 + row * 0.95, Math.PI, {
-      size: { width: 8.4, depth: 0.7, height: 0.95 },
-    })
-    b.place('seat-row', 20.5, 13.4 + row * 0.95, Math.PI, {
-      size: { width: 8.4, depth: 0.7, height: 0.95 },
-    })
+  b.place('lectern', 19.5, 23.1)
+  for (let row = 0; row < 9; row++) {
+    for (const x of [7.8, 22.2]) {
+      b.place('seat-row', x, 13.4 + row * 0.95, Math.PI, {
+        size: { width: 11, depth: 0.7, height: 0.95 },
+      })
+    }
   }
 
-  const session = b.zone('seating', 5.0, 12.8, 25.0, 19.6, 'Session room')
-  b.zone('keep-clear', 14.0, 12.4, 16.2, 19.8, 'Centre aisle', { cost: 5 })
+  const session = b.zone('seating', 1.8, 12.8, 28.2, 21.8, 'Session room')
+  b.zone('keep-clear', 13.6, 12.4, 16.4, 22.2, 'Centre aisle', { cost: 5 })
   b.zone('measure', 0.4, 12.2, 29.6, 13.0, 'Session doorway')
 
   return makeDocument('Conference registration', b.build(), {
