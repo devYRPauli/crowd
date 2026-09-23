@@ -4,6 +4,7 @@ import { Simulation } from '../sim/engine'
 import { parseDocument, serializeDocument } from '../core/document/serialize'
 import { detectRooms } from '../core/model/rooms'
 import { planSeats } from '../core/model/planGeometry'
+import { buildWorld } from '../sim/world'
 
 describe('starter templates', () => {
   it.each(TEMPLATES.map((t) => [t.id, t] as const))(
@@ -162,4 +163,15 @@ describe('starter templates', () => {
     }
     expect(checked).toBe(360)
   })
+
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))(
+    '%s gives the simulation every seat it lays out',
+    (_id, template) => {
+      // A sofa's or a bench's seats lie inside its own footprint, and the world
+      // dropped them as unreachable: the coffee bar lost its sofa and the
+      // concourse every seat it has.
+      const doc = template.build()
+      expect(buildWorld(doc.plan, doc.scenario).seats).toHaveLength(planSeats(doc.plan).length)
+    },
+  )
 })

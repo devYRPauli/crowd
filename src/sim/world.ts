@@ -19,12 +19,13 @@ import {
   pointInPolygon,
   polygonCentroid,
   polygonArea,
+  raySegmentIntersection,
   rectPolygon,
   samplePolyline,
   polylineLength,
 } from '../core/math/geometry'
 import type { Distribution } from '../core/math/random'
-import type { Plan, Scenario, Zone } from '../core/model/types'
+import type { FurnitureItem, Plan, Scenario, Zone } from '../core/model/types'
 import {
   furniturePolygon,
   isFurnitureBlocking,
@@ -233,6 +234,29 @@ const destinationFrom = (
     goalCells: cells,
     capacity: zone.capacity ?? 0,
   }
+}
+
+/**
+ * Where somebody sits on furniture everybody else walks round.
+ *
+ * A sofa's or a bench's seats lie inside its own footprint, which is solid, so
+ * each was in a blocked cell and dropped as unreachable: the coffee bar lost
+ * its sofa and the concourse every seat it had. Nobody can stand inside a solid
+ * either, so the sitter goes where a body fits, just clear of the item the way
+ * the seat faces, which is where a seated person's knees and feet are anyway.
+ * Clear by a body and by half a cell's diagonal, which is as far as the grid
+ * can be out, or the seat still reads as blocked.
+ */
+const seatOnBlockingItem = (item: FurnitureItem, seat: WorldSeat, cellSize: number): Vec2 => {
+  if (!pointInPolygon(seat.position, furniturePolygon(item))) return seat.position
+  const clear = furniturePolygon(item, NAV_CLEARANCE + cellSize * Math.SQRT1_2)
+  const dir = fromAngle(seat.facing)
+  let exit = 0
+  for (let i = 0; i < clear.length; i++) {
+    const hit = raySegmentIntersection(seat.position, dir, clear[i], clear[(i + 1) % clear.length])
+    if (hit) exit = Math.max(exit, hit.t)
+  }
+  return add(seat.position, scale(dir, exit))
 }
 
 /** Solid regions people must walk around, as counter-clockwise polygons. */
@@ -621,7 +645,15 @@ export const buildWorld = (
   // Only offer seats somebody can actually get to. A chair pushed against a
   // wall, or one that ended up inside the stage, is a seat on the drawing and
   // a trap in the simulation.
+  const blocking = new Map(
+    plan.furniture.filter(isFurnitureBlocking).map((item) => [item.id, item]),
+  )
   const seats: SeatRecord[] = planSeats(plan)
+    .map((seat) => {
+      const item = blocking.get(seat.furnitureId)
+      if (!item) return seat
+      return { ...seat, position: seatOnBlockingItem(item, seat, cellSize) }
+    })
     .filter((seat) => {
       const { col, row } = worldToCell(grid, seat.position.x, seat.position.y)
       if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false

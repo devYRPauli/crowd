@@ -4,6 +4,7 @@ import { AGENT_FIELD, AGENT_STRIDE, agentStateIndex } from './types'
 import type { Plan, Scenario, Wall, Zone } from '../core/model/types'
 import { createScenario, createPopulation } from '../core/model/defaults'
 import { PlanBuilder } from '../library/planBuilder'
+import { furnitureSize } from '../core/model/planGeometry'
 import { DEFAULT_DOOR_WIDTH, DEFAULT_DOUBLE_DOOR_WIDTH } from '../core/model/standards'
 
 let counter = 0
@@ -786,5 +787,66 @@ describe('Simulation', () => {
     const inspected = sim.inspect(wheelchair)
     expect(inspected?.state).toBe('walking')
     expect(inspected?.replanCount).toBeGreaterThan(0)
+  }, 60_000)
+
+  it('seats people on sofas, armchairs and benches, at the front of each', () => {
+    // Their seats lie inside their own solid footprint, and every one was
+    // dropped as unreachable: the concourse had benches and no seats at all.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 7, 6)
+    b.door(room.south, 3.5, DEFAULT_DOOR_WIDTH, 'door', 'both')
+    const pieces = [
+      b.place('sofa-2', 1.4, 5.3, Math.PI),
+      b.place('armchair', 3.5, 5.3, Math.PI),
+      b.place('bench', 5.4, 5.4, Math.PI),
+    ]
+    const lounge = b.zone('seating', 0.2, 3.6, 6.8, 5.8, 'Lounge')
+    const entry = b.zone('entry', 2.5, 0.3, 4.5, 1.3, 'In')
+    const plan = b.build()
+    const seatedState = agentStateIndex('seated')
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 900,
+      populations: [
+        {
+          ...createPopulation(0),
+          count: 5,
+          entryIds: [entry.id],
+          arrival: { kind: 'uniform', startS: 0, windowS: 20 },
+          itinerary: [
+            {
+              id: 'step-seat',
+              kind: 'seat',
+              targetId: lounge.id,
+              duration: { kind: 'constant', mean: 120 },
+            },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    const sim = new Simulation(plan, scenario)
+    const satAt = new Map<number, { x: number; y: number }>()
+    while (satAt.size < 5 && sim.currentTime < 120) {
+      sim.step(0.1)
+      const { agents, count } = sim.snapshot()
+      for (let i = 0; i < count; i++) {
+        const base = i * AGENT_STRIDE
+        const id = agents[base + AGENT_FIELD.id]
+        if (agents[base + AGENT_FIELD.state] !== seatedState || satAt.has(id)) continue
+        satAt.set(id, { x: agents[base + AGENT_FIELD.x], y: agents[base + AGENT_FIELD.y] })
+      }
+    }
+    expect(satAt.size).toBe(5)
+    // In front of the piece they sat at, and near enough to be sitting on it.
+    for (const at of satAt.values()) {
+      const gaps = pieces
+        .filter((p) => Math.abs(p.position.x - at.x) < furnitureSize(p).width / 2)
+        .map((p) => p.position.y - furnitureSize(p).depth / 2 - at.y)
+      expect(gaps).toHaveLength(1)
+      expect(gaps[0]).toBeGreaterThan(0)
+      expect(gaps[0]).toBeLessThan(0.5)
+    }
+    expect(runToCompletion(sim, 900).warnings).toEqual([])
   }, 60_000)
 })
