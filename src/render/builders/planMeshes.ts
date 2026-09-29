@@ -10,7 +10,7 @@
 import type { BufferGeometry } from 'three'
 import { BoxGeometry, Matrix4, Shape, ShapeGeometry, Euler } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import type { Opening, Plan, Wall } from '../../core/model/types'
+import type { Plan, Wall } from '../../core/model/types'
 import { isWalkableOpening, solidSpans, wallAngle, wallLength } from '../../core/model/planGeometry'
 import type { Vec2 } from '../../core/math/vec2'
 import type { Polygon } from '../../core/math/geometry'
@@ -192,26 +192,4 @@ export const buildFloorGeometry = (
   const merged = mergeGeometries(parts, false)
   for (const part of parts) part.dispose()
   return merged
-}
-
-/** The centre point and facing of each opening, for labels and markers. */
-export const openingMarkers = (
-  plan: Plan,
-): Array<{ opening: Opening; position: Vec2; angle: number; wall: Wall }> => {
-  const out: Array<{ opening: Opening; position: Vec2; angle: number; wall: Wall }> = []
-  for (const opening of plan.openings) {
-    const wall = plan.walls.find((w) => w.id === opening.wallId)
-    if (!wall) continue
-    const angle = wallAngle(wall)
-    out.push({
-      opening,
-      wall,
-      angle,
-      position: {
-        x: wall.a.x + Math.cos(angle) * opening.offset,
-        y: wall.a.y + Math.sin(angle) * opening.offset,
-      },
-    })
-  }
-  return out
 }

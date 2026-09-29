@@ -232,10 +232,3 @@ export const LockIcon = (p: IconProps) => (
     <path d="M8.5 10.5V7.8a3.5 3.5 0 017 0v2.7" />
   </svg>
 )
-
-export const EyeIcon = (p: IconProps) => (
-  <svg {...base} {...p}>
-    <path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" />
-    <circle cx="12" cy="12" r="2.8" />
-  </svg>
-)

@@ -84,11 +84,3 @@ export const clampLength = (a: Vec2, max: number): Vec2 => {
   const k = limit / Math.sqrt(lenSq)
   return { x: a.x * k, y: a.y * k }
 }
-
-/** Smallest signed rotation from `from` to `to`, in (-π, π]. */
-export const angleDelta = (from: number, to: number): number => {
-  let d = (to - from) % (Math.PI * 2)
-  if (d > Math.PI) d -= Math.PI * 2
-  if (d <= -Math.PI) d += Math.PI * 2
-  return d
-}

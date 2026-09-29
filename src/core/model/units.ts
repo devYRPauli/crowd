@@ -57,16 +57,6 @@ export const formatArea = (squareMetres: number, units: UnitSystem): string => {
   return `${squareMetres.toFixed(squareMetres < 10 ? 1 : 0)} m²`
 }
 
-export const formatDensity = (perSquareMetre: number, units: UnitSystem): string =>
-  units === 'imperial'
-    ? `${(perSquareMetre / (FEET_PER_METRE * FEET_PER_METRE)).toFixed(3)} /ft²`
-    : `${perSquareMetre.toFixed(2)} /m²`
-
-export const formatSpeed = (metresPerSecond: number, units: UnitSystem): string =>
-  units === 'imperial'
-    ? `${metresToFeet(metresPerSecond).toFixed(2)} ft/s`
-    : `${metresPerSecond.toFixed(2)} m/s`
-
 /** `1:23` for under an hour, `1:02:03` beyond. */
 export const formatClock = (seconds: number): string => {
   const total = Math.max(0, Math.round(seconds))

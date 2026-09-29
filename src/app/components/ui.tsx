@@ -7,7 +7,7 @@
  * the undo history.
  */
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { formatLength, parseLength } from '../../core/model/units'
 import type { UnitSystem } from '../../core/model/types'
 import { CloseIcon } from './icons'
@@ -418,30 +418,4 @@ export const Sparkline = ({
       <span className="chart-peak">{maxY >= 100 ? maxY.toFixed(0) : maxY.toFixed(1)}</span>
     </div>
   )
-}
-
-/** Runs `callback` after `delay` ms of quiet. */
-export const useDebounced = <T,>(value: T, delay: number): T => {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return debounced
-}
-
-export const useResizeObserver = (
-  ref: React.RefObject<HTMLElement | null>,
-  onResize: (rect: DOMRectReadOnly) => void,
-) => {
-  const callback = useCallback(onResize, [onResize])
-  useEffect(() => {
-    const element = ref.current
-    if (!element) return
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) callback(entry.contentRect)
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [ref, callback])
 }

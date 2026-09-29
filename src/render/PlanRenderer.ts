@@ -502,4 +502,4 @@ export class PlanRenderer {
   }
 }
 
-export { polygonLine, polylineGeometry, disposeTree, OUTLINE_LIFT }
+export { polygonLine, polylineGeometry }

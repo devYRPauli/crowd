@@ -11,16 +11,8 @@
 import type { Vec2 } from '../math/vec2'
 import { add, angleOf, distance, fromAngle, normalize, perp, scale, sub } from '../math/vec2'
 import type { Bounds, Polygon } from '../math/geometry'
-import {
-  EMPTY_BOUNDS,
-  boundsOf,
-  circlePolygon,
-  pointInPolygon,
-  polygonCentroid,
-  rectPolygon,
-  unionBounds,
-} from '../math/geometry'
-import type { FurnitureItem, Opening, Plan, ServicePoint, Wall, Zone } from './types'
+import { EMPTY_BOUNDS, boundsOf, circlePolygon, rectPolygon, unionBounds } from '../math/geometry'
+import type { FurnitureItem, Opening, Plan, ServicePoint, Wall } from './types'
 import { resolveCatalogItem, type SeatSlot } from '../../library/catalog'
 
 /** Openings at floor level let people through; windows and high gates do not. */
@@ -32,11 +24,6 @@ export const wallLength = (wall: Wall): number => distance(wall.a, wall.b)
 export const wallDirection = (wall: Wall): Vec2 => normalize(sub(wall.b, wall.a))
 
 export const wallAngle = (wall: Wall): number => angleOf(sub(wall.b, wall.a))
-
-export const wallCenter = (wall: Wall): Vec2 => ({
-  x: (wall.a.x + wall.b.x) / 2,
-  y: (wall.a.y + wall.b.y) / 2,
-})
 
 /** Point at distance `t` along the wall centreline from `a`. */
 export const pointOnWall = (wall: Wall, t: number): Vec2 =>
@@ -331,12 +318,6 @@ export const serviceQueue = (point: ServicePoint): Vec2[] => {
   return [head, tail]
 }
 
-export const zonePolygon = (zone: Zone): Polygon => zone.polygon
-
-export const zoneCenter = (zone: Zone): Vec2 => polygonCentroid(zone.polygon)
-
-export const pointInZone = (p: Vec2, zone: Zone): boolean => pointInPolygon(p, zone.polygon)
-
 /** Bounding box of everything in the plan, plus a margin. */
 export const planBounds = (plan: Plan, margin = 0): Bounds => {
   let bounds = { ...EMPTY_BOUNDS }
@@ -368,12 +349,6 @@ export const planBounds = (plan: Plan, margin = 0): Bounds => {
     maxY: bounds.maxY + margin,
   }
 }
-
-export const planIsEmpty = (plan: Plan): boolean =>
-  plan.walls.length === 0 &&
-  plan.furniture.length === 0 &&
-  plan.zones.length === 0 &&
-  plan.servicePoints.length === 0
 
 /** The wall an opening belongs to, or undefined if the document is inconsistent. */
 export const openingWall = (plan: Plan, opening: Opening): Wall | undefined =>

@@ -2318,7 +2318,6 @@ export class Simulation {
     return { x: dirX * speed, y: dirY * speed }
   }
 
-  /** Direction of increasing clearance, i.e. away from the nearest wall. */
   /**
    * How much of the move from (x0, y0) to (x1, y1) happens before it first
    * enters solid geometry, sampled every half cell. A move that starts inside
@@ -2341,6 +2340,7 @@ export class Simulation {
     return 1
   }
 
+  /** Direction of increasing clearance, i.e. away from the nearest wall. */
   private clearanceGradient(x: number, y: number): Vec2 {
     const h = this.world.grid.cellSize
     const left = sampleField(this.world.grid, this.world.clearance, x - h, y, 0)

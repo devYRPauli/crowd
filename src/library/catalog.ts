@@ -12,7 +12,7 @@
  */
 
 import type { MaterialRole, Prim } from './primitives'
-import { box, cone, cyl, legs, pedestal, sphere, torus, translated } from './primitives'
+import { box, cone, cyl, legs, pedestal, sphere, torus } from './primitives'
 
 export type CatalogCategory = 'tables' | 'seating' | 'service' | 'structure' | 'equipment' | 'decor'
 
@@ -1267,5 +1267,3 @@ export const searchCatalog = (query: string): CatalogItem[] => {
       item.keywords.some((k) => k.includes(q)),
   )
 }
-
-export { translated }

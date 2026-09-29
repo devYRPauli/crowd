@@ -764,7 +764,3 @@ export const queueSlotFacing = (queue: QueueRecord, slot: number): number => {
   const dir = scale(queue.overflowDirection, -1)
   return Math.atan2(dir.y, dir.x)
 }
-
-export const directionTo = (from: Vec2, to: Vec2): Vec2 => normalize(sub(to, from))
-
-export const facingFromAngle = (angle: number): Vec2 => fromAngle(angle)

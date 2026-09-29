@@ -4,7 +4,6 @@ import {
   buildFloorGeometry,
   buildOpeningGeometry,
   buildWallGeometry,
-  openingMarkers,
   polygonGeometry,
 } from './planMeshes'
 import type { Opening, Plan, Wall } from '../../core/model/types'
@@ -362,21 +361,6 @@ describe('opening geometry', () => {
     // Openings outlive their wall for as long as one undo step; the renderer
     // must not throw in between.
     expect(buildOpeningGeometry(plan([run], [orphan]))).toBeNull()
-    expect(openingMarkers(plan([run], [orphan]))).toEqual([])
-  })
-})
-
-describe('opening markers', () => {
-  it('puts a marker on the centre of each opening, facing along its wall', () => {
-    const run = wall(1, 1, 5, 5)
-    const opening = door(run, Math.hypot(2, 2))
-    const [marker] = openingMarkers(plan([run], [opening]))
-    expect(marker.opening).toBe(opening)
-    expect(marker.wall).toBe(run)
-    expect(marker.angle).toBeCloseTo(Math.PI / 4, 9)
-    // Two metres along a 45 degree wall from (1, 1).
-    expect(marker.position.x).toBeCloseTo(3, 9)
-    expect(marker.position.y).toBeCloseTo(3, 9)
   })
 })
 

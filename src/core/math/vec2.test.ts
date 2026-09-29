@@ -3,7 +3,6 @@ import type { Vec2 } from './vec2'
 import {
   add,
   addScaled,
-  angleDelta,
   angleOf,
   clampLength,
   clone,
@@ -187,23 +186,6 @@ describe('angles', () => {
     const twice = rotate(rotate(v(2, -1), 0.7), -0.7)
     expect(twice.x).toBeCloseTo(2, 12)
     expect(twice.y).toBeCloseTo(-1, 12)
-  })
-
-  it('takes the short way round the back of the compass', () => {
-    // Someone facing 179° who wants to face -179° turns two degrees, not 358.
-    expect(angleDelta(3.1, -3.1)).toBeCloseTo(0.0831853, 6)
-    expect(angleDelta(-3.1, 3.1)).toBeCloseTo(-0.0831853, 6)
-    expect(angleDelta(0.5, 0.75)).toBeCloseTo(0.25, 12)
-    expect(angleDelta(0, Math.PI * 2)).toBeCloseTo(0, 12)
-    expect(Math.abs(angleDelta(0, 7 * Math.PI))).toBeLessThanOrEqual(Math.PI)
-  })
-
-  it('lands on +π rather than -π at the exact half turn', () => {
-    // The range is (-π, π]; letting both ends through would make a turn of
-    // exactly 180° flip sign from frame to frame and jitter the facing.
-    expect(angleDelta(0, Math.PI)).toBeCloseTo(Math.PI, 12)
-    expect(angleDelta(0, -Math.PI)).toBeCloseTo(Math.PI, 12)
-    expect(angleDelta(0, -3 * Math.PI)).toBeCloseTo(Math.PI, 12)
   })
 })
 

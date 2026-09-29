@@ -288,6 +288,3 @@ const findRef = (doc: CrowdDocument, ref: PlanObjectRef): unknown => {
 
 const referenceExists = (doc: CrowdDocument, ref: PlanObjectRef): boolean =>
   findRef(doc, ref) !== undefined
-
-export const selectDocument = (state: EditorState) => state.document
-export const selectSelection = (state: EditorState) => state.selection

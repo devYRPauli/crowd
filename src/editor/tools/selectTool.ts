@@ -288,7 +288,6 @@ export class SelectTool implements Tool {
     'Click to select · Drag to move · Alt-drag to duplicate · Shift adds · Drag the ring to rotate'
 
   private mode: Mode = { kind: 'idle' }
-  private lastInfo: PointerInfo | null = null
 
   /** Handles for the current selection, in world coordinates. */
   private handles(ctx: ToolContext): Handle[] {
@@ -374,7 +373,6 @@ export class SelectTool implements Tool {
   }
 
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
-    this.lastInfo = info
     if (!info.ground) return
 
     const handle = this.handleAt(ctx, info)
@@ -437,7 +435,6 @@ export class SelectTool implements Tool {
   }
 
   onPointerMove(info: PointerInfo, ctx: ToolContext): void {
-    this.lastInfo = info
     if (!info.ground) return
 
     switch (this.mode.kind) {
@@ -837,8 +834,5 @@ export class SelectTool implements Tool {
 
   onPointerLeave(ctx: ToolContext): void {
     if (this.mode.kind === 'idle') ctx.setDraft(this.decorations(ctx, null))
-    void this.lastInfo
   }
 }
-
-export { duplicateSelection, selectionCenter }
