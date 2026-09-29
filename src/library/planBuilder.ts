@@ -167,10 +167,18 @@ export class PlanBuilder {
    * it — a block read the other way round seats a whole house looking away
    * from what they came to watch.
    */
-  seatingBlock(x: number, y: number, rowCount: number, width: number, rowSpacing = 0.95): void {
+  seatingBlock(
+    x: number,
+    y: number,
+    rowCount: number,
+    width: number,
+    rowSpacing = 0.95,
+    options: Partial<FurnitureItem> = {},
+  ): void {
     for (let row = 0; row < rowCount; row++) {
       this.place('seat-row', x, y + row * rowSpacing, Math.PI, {
         size: { width, depth: 0.7, height: 0.95 },
+        ...options,
       })
     }
   }

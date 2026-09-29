@@ -430,7 +430,7 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
    * unblocked navigation grid once `NAV_CLEARANCE` (0.26 m) is taken off each
    * side, so people thread it strictly one at a time. Charged against the
    * *effective* width instead (clear width less a 0.15 m boundary layer each
-   * side, the SFPE convention) the same run reads 1.718 p/m/s, above the band —
+   * side, the SFPE convention) the same run reads 1.618 p/m/s, above the band —
    * so the engine moves a single file at about the right rate and the error is
    * in how much of an opening it treats as usable, not in the locomotion.
    *
@@ -455,15 +455,13 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   it.fails('TC12: 0.8 m opening passes 1.2–1.4 p/m/s', bandTest(0.8))
 
   /**
-   * KNOWN GAP, and the worst of the two that remain. MEASURED 1.019 p/m/s;
-   * TARGET 1.2–1.4 — 15% below the band. Same cause as the 0.8 m case: the
-   * usable navigation channel is 0.48 m, two centimetres more than two bodies
-   * need, so the file staggers rather than doubling and the door meters at
-   * roughly one lane. Against effective width it reads 1.423 p/m/s, above the
-   * band. Note how little the absolute flow gains from the extra 0.2 m of door
-   * over the 0.8 m case — 0.86 to 1.00 people a second — which is the shape of
-   * the defect: widening a door buys almost nothing until the channel is wide
-   * enough for two abreast with room to spare.
+   * KNOWN GAP. MEASURED 1.049 p/m/s; TARGET 1.2–1.4 — 13% below the band.
+   * Same cause as the 0.8 m case: the usable navigation channel is 0.48 m, two
+   * centimetres more than two bodies need, so the file staggers rather than
+   * doubling. Against effective width it reads 1.498 p/m/s, above the band. The
+   * extra 0.2 m of door over the 0.8 m case buys flow roughly in proportion,
+   * 0.81 to 1.05 people a second, so what both widths lose is the fixed
+   * clearance at each jamb, not the width in between.
    */
   it.fails('TC12: 1.0 m opening passes 1.2–1.4 p/m/s', bandTest(1.0))
 

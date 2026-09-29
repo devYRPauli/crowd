@@ -105,6 +105,13 @@ export const hall = ({
   }
 }
 
+const theatreRows = (b, width, height, options) => {
+  const rowWidth = (width - 6) / 2 - 1
+  const rows = Math.floor((height - 6) / 0.95)
+  b.seatingBlock(3 + rowWidth / 2, 3, rows, rowWidth, undefined, options)
+  b.seatingBlock(width - 3 - rowWidth / 2, 3, rows, rowWidth, undefined, options)
+}
+
 /** Furniture layouts, each covering the floor the way a real event would. */
 export const LAYOUTS = {
   empty: null,
@@ -118,12 +125,10 @@ export const LAYOUTS = {
   },
 
   /** Theatre rows facing the far wall, with a centre aisle. */
-  theatre: (b, width, height) => {
-    const rowWidth = (width - 6) / 2 - 1
-    const rows = Math.floor((height - 6) / 0.95)
-    b.seatingBlock(3 + rowWidth / 2, 3, rows, rowWidth)
-    b.seatingBlock(width - 3 - rowWidth / 2, 3, rows, rowWidth)
-  },
+  theatre: (b, width, height) => theatreRows(b, width, height),
+
+  /** The same rows marked as obstacles, the override the inspector offers per item. */
+  'theatre-solid': (b, width, height) => theatreRows(b, width, height, { blocking: true }),
 
   /** Classroom: rectangular tables in ranks, with gangways between them. */
   classroom: (b, width, height) => {
@@ -173,12 +178,15 @@ export const run = ({ plan, scenario, maxSteps = 30_000, sampleDensity = false }
   let steps = 0
   let peakActive = 0
   const densitySamples = []
+  // exitTimes[k] is when the (k+1)th person was out.
+  const exitTimes = []
 
   while (steps < maxSteps && !sim.isFinished) {
     sim.step(DT)
     steps++
-    const active = sim.stats().active
+    const { active, completed } = sim.stats()
     if (active > peakActive) peakActive = active
+    while (exitTimes.length < completed) exitTimes.push(steps * DT)
     if (sampleDensity && steps % 50 === 0) densitySamples.push(active)
   }
 
@@ -189,6 +197,7 @@ export const run = ({ plan, scenario, maxSteps = 30_000, sampleDensity = false }
     steps,
     peakActive,
     densitySamples,
+    exitTimes,
     cappedOut: steps >= maxSteps && !sim.isFinished,
     wallClockMs,
     perAgentUs: peakActive > 0 ? (wallClockMs * 1000) / (steps * peakActive) : 0,
@@ -205,6 +214,19 @@ export const run = ({ plan, scenario, maxSteps = 30_000, sampleDensity = false }
  */
 export const specificFlow = (summary, exitWidth) =>
   summary.clearanceTime > 0 ? (summary.completed * 0.95) / (summary.clearanceTime * exitWidth) : 0
+
+/**
+ * People per second across the saturated middle of a run, between the 20th and
+ * 80th percentile of the crowd out, the window `egress.test.ts` measures. The
+ * walk-up at the start and the stragglers at the end are not what a door's
+ * capacity describes.
+ */
+export const saturatedFlow = (result, count) => {
+  const low = Math.round(count * 0.2)
+  const high = Math.round(count * 0.8)
+  const t = result.exitTimes
+  return t.length >= high ? (high - low) / (t[high - 1] - t[low - 1]) : NaN
+}
 
 /** Mean and spread across the seed replicates of one configuration. */
 export const across = (values) => {

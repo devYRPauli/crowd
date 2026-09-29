@@ -33,21 +33,21 @@ own hides it.
 
 ```
    N  rho set  rho box  rho felt   v box  v all  v Weidmann   error  J=rho·v  max overlap
-  18     0.30    0.325     0.220   1.338  1.338       1.335   0.004    0.435         0.0%
-  30     0.50    0.500     0.354   1.331  1.330       1.299   0.032    0.665         0.0%
-  45     0.75    0.780     0.584   1.263  1.267       1.176   0.087    0.985         0.0%
-  60     1.00    0.963     0.896   1.105  1.114       1.078   0.027    1.064         0.0%
-  75     1.25    1.250     1.207   0.926  0.949       0.926  -0.001    1.158         0.0%
-  90     1.50    1.476     1.476   0.788  0.818       0.817  -0.030    1.163         0.0%
- 105     1.75    1.809     1.798   0.682  0.682       0.677   0.005    1.233         0.0%
- 120     2.00    2.079     2.099   0.540  0.574       0.579  -0.040    1.121         0.0%
- 135     2.25    2.399     2.437   0.446  0.473       0.480  -0.034    1.070         0.0%
- 150     2.50    2.656     2.747   0.364  0.392       0.411  -0.047    0.967         0.0%
- 180     3.00    3.307     3.402   0.235  0.257       0.269  -0.034    0.778         0.0%
+  18     0.30    0.325     0.217   1.339  1.339       1.335   0.004    0.435         0.0%
+  30     0.50    0.523     0.337   1.332  1.331       1.291   0.041    0.697         0.0%
+  45     0.75    0.776     0.584   1.263  1.267       1.178   0.085    0.980         0.0%
+  60     1.00    0.976     0.874   1.119  1.125       1.071   0.048    1.092         0.0%
+  75     1.25    1.164     1.168   0.950  0.967       0.971  -0.021    1.106         0.0%
+  90     1.50    1.442     1.456   0.810  0.824       0.833  -0.024    1.167         0.0%
+ 105     1.75    1.723     1.767   0.693  0.688       0.711  -0.017    1.195         0.0%
+ 120     2.00    1.996     2.086   0.555  0.571       0.608  -0.052    1.109         0.0%
+ 135     2.25    2.431     2.430   0.443  0.469       0.471  -0.027    1.078         0.0%
+ 150     2.50    2.679     2.759   0.364  0.390       0.405  -0.041    0.975         0.0%
+ 180     3.00    3.307     3.401   0.236  0.257       0.269  -0.033    0.782         0.0%
  210     3.50    3.614     3.977   0.168  0.176       0.215  -0.047    0.608         0.0%
  240     4.00    4.067     4.679   0.161  0.161       0.147   0.014    0.654         0.0%
  270     4.50    4.545     5.286   0.161  0.161       0.086   0.074    0.731         0.1%
-RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0418 m/s   peak J 1.2327 p/m/s at 1.809 p/m²
+RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0437 m/s   peak J 1.1949 p/m/s at 1.723 p/m²
 ```
 
 Pooled the way the experimental literature extracts a fundamental diagram —
@@ -56,33 +56,33 @@ than a whole run averaged into one point:
 
 ```
  rho box  samples   v meas  v Weidmann   error  J=rho·v
-   0.144      162    1.339       1.340  -0.001    0.192
-   0.386      571    1.334       1.327   0.007    0.515
-   0.605      729    1.299       1.259   0.040    0.787
-   0.870      654    1.175       1.128   0.047    1.023
-   1.108      628    1.006       1.000   0.006    1.115
-   1.365      532    0.848       0.870  -0.022    1.157
-   1.616      428    0.757       0.755   0.001    1.223
-   1.854      594    0.659       0.659  -0.001    1.222
-   2.126      551    0.534       0.564  -0.029    1.136
-   2.380      507    0.448       0.485  -0.037    1.067
-   2.588      429    0.393       0.428  -0.035    1.016
-   2.875      206    0.333       0.358  -0.025    0.959
-   3.098      251    0.284       0.310  -0.026    0.879
-   3.378      343    0.198       0.256  -0.058    0.670
-   3.612      443    0.176       0.216  -0.040    0.635
-   3.860      355    0.165       0.177  -0.011    0.639
+   0.144      158    1.339       1.340  -0.001    0.193
+   0.380      488    1.335       1.328   0.008    0.508
+   0.608      769    1.310       1.258   0.052    0.796
+   0.860      766    1.173       1.134   0.039    1.008
+   1.123      689    1.000       0.992   0.008    1.123
+   1.364      601    0.832       0.870  -0.038    1.136
+   1.622      386    0.739       0.753  -0.014    1.199
+   1.867      602    0.626       0.655  -0.028    1.169
+   2.128      424    0.547       0.563  -0.016    1.164
+   2.367      414    0.447       0.489  -0.041    1.059
+   2.614      443    0.398       0.421  -0.024    1.040
+   2.834      224    0.336       0.368  -0.031    0.953
+   3.116      245    0.282       0.306  -0.024    0.879
+   3.369      384    0.210       0.258  -0.048    0.707
+   3.615      426    0.175       0.215  -0.040    0.633
+   3.859      360    0.166       0.177  -0.011    0.640
    4.106      331    0.161       0.141   0.020    0.661
    4.368      280    0.161       0.108   0.053    0.702
    4.592      307    0.161       0.081   0.080    0.738
    4.812       90    0.161       0.057   0.104    0.774
-RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0318 m/s   peak J 1.2229 p/m/s at 1.616 p/m²
+RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0325 m/s   peak J 1.1990 p/m/s at 1.622 p/m²
 ```
 
-**Free-flow speed** comes out at 1.338 m/s against a configured 1.34.
+**Free-flow speed** comes out at 1.339 m/s against a configured 1.34.
 **Body exclusion** holds: no pair overlaps by more than 0.1% of two radii
 anywhere in the sweep. **Capacity** — the number a model like this is most
-likely to be quoted on — peaks at 1.233 persons/m/s at 1.81 persons/m², against
+likely to be quoted on — peaks at 1.195 persons/m/s at 1.72 persons/m², against
 Weidmann's own peak of 1.225 at 1.75.
 
 Above about 3.6 persons/m² the model walks faster than Weidmann, and that is
@@ -131,11 +131,11 @@ does not get one.
 
 | Case                             | Criterion                                             | Measured                                                                                                           |                      |
 | -------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------- |
-| **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.00 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
-| **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2328 m against a 0.23 m body | pass                 |
-| **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 4.3% (adult, 1.398 vs 1.34 m/s); all seven profiles within 4.3%; overall sd 0.328 vs 0.327 implied     | pass                 |
-| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.2 m: **1.251** · 1.5 m: **1.252** · 2.0 m: **1.318**                                                             | pass                 |
-|                                  |                                                       | 0.8 m: 1.011 · 1.0 m: 1.019                                                                                        | **fail, below band** |
+| **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.01 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
+| **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2894 m against a 0.23 m body | pass                 |
+| **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 5.8% (adult, 1.417 vs 1.34 m/s); all seven profiles within 5.8%; overall sd 0.324 vs 0.327 implied     | pass                 |
+| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.2 m: **1.251** · 1.5 m: **1.261** · 2.0 m: **1.307**                                                             | pass                 |
+|                                  |                                                       | 0.8 m: 1.011 · 1.0 m: 1.049                                                                                        | **fail, below band** |
 | TC2, TC3, TC8, TC13              | Stairs and multi-storey egress                        | —                                                                                                                  | not modelled         |
 | TC4                              | Fundamental diagram                                   | measured above, though not in RiMEA's own corridor geometry                                                        | partial              |
 | TC5, TC9, TC10, TC11, TC14, TC15 | Personal data, exit choice, evacuation demonstrations | —                                                                                                                  | not written yet      |
@@ -254,16 +254,16 @@ A 40 m × 20 m hall with a 1.2 m door at each end and everybody starting by the
 west one. Each case runs twice: once with congestion-aware routing on, once off.
 The difference between the two runs is the feature.
 
-| People | Routing          | Near door | Far door      | Cleared in |
-| ------ | ---------------- | --------- | ------------- | ---------- |
-| 40     | congestion-aware | 40        | 0             | 19.6 s     |
-| 40     | shortest path    | 40        | 0             | 18.6 s     |
-| 300    | congestion-aware | 195       | **105 (35%)** | **89.9 s** |
-| 300    | shortest path    | 300       | 0             | 115.9 s    |
+| People | Routing          | Near door | Far door      | Cleared in  |
+| ------ | ---------------- | --------- | ------------- | ----------- |
+| 40     | congestion-aware | 40        | 0             | 27.2 s      |
+| 40     | shortest path    | 40        | 0             | 28.9 s      |
+| 300    | congestion-aware | 160       | **140 (47%)** | **116.2 s** |
+| 300    | shortest path    | 300       | 0             | 161.7 s     |
 
 With nobody in the way the nearer door is simply the right answer and both
 settings give it. With a crowd too big for one door, congestion-aware routing
-spreads 35% of it to the far door and the hall clears **22% sooner**.
+spreads 47% of it to the far door and the hall clears **28% sooner**.
 
 This is the behaviour the tool exists to show, and it did not work until this
 was measured. Exit choice compared travel time over the _static_ field, so
@@ -316,9 +316,9 @@ behind it, and a crowd that packs through itself.
 
 |                    | Measured                                                                                           |      |
 | ------------------ | -------------------------------------------------------------------------------------------------- | ---- |
-| Everybody gets out | 150/150; 25% by 22.5 s, 50% by 40.7 s, 95% by 81.9 s, last at 84.9 s                               | pass |
-| A queue forms      | peaked at 85 people in the 3 m upstream; peak density 6.73 persons/m²                              | pass |
-| Bodies stay apart  | max overlap 0.084 m on a 0.46 m pair distance (p95 0.071 m, median tick 0.025 m), tolerance 0.10 m | pass |
+| Everybody gets out | 150/150; 25% by 27.4 s, 50% by 50.2 s, 95% by 97.4 s, last at 100.6 s                              | pass |
+| A queue forms      | peaked at 88 people in the 3 m upstream; peak density 6.75 persons/m²                              | pass |
+| Bodies stay apart  | max overlap 0.081 m on a 0.46 m pair distance (p95 0.067 m, median tick 0.030 m), tolerance 0.10 m | pass |
 
 The overlap was the honest weak point of this model and is no longer: it
 measured 0.271 m, which is most of a body, and not as a transient — the p95 was

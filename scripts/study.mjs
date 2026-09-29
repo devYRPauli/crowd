@@ -13,11 +13,13 @@ import {
   collected,
   counters,
   crowdSize,
+  doorFlow,
   exitProvision,
   layouts,
 } from './study/experiments.mjs'
 
 const ALL = {
+  doors: ['Doors — what one leaf passes at capacity', doorFlow],
   exits: ['E1 — what a door is worth', exitProvision],
   layouts: ['E2 — what the furniture costs', layouts],
   crowd: ['E3 — how it scales with the size of the crowd', crowdSize],
@@ -29,7 +31,7 @@ const asked = process.argv.slice(2).filter((arg) => arg in ALL)
 const chosen = asked.length ? asked : Object.keys(ALL)
 
 console.log('\nCROWD configuration study')
-console.log('Three seeds per configuration; ± is half the spread across them.\n')
+console.log('Three seeds per configuration, twenty for E2; ± is half the spread across them.\n')
 
 for (const key of chosen) {
   const [title, experiment] = ALL[key]

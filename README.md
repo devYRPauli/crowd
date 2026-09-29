@@ -217,8 +217,9 @@ the same numbers, which is what makes two layouts comparable.
 - **Loose chairs and theatre rows are not navigation obstacles.** Eight chairs
   around a banquet round seal the table off entirely once the grid adds body
   clearance, and nobody can take their seat. The table stays solid; that is what
-  actually shapes circulation. Anything you want treated as an obstacle can be
-  marked as one per item.
+  actually shapes circulation. Crossing a chair or a row costs four times open
+  floor, so people go round them when there is a way round. Anything you want
+  treated as an obstacle can be marked as one per item.
 - **People who cannot reach somewhere leave, and the run says so.** A plan that
   strands people is worth reporting, not hiding inside an average.
 - **Arrivals block when the doorway is full**, rather than spawning people inside
@@ -282,10 +283,10 @@ other test.
   escape-route choice (TC11) called out as the gap that matters most.
 - **Egress through a door** is measured directly, because it is the number the
   tool is actually asked for and it went wrong once without anything noticing.
-  A pair of 3'0" leaves passes **1.33 persons per metre per second** of clear
-  width, against the 1.2–1.4 the observational literature reports, and doubling
-  a door's width roughly doubles what it passes. The test that holds that
-  relationship exists because for a long time it did not hold: see
+  A pair of 3'0" leaves passes **1.47 persons per metre per second** of clear
+  width, a little above the 1.2–1.4 the observational literature reports, and
+  doubling a door's width roughly doubles what it passes. The test that holds
+  that relationship exists because for a long time it did not hold: see
   [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 - **ORCA** is verified by differential fuzzing against an independent
   transliteration of the RVO2 reference, and its test suite is mutation-tested.
@@ -316,15 +317,16 @@ This is an exploratory planning model, not a safety certification.
   floor rather than reproducing the mistake.
 - **Group behaviour is limited.** People can arrive in groups, but there is no
   explicit cohesion model keeping a family together through a crowd.
-- **Loose seating is passable by default, and a theatre needs it not to be.**
-  Chairs and seat rows are not navigation obstacles as shipped, because eight
-  chairs round a banquet round would seal the table off entirely once the grid
-  adds body clearance and nobody could take their seat. For a theatre that is the
-  wrong default: people walk through the rows. Mark the rows as obstacles per
-  item and the aisles carry the crowd properly — measured, that costs 39% of the
-  floor and 15% of the clearance time, and everybody still gets out. See
-  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Nothing prompts you to do it, which
-  is the part still worth fixing.
+- **Theatre rows are priced, not solid.** Chairs and seat rows are not
+  navigation obstacles as shipped, because eight chairs round a banquet round
+  would seal the table off entirely once the grid adds body clearance and nobody
+  could take their seat. Crossing one costs four times open floor instead, so an
+  audience goes round by the aisles and reaches a seat from the end of its row,
+  but somebody shoved in among the seats can still cross a row. Mark the rows as
+  obstacles per item to rule that out: measured over twenty seeds, solid rows
+  take 39% of the floor and add 9% to the clearance time of the empty hall,
+  against 4% for rows left passable, and everybody still gets out. See
+  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Nothing prompts you to do it.
 - **Narrow doors are pessimistic.** Below about 1.2 m the engine passes fewer
   people per metre than the observational literature reports, because it keeps a
   fixed clearance between a body and a jamb and a narrow opening loses

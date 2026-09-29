@@ -3,9 +3,10 @@
  *
  * Each experiment changes one thing about a venue and reports what it cost,
  * which is the loop the whole tool is built around: draw the room, run it,
- * change the room, run it again. Every figure is the mean of three seeds, and
- * the spread across those seeds is reported next to it so that a difference
- * too small to mean anything looks too small to mean anything.
+ * change the room, run it again. Every figure is the mean of three seeds, or
+ * twenty where the differences are small, and the spread across those seeds is
+ * reported next to it so that a difference too small to mean anything looks
+ * too small to mean anything.
  */
 
 import {
@@ -17,21 +18,36 @@ import {
   hall,
   leavers,
   run,
+  saturatedFlow,
   scenarioFor,
   table,
 } from './harness.mjs'
+import { BOUNDARY_LAYER } from '../../src/core/analysis/compliance.ts'
 
 const PEOPLE = 200
 const results = {}
 
 /** Mean over seeds of one measurement, with the seed spread beside it. */
-const gather = (make, pick) => {
-  const runs = SEEDS.map((seed) => make(seed))
-  return Object.fromEntries(Object.entries(pick).map(([key, get]) => [key, across(runs.map(get))]))
+const gather = (make, pick, seeds = SEEDS) => {
+  const runs = seeds.map((seed) => make(seed))
+  return Object.fromEntries(
+    Object.entries(pick).map(([key, get]) => {
+      const values = runs.map(get)
+      return [key, { ...across(values), values }]
+    }),
+  )
 }
 
 const meanSpread = (stat, places = 1) =>
   `${fmt(stat.mean, places)} ±${fmt((stat.max - stat.min) / 2, places)}`
+
+/** How much more one measurement is than another, ± the standard error of the difference. */
+const difference = (stat, base, places = 1) => {
+  const variance = ({ sd, values }) => (sd ** 2 * values.length) / (values.length - 1)
+  const error = Math.sqrt(variance(stat) / stat.values.length + variance(base) / base.values.length)
+  const change = stat.mean - base.mean
+  return `${change >= 0 ? '+' : ''}${fmt(change, places)} ±${fmt(error, places)}`
+}
 
 /**
  * Share of person-seconds spent at Fruin level of service E or F.
@@ -44,6 +60,35 @@ const meanSpread = (stat, places = 1) =>
  * from another.
  */
 const crowdedShare = (summary) => (summary.losShare.E ?? 0) + (summary.losShare.F ?? 0)
+
+// ---------------------------------------------------------------------------
+// Doors — what one leaf passes at capacity
+// ---------------------------------------------------------------------------
+
+export const doorFlow = () => {
+  const rows = []
+  for (const leaf of [`2'0"`, `3'0"`, `6'0" pair`, `8'0" pair`]) {
+    const venue = hall({ exits: [{ wall: 'south', at: 0.5, width: door(leaf) }] })
+    const stats = gather(
+      (seed) => {
+        const pop = leavers({ count: PEOPLE, entryIds: [], standId: venue.standId })
+        return run({ plan: venue.plan, scenario: scenarioFor({ population: pop, seed }) })
+      },
+      { flow: (r) => saturatedFlow(r, PEOPLE) },
+    )
+    const width = venue.exitWidth
+    rows.push([
+      leaf,
+      fmt(width, 3),
+      meanSpread(stats.flow, 2),
+      fmt(stats.flow.mean / width, 2),
+      fmt(stats.flow.mean / (width - 2 * BOUNDARY_LAYER), 2),
+    ])
+    console.log(`    ${leaf} done`)
+  }
+  results.doorFlow = rows
+  return table(['leaf', 'clear m', 'p/s', 'p/m clear/s', 'p/m effective/s'], rows)
+}
 
 // ---------------------------------------------------------------------------
 // E1 — what a door is worth
@@ -120,9 +165,15 @@ export const exitProvision = () => {
 // E2 — what the furniture costs
 // ---------------------------------------------------------------------------
 
+// What furniture costs is a few seconds, against a seed spread of ten in the
+// same room. Over three seeds the classroom came out 3% faster than the empty
+// hall and over twenty 4% slower, so this one experiment runs twenty.
+const LAYOUT_SEEDS = Array.from({ length: 20 }, (_, i) => i + 1)
+
 export const layouts = () => {
   const rows = []
-  for (const name of ['empty', 'reception', 'classroom', 'banquet', 'theatre']) {
+  let empty = null
+  for (const name of ['empty', 'reception', 'classroom', 'banquet', 'theatre', 'theatre-solid']) {
     const venue = hall({
       exits: [
         { wall: 'south', at: 0.3, width: door(`3'0"`) },
@@ -144,12 +195,15 @@ export const layouts = () => {
         completed: (r) => r.summary.completed,
         perAgentUs: (r) => r.perAgentUs,
       },
+      LAYOUT_SEEDS,
     )
+    empty ??= stats.clearance
     rows.push([
       name,
       String(venue.plan.furniture.length),
       fmt(stats.walkable.mean, 0),
       meanSpread(stats.clearance),
+      name === 'empty' ? '' : difference(stats.clearance, empty),
       meanSpread(stats.journey),
       meanSpread(stats.peakDensity, 2),
       meanSpread(stats.crowded, 1),
@@ -165,6 +219,7 @@ export const layouts = () => {
       'items',
       'walkable m2',
       'clearance s',
+      'vs empty s ±s.e.',
       'journey s',
       'peak p/m2',
       '% at LOS E/F',
@@ -197,6 +252,7 @@ export const crowdSize = () => {
         clearance: (r) => r.summary.clearanceTime,
         peakDensity: (r) => r.summary.peakDensity,
         journey: (r) => r.summary.meanJourney,
+        crowded: (r) => crowdedShare(r.summary) * 100,
         completed: (r) => r.summary.completed,
         perAgentUs: (r) => r.perAgentUs,
       },
@@ -214,7 +270,10 @@ export const crowdSize = () => {
     console.log(`    ${count} people done`)
   }
   results.crowdSize = rows
-  return table(['people', 'clearance s', 'p/s', 'journey s', 'peak p/m2', 'out', 'us/p/step'], rows)
+  return table(
+    ['people', 'clearance s', 'p/s', 'journey s', 'peak p/m2', '% at LOS E/F', 'out', 'us/p/step'],
+    rows,
+  )
 }
 
 // ---------------------------------------------------------------------------

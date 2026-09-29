@@ -152,14 +152,14 @@ describe('egress through a door', () => {
    *
    * 1.2–1.4 persons per metre per second is where SFPE and Fruin put a door's
    * capacity, and it is the band RiMEA TC12 grades against. A pair of 3'0"
-   * leaves reads inside it.
+   * leaves reads 1.47, a little above it.
    *
    * A narrow leaf reads lower — the same known gap TC12 records at its 0.8 m
    * and 1.0 m widths. The engine keeps a fixed clearance between a body and a
    * jamb, so a narrow opening loses proportionally more of itself to it, and
    * people thread it closer to single file than they should. Charged against
    * SFPE's effective width instead — clear width less a 0.15 m boundary layer
-   * each side — every width here reads between 1.53 and 1.68 p/m/s, so the
+   * each side — every width here reads between 1.76 and 2.00 p/m/s, so the
    * engine is consistent with itself and the disagreement is about how much of
    * an opening is usable, not about how fast people walk through one.
    */
