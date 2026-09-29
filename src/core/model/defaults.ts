@@ -15,9 +15,12 @@ import type {
   Scenario,
   Plan,
   CrowdDocument,
+  ServicePoint,
 } from './types'
 import { SCHEMA_VERSION } from './types'
 import {
+  DEFAULT_COUNTER_DEPTH,
+  DEFAULT_COUNTER_WIDTH,
   DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
   DEFAULT_WALL_HEIGHT,
@@ -131,6 +134,22 @@ export const DEFAULT_PROFILE_MIX: Population['profileMix'] = [
   { profileId: 'luggage', weight: 4 },
   { profileId: 'wheelchair', weight: 2 },
 ]
+
+/**
+ * A service point where nothing says otherwise. The placement tool, the
+ * template builder and the file reader each used to carry their own, and they
+ * disagreed about the queue spacing and the service time. Copy `serviceTime`
+ * before handing it to a document, for the reason `createScenario` copies speed.
+ */
+export const DEFAULT_SERVICE_POINT: Pick<
+  ServicePoint,
+  'width' | 'depth' | 'serviceTime' | 'queueSpacing'
+> = {
+  width: DEFAULT_COUNTER_WIDTH,
+  depth: DEFAULT_COUNTER_DEPTH,
+  serviceTime: { kind: 'lognormal', mean: 20, sd: 7, min: 2 },
+  queueSpacing: 0.65,
+}
 
 export const POPULATION_COLORS = ['#4c7dd4', '#d4694c', '#49a884', '#c9a227', '#8a7fb8', '#3f9ab0']
 

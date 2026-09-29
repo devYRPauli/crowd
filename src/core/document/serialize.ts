@@ -26,12 +26,20 @@ import { SCHEMA_VERSION } from '../model/types'
 import {
   AGENT_PROFILES,
   DEFAULT_PROFILE_MIX,
+  DEFAULT_SERVICE_POINT,
   DEFAULT_SETTINGS,
   createScenario,
 } from '../model/defaults'
 import { newDocumentId, newId } from '../model/ids'
 import type { Vec2 } from '../math/vec2'
 import type { Distribution } from '../math/random'
+
+/** What a profile the file only half describes is completed from. */
+const ADULT = (() => {
+  const adult = AGENT_PROFILES.find((profile) => profile.id === 'adult')
+  if (!adult) throw new Error('The shipped profiles have no adult to fall back on.')
+  return adult
+})()
 
 export interface ParseResult {
   document: CrowdDocument
@@ -215,12 +223,14 @@ const parseServicePoint = (raw: unknown): ServicePoint | null => {
     name: str(raw.name, 'Service point'),
     position: point(raw.position),
     rotation: num(raw.rotation, 0),
-    width: Math.max(0.3, num(raw.width, 1.8)),
-    depth: Math.max(0.2, num(raw.depth, 0.7)),
+    width: Math.max(0.3, num(raw.width, DEFAULT_SERVICE_POINT.width)),
+    depth: Math.max(0.2, num(raw.depth, DEFAULT_SERVICE_POINT.depth)),
     servers: Math.max(1, Math.round(num(raw.servers, 1))),
-    serviceTime: parseDistribution(raw.serviceTime, 20) ?? { kind: 'lognormal', mean: 20, sd: 6 },
+    serviceTime: parseDistribution(raw.serviceTime, DEFAULT_SERVICE_POINT.serviceTime.mean) ?? {
+      ...DEFAULT_SERVICE_POINT.serviceTime,
+    },
     ...(queue.length >= 2 ? { queue } : {}),
-    queueSpacing: Math.max(0.3, num(raw.queueSpacing, 0.6)),
+    queueSpacing: Math.max(0.3, num(raw.queueSpacing, DEFAULT_SERVICE_POINT.queueSpacing)),
     ...(typeof raw.color === 'string' ? { color: raw.color } : {}),
     ...(raw.locked === true ? { locked: true } : {}),
     ...(opensAt !== undefined ? { opensAt } : {}),
@@ -272,6 +282,9 @@ const parseItineraryStep = (raw: unknown): ItineraryStep | null => {
 
 const parsePopulation = (raw: unknown, index: number): Population | null => {
   if (!isObject(raw)) return null
+  // A group whose size is unreadable is lost rather than given one: a count
+  // made up here is a crowd of people nobody put in the file.
+  if (typeof raw.count !== 'number' || !Number.isFinite(raw.count)) return null
   const mix = array(raw.profileMix)
     .filter(isObject)
     .map((entry) => ({
@@ -281,7 +294,7 @@ const parsePopulation = (raw: unknown, index: number): Population | null => {
   return {
     id: str(raw.id, newId('pop')),
     name: str(raw.name, `Group ${index + 1}`),
-    count: Math.max(0, Math.round(num(raw.count, 100))),
+    count: Math.max(0, Math.round(raw.count)),
     color: str(raw.color, '#4c7dd4'),
     entryIds: array(raw.entryIds).filter((v): v is string => typeof v === 'string'),
     arrival: parseArrival(raw.arrival),
@@ -327,24 +340,24 @@ const parseScenario = (raw: unknown, warnings: string[]): Scenario => {
         .map((p) => ({
           id: str(p.id, newId('profile')),
           name: str(p.name, 'Profile'),
-          radius: Math.max(0.05, num(p.radius, 0.23)),
+          radius: Math.max(0.05, num(p.radius, ADULT.radius)),
           speed: isObject(p.speed)
             ? {
-                mean: Math.max(0.1, num(p.speed.mean, 1.34)),
-                sd: Math.max(0, num(p.speed.sd, 0.26)),
-                min: Math.max(0.05, num(p.speed.min, 0.6)),
-                max: Math.max(0.1, num(p.speed.max, 2.0)),
+                mean: Math.max(0.1, num(p.speed.mean, ADULT.speed.mean)),
+                sd: Math.max(0, num(p.speed.sd, ADULT.speed.sd)),
+                min: Math.max(0.05, num(p.speed.min, ADULT.speed.min)),
+                max: Math.max(0.1, num(p.speed.max, ADULT.speed.max)),
               }
-            : { mean: 1.34, sd: 0.26, min: 0.6, max: 2.0 },
-          caution: Math.max(0.1, num(p.caution, 1)),
-          assertiveness: Math.min(1, Math.max(0, num(p.assertiveness, 0.5))),
-          color: str(p.color, '#4c7dd4'),
-          heightScale: Math.max(0.3, num(p.heightScale, 1)),
+            : { ...ADULT.speed },
+          caution: Math.max(0.1, num(p.caution, ADULT.caution)),
+          assertiveness: Math.min(1, Math.max(0, num(p.assertiveness, ADULT.assertiveness))),
+          color: str(p.color, ADULT.color),
+          heightScale: Math.max(0.3, num(p.heightScale, ADULT.heightScale)),
           mobility: (['walking', 'assisted', 'wheelchair'] as const).includes(p.mobility as never)
             ? (p.mobility as 'walking' | 'assisted' | 'wheelchair')
             : 'walking',
         }))
-    : AGENT_PROFILES.map((p) => ({ ...p }))
+    : base.profiles
   const routing = isObject(raw.routing) ? raw.routing : {}
   return {
     name: str(raw.name, base.name),
@@ -352,12 +365,15 @@ const parseScenario = (raw: unknown, warnings: string[]): Scenario => {
     seed: Math.max(0, Math.round(num(raw.seed, base.seed))),
     populations: populations.length || described ? populations : base.populations,
     profiles,
-    speedFactor: Math.max(0.1, num(raw.speedFactor, 1)),
+    speedFactor: Math.max(0.1, num(raw.speedFactor, base.speedFactor)),
     routing: {
-      adaptive: bool(routing.adaptive, true),
-      congestionWeight: Math.min(1, Math.max(0, num(routing.congestionWeight, 0.55))),
-      replanIntervalS: Math.max(0.25, num(routing.replanIntervalS, 2)),
-      routeVariety: Math.min(1, Math.max(0, num(routing.routeVariety, 0.25))),
+      adaptive: bool(routing.adaptive, base.routing.adaptive),
+      congestionWeight: Math.min(
+        1,
+        Math.max(0, num(routing.congestionWeight, base.routing.congestionWeight)),
+      ),
+      replanIntervalS: Math.max(0.25, num(routing.replanIntervalS, base.routing.replanIntervalS)),
+      routeVariety: Math.min(1, Math.max(0, num(routing.routeVariety, base.routing.routeVariety))),
     },
     evacuationAtS: optNum(raw.evacuationAtS) ?? null,
   }
@@ -368,9 +384,9 @@ const parseSettings = (value: unknown): DocumentSettings => {
   return {
     units: raw.units === 'imperial' ? 'imperial' : 'metric',
     gridSize: Math.max(0.05, num(raw.gridSize, DEFAULT_SETTINGS.gridSize)),
-    snapToGrid: bool(raw.snapToGrid, true),
-    snapToObjects: bool(raw.snapToObjects, true),
-    angleSnapDeg: Math.max(0, num(raw.angleSnapDeg, 15)),
+    snapToGrid: bool(raw.snapToGrid, DEFAULT_SETTINGS.snapToGrid),
+    snapToObjects: bool(raw.snapToObjects, DEFAULT_SETTINGS.snapToObjects),
+    angleSnapDeg: Math.max(0, num(raw.angleSnapDeg, DEFAULT_SETTINGS.angleSnapDeg)),
     defaultWallHeight: Math.max(
       0.5,
       num(raw.defaultWallHeight, DEFAULT_SETTINGS.defaultWallHeight),

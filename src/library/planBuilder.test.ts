@@ -362,10 +362,10 @@ describe('metres', () => {
     expect(wallLength(wall)).toBeCloseTo(3.5, 12)
     expect(polygonArea(measured.polygon)).toBeCloseTo(10, 12)
     expect(desk.position).toEqual({ x: 6, y: 1.5 })
-    // A counter 1.8 m along its face and 0.65 m between people in its queue:
-    // metres, like everything else the builder writes down.
-    expect(desk.width).toBe(1.8)
-    expect(desk.depth).toBe(0.7)
+    // A 6'0" counter, 1.83 m along its face, and 0.65 m between people in its
+    // queue: metres, like everything else the builder writes down.
+    expect(desk.width).toBeCloseTo(1.829, 9)
+    expect(desk.depth).toBeCloseTo(0.762, 9)
     expect(desk.queueSpacing).toBe(0.65)
     expect(desk.servers).toBe(2)
   })

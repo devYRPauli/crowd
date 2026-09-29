@@ -803,12 +803,13 @@ describe('queues at a counter', () => {
     const world = compile(plan, { cellSize: 0.1 })
     const queue = world.queues[0]
 
-    // The counter faces -Y, so the line runs south from it, head first.
+    // The counter faces -Y, so the line runs south from it, head first. It is
+    // 2'6" deep, so its face is at 11.619 and the head of the line a metre off.
     expect(queue.lineLength).toBeCloseTo(6, 6)
     expect(queue.spacing).toBeCloseTo(0.65, 6)
     expect(queue.slots).toHaveLength(10)
-    expect(queue.slots[0].y).toBeCloseTo(10.65, 6)
-    expect(queue.slots[9].y).toBeCloseTo(4.8, 6)
+    expect(queue.slots[0].y).toBeCloseTo(10.619, 6)
+    expect(queue.slots[9].y).toBeCloseTo(4.769, 6)
     expect(queue.overflowAnchor).toBe(queue.slots[9])
     expect(queue.overflowDirection.y).toBeCloseTo(-1, 6)
     for (const facing of queue.slotFacing) expect(facing).toBeCloseTo(Math.PI / 2, 6)
@@ -867,8 +868,8 @@ describe('queues at a counter', () => {
     const last = queue.slots.length
 
     expect(queueSlotPosition(queue, last - 1)).toBe(queue.slots[last - 1])
-    expect(queueSlotPosition(queue, last).y).toBeCloseTo(4.8 - queue.spacing, 6)
-    expect(queueSlotPosition(queue, last + 1).y).toBeCloseTo(4.8 - 2 * queue.spacing, 6)
+    expect(queueSlotPosition(queue, last).y).toBeCloseTo(4.769 - queue.spacing, 6)
+    expect(queueSlotPosition(queue, last + 1).y).toBeCloseTo(4.769 - 2 * queue.spacing, 6)
     // Facing back up the line, the way everybody already in it faces. Somebody
     // joining the overflow should not be the one person turned around.
     expect(queueSlotFacing(queue, last)).toBeCloseTo(queue.slotFacing[0], 6)

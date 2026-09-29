@@ -139,6 +139,9 @@ export const DEFAULT_WINDOW_HEIGHT = feet(4)
 export const DEFAULT_WINDOW_SILL = feet(3)
 export const DEFAULT_WALL_THICKNESS = inches(6.5)
 export const DEFAULT_WALL_HEIGHT = feet(9)
+/** A service counter is usually a desk, and 72" by 30" is the desk as sold. */
+export const DEFAULT_COUNTER_WIDTH = feet(6)
+export const DEFAULT_COUNTER_DEPTH = feet(2, 6)
 
 /**
  * Model-code minimums, for the checks that report against them.

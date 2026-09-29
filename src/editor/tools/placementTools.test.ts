@@ -817,10 +817,11 @@ describe('ServiceTool placement', () => {
     new ServiceTool().onPointerDown(pointer({ x: 5, y: 0.8 }), h.ctx)
 
     const [point] = h.document.plan.servicePoints
-    expect(point.width).toBe(1.8)
-    expect(point.depth).toBe(0.7)
+    // A 6'0" by 2'6" counter, to the millimetre.
+    expect(point.width).toBeCloseTo(1.829, 9)
+    expect(point.depth).toBeCloseTo(0.762, 9)
     expect(point.servers).toBe(2)
-    expect(point.queueSpacing).toBe(0.6)
+    expect(point.queueSpacing).toBe(0.65)
     expect(point.serviceTime).toEqual({ kind: 'lognormal', mean: 20, sd: 7, min: 2 })
     // The depth used to align it and the depth stored on it have to agree, or
     // the counter floats off the wall or sinks into it.
@@ -901,15 +902,15 @@ describe('ServiceTool placement', () => {
     const tool = new ServiceTool()
     const at = pointer({ x: 5, y: 0.8 })
     tool.onPointerMove(at, h.ctx)
-    expect(spanX(h.draft[0].points)).toBeCloseTo(1.8, 9)
+    expect(spanX(h.draft[0].points)).toBeCloseTo(1.829, 9)
     expect(h.draft[1].points[0].y).toBeGreaterThan(0)
 
     tool.onKeyDown(key('r', { shiftKey: true }), h.ctx)
-    // A quarter turn stands the 1.8 m counter across the wall and sends the line
+    // A quarter turn stands the 6'0" counter across the wall and sends the line
     // off along it instead of out into the room.
-    expect(spanX(h.draft[0].points)).toBeCloseTo(0.7, 9)
+    expect(spanX(h.draft[0].points)).toBeCloseTo(0.762, 9)
     const [head, tail] = h.draft[1].points
-    expect(head.x).toBeCloseTo(5 - (0.7 / 2 + 1), 9)
+    expect(head.x).toBeCloseTo(5 - (0.762 / 2 + 1), 9)
     expect(tail.x).toBeCloseTo(head.x - 6, 9)
     expect(h.labels[0].x).toBeCloseTo(tail.x, 9)
 
@@ -935,7 +936,7 @@ describe('ServiceTool placement', () => {
     tool.onPointerDown(at, h.ctx)
     const [point] = h.document.plan.servicePoints
     // The counter is drawn from one pair of numbers and stored from another;
-    // they are only the same 1.8 m by 0.7 m for as long as somebody keeps them
+    // they are only the same 6'0" by 2'6" for as long as somebody keeps them
     // in step, and the preview is where a user would notice they had drifted.
     expect(spanX(previewedCounter)).toBeCloseTo(point.width, 9)
     expect(spanY(previewedCounter)).toBeCloseTo(point.depth, 9)

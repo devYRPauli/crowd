@@ -263,6 +263,25 @@ describe('the crowd a damaged file comes back with', () => {
     expect(result.warnings.join(' ')).toMatch(/2 group\(s\) of people/i)
   })
 
+  it('loses a group whose size it cannot read rather than making one up', () => {
+    // It used to come back 100 strong, whatever the file had meant.
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: {
+        populations: [
+          { id: 'p1', name: 'Guests', count: 40 },
+          { id: 'p2', name: 'Staff' },
+          { id: 'p3', name: 'Press', count: 'a few' },
+        ],
+      },
+    })
+
+    expect(result.document.scenario.populations.map((p) => [p.name, p.count])).toEqual([
+      ['Guests', 40],
+    ])
+    expect(result.warnings.join(' ')).toMatch(/2 group\(s\) of people/i)
+  })
+
   it('still gives a starter crowd to a file that never mentioned one', () => {
     // A document saved before anybody set a crowd up is not damaged, and
     // opening it onto an empty scenario would be unhelpful rather than honest.
@@ -448,6 +467,7 @@ describe('repairs the parser reports', () => {
           {
             id: 'p1',
             name: 'Crowd',
+            count: 10,
             arrival: { kind: 'peak', startS: 0, windowS: 600, peakAt: Number.NaN, waves: Infinity },
             itinerary: [{ id: 'st1', kind: 'goto', targetId: 'z1', probability: Number.NaN }],
           },

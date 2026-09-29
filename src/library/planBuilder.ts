@@ -20,7 +20,7 @@ import type { Distribution } from '../core/math/random'
 import type { Vec2 } from '../core/math/vec2'
 import { newId } from '../core/model/ids'
 import { resolveCatalogItem } from './catalog'
-import { ZONE_COLORS, ZONE_LABELS } from '../core/model/defaults'
+import { DEFAULT_SERVICE_POINT, ZONE_COLORS, ZONE_LABELS } from '../core/model/defaults'
 import {
   DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
@@ -177,7 +177,7 @@ export class PlanBuilder {
   ): void {
     for (let row = 0; row < rowCount; row++) {
       this.place('seat-row', x, y + row * rowSpacing, Math.PI, {
-        size: { width, depth: 0.7, height: 0.95 },
+        size: { ...resolveCatalogItem('seat-row').size, width },
         ...options,
       })
     }
@@ -223,11 +223,11 @@ export class PlanBuilder {
       name,
       position: { x, y },
       rotation,
-      width: 1.8,
-      depth: 0.7,
+      width: DEFAULT_SERVICE_POINT.width,
+      depth: DEFAULT_SERVICE_POINT.depth,
       servers,
       serviceTime,
-      queueSpacing: 0.65,
+      queueSpacing: DEFAULT_SERVICE_POINT.queueSpacing,
       ...options,
     }
     this.servicePoints.push(created)

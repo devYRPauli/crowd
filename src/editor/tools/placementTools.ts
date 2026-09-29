@@ -25,6 +25,7 @@ import { newId } from '../../core/model/ids'
 import { formatLength } from '../../core/model/units'
 import { wallLength } from '../../core/model/planGeometry'
 import { DOUBLE_DOOR_FROM, OPENING_JAMB } from '../../core/model/standards'
+import { DEFAULT_SERVICE_POINT } from '../../core/model/defaults'
 
 const PREVIEW_COLOR = '#f08a3c'
 /** How far from a wall the door and window tools still take hold of it. */
@@ -341,7 +342,12 @@ export class ServiceTool implements Tool {
 
   private resolve(info: PointerInfo, ctx: ToolContext) {
     if (!info.ground) return null
-    const aligned = wallAlignedPlacement(ctx.document, info.ground, 0.7, 1.4)
+    const aligned = wallAlignedPlacement(
+      ctx.document,
+      info.ground,
+      DEFAULT_SERVICE_POINT.depth,
+      1.4,
+    )
     // `wallAlignedPlacement` turns an object's front — its local +Z — into the
     // room, but a counter is served from the other side (`serviceFacing`): staff
     // work against the wall and the queue forms in the room. Half a turn is the
@@ -360,8 +366,7 @@ export class ServiceTool implements Tool {
 
   private refresh(ctx: ToolContext): void {
     if (!this.preview) return
-    const width = 1.8
-    const depth = 0.7
+    const { width, depth } = DEFAULT_SERVICE_POINT
     const outward = fromAngle(this.preview.rotation - Math.PI / 2)
     const head = add(this.preview.position, scale(outward, depth / 2 + 1))
     const tail = add(head, scale(outward, 6))
@@ -395,11 +400,9 @@ export class ServiceTool implements Tool {
       name: `Service point ${index}`,
       position: resolved.position,
       rotation: resolved.rotation,
-      width: 1.8,
-      depth: 0.7,
+      ...DEFAULT_SERVICE_POINT,
+      serviceTime: { ...DEFAULT_SERVICE_POINT.serviceTime },
       servers: 2,
-      serviceTime: { kind: 'lognormal' as const, mean: 20, sd: 7, min: 2 },
-      queueSpacing: 0.6,
     }
     ctx.apply((doc) => addServicePoint(doc, point), 'Add service point')
     ctx.seal()
