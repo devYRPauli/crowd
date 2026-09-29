@@ -15,13 +15,14 @@
  *
  * The harness draws the line between *physics* and *heuristics* and takes only
  * the physics. In: agent size, free speed, time horizons, reciprocity, the
- * timestep, the 0.7 m density kernel, and the positional passes that stop
- * bodies interpenetrating — `relaxOverlaps` and the push out of a wall that
- * `integrate` does from the clearance field. Those last two are not tuning
- * knobs, they are the engine's statement that people are solid, and without
- * them assertion 6 below would be measuring nothing: ORCA is a velocity-space
- * method, it prevents collisions it can see coming and cannot undo one that
- * already exists. Out: the engine's jam-breaking heuristics — the sidestep, the
+ * timestep, the 0.7 m density kernel, and the passes that stop bodies
+ * interpenetrating — `resolveContacts` before anybody moves, `relaxOverlaps`
+ * after, and the push out of a wall that `integrate` does from the clearance
+ * field. Those are not tuning knobs, they are the engine's statement that
+ * people are solid, and without them assertion 6 below would be measuring
+ * nothing: ORCA is a velocity-space method, and when its linear program is
+ * infeasible it lets bodies close that it cannot then separate. Out: the
+ * engine's jam-breaking heuristics — the sidestep, the
  * creep, the time horizon that shortens under pressure, the re-plan. Those
  * exist so a venue never deadlocks; including them would measure the recovery
  * machinery rather than the locomotion model. For the record, with the two
@@ -70,9 +71,20 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { buildObstacles, computeNewVelocity, type OrcaAgentState } from '../avoidance/orca'
 import { ObstacleIndex } from '../avoidance/obstacleIndex'
-import { SEPARATION, separationScale } from '../avoidance/separation'
+import {
+  CONTACT_PASSES,
+  SEPARATION,
+  contactCorrection,
+  separationScale,
+} from '../avoidance/separation'
 import { personalSpace } from '../behaviour/proxemics'
-import { hardCoreCorrection, PACE_LOOKAHEAD, speedFromDensity } from '../nav/flowFields'
+import {
+  DENSITY_BANDWIDTH,
+  densityRange,
+  hardCoreCorrection,
+  PACE_LOOKAHEAD,
+  speedFromDensity,
+} from '../nav/flowFields'
 import { weidmannSpeed } from '../metrics/los'
 import { Rng } from '../../core/math/random'
 import type { Vec2 } from '../../core/math/vec2'
@@ -94,14 +106,16 @@ const RESPONSIBILITY = 0.5
 /** The adult profile's willingness to accept a tight gap; see `proxemics`. */
 const ASSERTIVENESS = 0.5
 const DT = 0.1
+/** Far enough that no pair the contact rule could reach is left out of it. */
+const CONTACT_REACH = 2 * RADIUS + 0.6
 
 /** `DensityField`'s kernel, evaluated directly so that it can wrap with the corridor. */
-const BANDWIDTH = 0.7
+const BANDWIDTH = DENSITY_BANDWIDTH
 const KERNEL_NORM =
   (1 / (2 * Math.PI * BANDWIDTH * BANDWIDTH)) * hardCoreCorrection(RADIUS, BANDWIDTH)
 const KERNEL_DENOMINATOR = 2 * BANDWIDTH * BANDWIDTH
-/** Where the engine's precomputed stamp drops weights below 1% of the peak. */
-const DENSITY_RANGE = 2.1
+/** Where the engine's precomputed stamp stops. */
+const DENSITY_RANGE = densityRange(BANDWIDTH)
 
 /**
  * The share of the kernel that lands on floor somebody could stand on, for a
@@ -507,6 +521,38 @@ const runCorridor = (count: number, totalSeconds: number, transientSeconds: numb
       }
     }
     if (step === steps) break
+
+    // Contact in velocity, before anybody moves, exactly as
+    // `Simulation.resolveContacts` does it with the rule and pass count shared
+    // in `avoidance/separation`: a pair closes only as fast as the gap between
+    // them allows in one step, and each of them gives way by half.
+    for (let pass = 0; pass < CONTACT_PASSES; pass++) {
+      let touched = false
+      for (let i = 0; i < count; i++) {
+        const column = Math.min(COLUMNS - 1, Math.floor(x[i] / COLUMN_WIDTH))
+        for (let c = -1; c <= 1; c++) {
+          for (const j of buckets[(column + c + COLUMNS) % COLUMNS]) {
+            if (j <= i) continue
+            const dxj = wrap(x[j] - x[i])
+            const dyj = y[j] - y[i]
+            const d2 = dxj * dxj + dyj * dyj
+            if (d2 < 1e-12 || d2 > CONTACT_REACH * CONTACT_REACH) continue
+            const length = Math.sqrt(d2)
+            const nx = dxj / length
+            const ny = dyj / length
+            const separating = (nextVx[j] - nextVx[i]) * nx + (nextVy[j] - nextVy[i]) * ny
+            const correction = contactCorrection(length - 2 * RADIUS, separating, DT)
+            if (correction === 0) continue
+            nextVx[i] -= nx * correction * 0.5
+            nextVy[i] -= ny * correction * 0.5
+            nextVx[j] += nx * correction * 0.5
+            nextVy[j] += ny * correction * 0.5
+            touched = true
+          }
+        }
+      }
+      if (!touched) break
+    }
 
     for (let i = 0; i < count; i++) {
       vx[i] = nextVx[i]

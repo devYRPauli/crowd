@@ -178,8 +178,8 @@ describe('egress through a door', () => {
    * Each run above stops the moment it has its measurement, so this asserts
    * that the saturated window was actually reached and not that the hall
    * emptied — a door narrow enough to strand people would never get here.
-   * Full clearance through a single exit is RiMEA TC11's case, in
-   * `engine.test.ts`.
+   * Full clearance through a single exit is asserted in `engine.test.ts`
+   * and in the single-exit congestion case in `rimea.test.ts`.
    */
   it('reaches the measuring window through every one of them', () => {
     const window = Math.round(PEOPLE * 0.8)

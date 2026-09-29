@@ -9,8 +9,13 @@
  * crowd reaches — which then feeds back through the speed–density relation and
  * has everyone walking through a pack that could not physically exist.
  *
- * The rule lives in its own module because two places implement it:
- * `Simulation.relaxOverlaps` for the engine, and the periodic-corridor harness
+ * It has a velocity half, applied before anybody moves, so that a pair can
+ * close only as fast as the gap between them allows in one step; a correction
+ * made after the overlap exists is a step too late.
+ *
+ * The rules live in their own module because two places implement them:
+ * `Simulation.resolveContacts` and `Simulation.relaxOverlaps` for the engine,
+ * and the periodic-corridor harness
  * in `validation/fundamentalDiagram.test.ts`, which cannot use the engine
  * because it needs wrap-around geometry the engine has no concept of. If those
  * two drifted, the validation suite would stop measuring the shipped model, so
@@ -40,6 +45,29 @@ export const SEPARATION = {
    */
   maxCorrectionPerStep: 0.12,
 } as const
+
+/**
+ * Velocity passes per step spent keeping bodies from walking into each other,
+ * before anybody moves. Contact comes in chains, since holding A off B changes
+ * B, which was also being held off C; two passes are most of the benefit, and
+ * the positional passes after integration take what is left.
+ */
+export const CONTACT_PASSES = 2
+
+/**
+ * How much a pair's closing speed has to come down so that they are, at worst,
+ * touching after a step of `dt`. Zero when it need not.
+ *
+ * `gap` is the distance between their surfaces, negative when they already
+ * overlap, and `separating` is their relative speed along the line between
+ * them, positive when they are moving apart. A pair may close by the whole gap
+ * in one step and no faster. Only this component is touched, so a crowd still
+ * slides past itself along the tangent.
+ */
+export function contactCorrection(gap: number, separating: number, dt: number): number {
+  const allowed = -gap / dt
+  return separating >= allowed ? 0 : allowed - separating
+}
 
 /** The share of the step budget one pass may spend. */
 export const SEPARATION_PASS_CAP = SEPARATION.maxCorrectionPerStep / SEPARATION.iterations

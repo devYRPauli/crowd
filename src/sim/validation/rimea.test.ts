@@ -63,6 +63,7 @@ import type { AgentProfile, Plan, Population, Scenario, Zone } from '../../core/
 import { AGENT_FIELD, AGENT_STRIDE } from '../types'
 import { collectObstaclePolygons } from '../world'
 import { distanceToPolygonEdge, pointInPolygon } from '../../core/math/geometry'
+import { BOUNDARY_LAYER } from '../../core/analysis/compliance'
 
 /** The engine's default physics timestep; these runs use nothing exotic. */
 const DT = 0.1
@@ -257,9 +258,6 @@ const BOTTLENECK_WIDTHS = [0.8, 1.0, 1.2, 1.5, 2.0]
 const BAND_LOW = 1.2
 const BAND_HIGH = 1.4
 
-/** SFPE boundary layer, used only to explain the result — never to grade it. */
-const BOUNDARY_LAYER = 0.15
-
 /**
  * A room feeding one opening, measured at the opening plane.
  *
@@ -285,7 +283,7 @@ const measureBottleneck = (width: number): BottleneckResult => {
   const plan: Plan = b.build()
 
   const population = leavingPopulation(
-    `rimea-tc4-${width}`,
+    `rimea-tc12-${width}`,
     people,
     entry,
     { kind: 'uniform', startS: 0, windowS },
@@ -753,7 +751,7 @@ const runSingleExitEvacuation = (): EvacuationResult => {
 
   const people = 150
   const population = leavingPopulation(
-    'rimea-tc11',
+    'single-exit',
     people,
     entry,
     { kind: 'all-at-once', startS: 0, windowS: 0 },

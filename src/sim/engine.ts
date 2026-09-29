@@ -51,7 +51,12 @@ import {
 } from './nav/flowFields'
 import { computeNewVelocity, type OrcaAgentState } from './avoidance/orca'
 import { ObstacleIndex } from './avoidance/obstacleIndex'
-import { SEPARATION, separationScale } from './avoidance/separation'
+import {
+  CONTACT_PASSES,
+  SEPARATION,
+  contactCorrection,
+  separationScale,
+} from './avoidance/separation'
 import { personalSpace } from './behaviour/proxemics'
 import { SpatialHash } from './spatialHash'
 import { scheduleArrivals, splitIntoGroups } from './agents/arrivals'
@@ -140,8 +145,6 @@ const ROW_PASS_COST = 2
 /** Steps in half a turn when looking round for a place behind somebody. */
 const PLACE_TURNS = 8
 const NEIGHBOUR_RANGE = 5.0
-/** Velocity passes spent keeping bodies from walking into each other. */
-const CONTACT_PASSES = 2
 /** Seconds between a person reconsidering which way out they are heading. */
 const EXIT_REVIEW_INTERVAL = 6
 /**
@@ -2509,11 +2512,9 @@ export class Simulation {
    *
    * Only the closing part of the relative velocity is touched. Everything along
    * the tangent survives, so a crowd still slides and shuffles past itself and
-   * this cannot deadlock anybody the way zeroing a velocity outright would.
-   *
-   * Two passes, because contact comes in chains: fixing A against B changes B,
-   * which was also being held off C. Two is most of the benefit; the positional
-   * relaxation after integration mops up what is left.
+   * this cannot deadlock anybody the way zeroing a velocity outright would. The
+   * rule and its pass count are `contactCorrection` and `CONTACT_PASSES`, shared
+   * with the corridor harness.
    */
   private resolveContacts(dt: number): void {
     const count = this.live.length
@@ -2531,22 +2532,21 @@ export class Simulation {
           const distanceSq = dx * dx + dy * dy
           if (distanceSq < 1e-12) return
           const length = Math.sqrt(distanceSq)
-          const touching = contactDistance(agent, other)
           const nx = dx / length
           const ny = dy / length
-          // Along the line between them, positive is separating.
-          const closing = (other.vx - agent.vx) * nx + (other.vy - agent.vy) * ny
-          // The fastest they may close and still not be inside each other after
-          // this step. Negative while there is a gap to spend.
-          const allowed = (touching - length) / dt
-          if (closing >= allowed) return
+          const separating = (other.vx - agent.vx) * nx + (other.vy - agent.vy) * ny
+          const correction = contactCorrection(
+            length - contactDistance(agent, other),
+            separating,
+            dt,
+          )
+          if (correction === 0) return
           // Someone seated or being served holds their place; the mover gives way.
           const agentFixed = agent.state === 'seated' || agent.state === 'served'
           const otherFixed = other.state === 'seated' || other.state === 'served'
           if (agentFixed && otherFixed) return
           const agentShare = agentFixed ? 0 : otherFixed ? 1 : 0.5
           const otherShare = otherFixed ? 0 : agentFixed ? 1 : 0.5
-          const correction = allowed - closing
           agent.vx -= nx * correction * agentShare
           agent.vy -= ny * correction * agentShare
           other.vx += nx * correction * otherShare
@@ -2566,8 +2566,8 @@ export class Simulation {
    * and the relaxed fallback lets people drift into each other. Without this
    * pass a jam keeps compressing and reports densities no real crowd reaches —
    * twenty-plus persons per square metre — which then poisons every measure
-   * derived from density. One positional relaxation per step is enough to hold
-   * the crowd at a physical packing.
+   * derived from density. `SEPARATION.iterations` passes per step hold the
+   * crowd at a physical packing; `avoidance/separation` says why one is not.
    */
   private relaxOverlaps(): void {
     const count = this.live.length
