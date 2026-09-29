@@ -33,6 +33,7 @@ import {
 import { newDocumentId, newId } from '../model/ids'
 import type { Vec2 } from '../math/vec2'
 import type { Distribution } from '../math/random'
+import { hypot } from '../math/libm'
 
 /** What a profile the file only half describes is completed from. */
 const ADULT = (() => {
@@ -109,7 +110,7 @@ const parseWall = (raw: unknown): Wall | null => {
   if (!isObject(raw)) return null
   const a = point(raw.a)
   const b = point(raw.b)
-  if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-4) return null
+  if (hypot(b.x - a.x, b.y - a.y) < 1e-4) return null
   return {
     id: str(raw.id, newId('wall')),
     a,

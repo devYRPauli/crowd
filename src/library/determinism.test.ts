@@ -13,11 +13,28 @@
  * station came out anywhere between 108 and 119 people served on identical
  * input. Streams are named after a thing's position in the plan now, which two
  * structurally identical plans always agree on.
+ *
+ * And on every machine. `Math.sin` and the rest round differently on arm64 and
+ * x86, and a crowd amplifies the last bit: an exit-choice run split 160/140 on
+ * a Mac and 150/150 on CI. The engine computes them with `core/math/libm` now,
+ * and each run's numbers are pinned here as a hash. A change to the engine that
+ * moves them updates the hash; a hash that passes on one machine and fails on
+ * another is the platform leaking back in.
  */
 
 import { describe, expect, it } from 'vitest'
 import { TEMPLATES } from './templates'
 import { Simulation } from '../sim/engine'
+import { hashString } from '../core/math/random'
+
+const PINNED: Record<string, number> = {
+  'coffee-bar': 2539051883,
+  conference: 3596447635,
+  gallery: 4126874085,
+  'polling-station': 1397113152,
+  concourse: 3480398078,
+  banquet: 2090742699,
+}
 
 /** The summary with ids stripped: those are minted per build and differ by design. */
 const numbersOnly = (summary: unknown): unknown =>
@@ -61,6 +78,7 @@ describe('determinism', () => {
     async (id) => {
       const first = await run(id)
       expect(await run(id)).toEqual(first)
+      expect(hashString(JSON.stringify(first))).toBe(PINNED[id])
     },
     120_000,
   )

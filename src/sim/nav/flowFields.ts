@@ -22,6 +22,7 @@ import type { Vec2 } from '../../core/math/vec2'
 import type { NavGrid } from './eikonal'
 import { sampleGradient, solveEikonal } from './eikonal'
 import { weidmannFactor } from '../metrics/los'
+import { exp, hypot, log } from '../../core/math/libm'
 
 export interface RouteField {
   id: string
@@ -203,7 +204,7 @@ export class FlowFieldCache {
     const dx = shortest.dx * (1 - awareness) + congested.dx * awareness
     const dy = shortest.dy * (1 - awareness) + congested.dy * awareness
     const cost = shortest.value * (1 - awareness) + congested.value * awareness
-    const length = Math.hypot(dx, dy)
+    const length = hypot(dx, dy)
     if (length < 1e-6) return { dx: shortest.dx, dy: shortest.dy, cost }
     return { dx: dx / length, dy: dy / length, cost }
   }
@@ -312,7 +313,7 @@ const DENSITY_CUTOFF = 0.01
  * harness both assumed the cutoff, which is now the boundary on every grid.
  */
 export const densityRange = (bandwidth: number): number =>
-  bandwidth * Math.sqrt(-2 * Math.log(DENSITY_CUTOFF))
+  bandwidth * Math.sqrt(-2 * log(DENSITY_CUTOFF))
 
 /**
  * How much a kernel density estimate under-reads a crowd of solid bodies, and
@@ -341,7 +342,7 @@ export const densityRange = (bandwidth: number): number =>
  */
 export function hardCoreCorrection(bodyRadius: number, bandwidth: number): number {
   const contact = 2 * bodyRadius
-  return Math.exp((contact * contact) / (2 * bandwidth * bandwidth))
+  return exp((contact * contact) / (2 * bandwidth * bandwidth))
 }
 
 export class DensityField {
@@ -391,7 +392,7 @@ export class DensityField {
     for (let dy = -reach; dy <= reach; dy++) {
       for (let dx = -reach; dx <= reach; dx++) {
         const distanceSq = (dx * dx + dy * dy) * grid.cellSize * grid.cellSize
-        const weight = norm * Math.exp(-distanceSq / (2 * bandwidth * bandwidth))
+        const weight = norm * exp(-distanceSq / (2 * bandwidth * bandwidth))
         if (weight < norm * DENSITY_CUTOFF) continue
         offsets.push(dy * grid.cols + dx)
         weights.push(weight)
@@ -480,7 +481,7 @@ export class DensityField {
     const col = Math.round((x - originX) / cellSize - 0.5)
     const row = Math.round((y - originY) / cellSize - 0.5)
     if (col < 0 || row < 0 || col >= cols || row >= rows) return 0
-    const falloff = Math.exp(-(distance * distance) / (2 * this.bandwidth * this.bandwidth))
+    const falloff = exp(-(distance * distance) / (2 * this.bandwidth * this.bandwidth))
     if (falloff < DENSITY_CUTOFF) return 0
     return (this.peakWeight * falloff) / this.coverage[row * cols + col]
   }

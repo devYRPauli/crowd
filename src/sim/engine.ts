@@ -75,6 +75,7 @@ import {
   type SimStats,
 } from './types'
 import { CROWD_SAFETY, WALKWAY_LOS, losFor, losIndex } from './metrics/los'
+import { atan2, cos, hypot, sin } from '../core/math/libm'
 
 /** How close counts as having arrived at an exact target. */
 const ARRIVE_RADIUS = 0.34
@@ -1291,7 +1292,7 @@ export class Simulation {
     const { grid } = this.world
     const dx = to.x - agent.x
     const dy = to.y - agent.y
-    const length = Math.hypot(dx, dy)
+    const length = hypot(dx, dy)
     if (length < 1e-6) return true
     const steps = Math.ceil(length / grid.cellSize)
     for (let i = 1; i <= steps; i++) {
@@ -1397,16 +1398,16 @@ export class Simulation {
     }
     const dx = agent.x - ahead.x
     const dy = agent.y - ahead.y
-    if (Math.hypot(dx, dy) < 1e-6) return this.slotPosition(queue, slotIndex)
+    if (hypot(dx, dy) < 1e-6) return this.slotPosition(queue, slotIndex)
     // Behind the person ahead on the side you are coming from, turned as little
     // as it takes to stay on floor a queue may use. Unturned, the banquet bar's
     // queue grew towards the front door because that is where everybody comes
     // from, and the first guest to join it from outside put the back of the
     // line outside for the rest of the evening.
-    const heading = Math.atan2(dy, dx)
+    const heading = atan2(dy, dx)
     const placeAt = (angle: number): Vec2 => ({
-      x: ahead.x + Math.cos(angle) * record.spacing,
-      y: ahead.y + Math.sin(angle) * record.spacing,
+      x: ahead.x + cos(angle) * record.spacing,
+      y: ahead.y + sin(angle) * record.spacing,
     })
     for (let turn = 0; turn <= PLACE_TURNS; turn++) {
       for (const side of turn === 0 || turn === PLACE_TURNS ? [1] : [1, -1]) {
@@ -1613,7 +1614,7 @@ export class Simulation {
         head.state = 'served'
         head.serverIndex = s
         head.exactTarget = servicePositionFor(record, s)
-        head.facingTarget = Math.atan2(
+        head.facingTarget = atan2(
           record.servers[s % record.servers.length].y - head.exactTarget.y,
           record.servers[s % record.servers.length].x - head.exactTarget.x,
         )
@@ -2052,12 +2053,12 @@ export class Simulation {
     agent.leftAt = this.time
     agent.leftFrom = { x: agent.x, y: agent.y }
     agent.leftVia = agent.fieldTarget
-    const speed = Math.hypot(agent.vx, agent.vy)
-    const heading = speed > 0.05 ? Math.atan2(agent.vy, agent.vx) : agent.heading
+    const speed = hypot(agent.vx, agent.vy)
+    const heading = speed > 0.05 ? atan2(agent.vy, agent.vx) : agent.heading
     const far = EXIT_TAIL * 6
     agent.exactTarget = {
-      x: agent.x + Math.cos(heading) * far,
-      y: agent.y + Math.sin(heading) * far,
+      x: agent.x + cos(heading) * far,
+      y: agent.y + sin(heading) * far,
     }
     agent.fieldTarget = null
   }
@@ -2218,8 +2219,8 @@ export class Simulation {
       // them creep towards where they are going. The overlap relaxation keeps
       // the crowd at a physical packing, so this presses forward without
       // anybody passing through anybody.
-      if (agent.jamTime > 4 && Math.hypot(agent.vx, agent.vy) < 0.05) {
-        const push = Math.hypot(pref.x, pref.y)
+      if (agent.jamTime > 4 && hypot(agent.vx, agent.vy) < 0.05) {
+        const push = hypot(pref.x, pref.y)
         if (push > 1e-6) {
           const creep = 0.14
           agent.vx = (pref.x / push) * creep
@@ -2290,7 +2291,7 @@ export class Simulation {
         const baseY = dirY
         dirX = baseX - baseY * bias
         dirY = baseY + baseX * bias
-        const length = Math.hypot(dirX, dirY)
+        const length = hypot(dirX, dirY)
         dirX /= length
         dirY /= length
       }
@@ -2302,7 +2303,7 @@ export class Simulation {
       const strength = (agent.radius + 0.35 - clearance) * 1.6
       dirX += push.x * strength
       dirY += push.y * strength
-      const length = Math.hypot(dirX, dirY)
+      const length = hypot(dirX, dirY)
       if (length > 1e-6) {
         dirX /= length
         dirY /= length
@@ -2342,7 +2343,7 @@ export class Simulation {
       const aheadY = dirY
       dirX = aheadX - aheadY * side * strength
       dirY = aheadY + aheadX * side * strength
-      const length = Math.hypot(dirX, dirY)
+      const length = hypot(dirX, dirY)
       if (length > 1e-6) {
         dirX /= length
         dirY /= length
@@ -2364,7 +2365,7 @@ export class Simulation {
       const { col, row } = worldToCell(grid, x, y)
       return solid[gridIndex(grid, col, row)] === 1
     }
-    const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (grid.cellSize * 0.5))
+    const steps = Math.ceil(hypot(x1 - x0, y1 - y0) / (grid.cellSize * 0.5))
     let inside = isSolid(x0, y0)
     for (let i = 1; i <= steps; i++) {
       const t = i / steps
@@ -2384,7 +2385,7 @@ export class Simulation {
     const up = sampleField(this.world.grid, this.world.clearance, x, y + h, 0)
     const gx = right - left
     const gy = up - down
-    const length = Math.hypot(gx, gy)
+    const length = hypot(gx, gy)
     return length > 1e-6 ? { x: gx / length, y: gy / length } : { x: 0, y: 0 }
   }
 
@@ -2398,13 +2399,13 @@ export class Simulation {
       // and the push-out below then eased them on out the far side, where no
       // field leads to an exit. A move shorter than the clearance it starts
       // from cannot reach geometry, so most steps skip the sweep.
-      const reach = Math.hypot(nextX - agent.x, nextY - agent.y)
+      const reach = hypot(nextX - agent.x, nextY - agent.y)
       if (reach > sampleField(this.world.grid, this.world.clearance, agent.x, agent.y, 10)) {
         const free = this.freeFraction(agent.x, agent.y, nextX, nextY)
         nextX = agent.x + (nextX - agent.x) * free
         nextY = agent.y + (nextY - agent.y) * free
       }
-      const moved = Math.hypot(nextX - agent.x, nextY - agent.y)
+      const moved = hypot(nextX - agent.x, nextY - agent.y)
       agent.x = nextX
       agent.y = nextY
       agent.distance += moved
@@ -2422,7 +2423,7 @@ export class Simulation {
         agent.jamTime = 0
       }
       if (speed > 0.05) {
-        agent.heading = Math.atan2(agent.vy, agent.vx)
+        agent.heading = atan2(agent.vy, agent.vx)
       } else if (agent.facingTarget !== null) {
         agent.heading = agent.facingTarget
       }
@@ -2697,7 +2698,7 @@ export class Simulation {
         }
         if (!pointInPolygon({ x: agent.x, y: agent.y }, area.record.polygon)) continue
         inside++
-        speedSum += Math.hypot(agent.vx, agent.vy)
+        speedSum += hypot(agent.vx, agent.vy)
       }
 
       const density = area.record.area > 0 ? inside / area.record.area : 0
@@ -2742,7 +2743,7 @@ export class Simulation {
       exactTarget: agent.exactTarget,
       queueId: agent.queueId,
       queueSlot: agent.queueSlot,
-      speed: Math.hypot(agent.vx, agent.vy),
+      speed: hypot(agent.vx, agent.vy),
       queueTime: agent.queueTime,
       jamTime: agent.jamTime,
       replanCount: agent.replanCount,
@@ -2800,7 +2801,7 @@ export class Simulation {
       this.packed[base + AGENT_FIELD.x] = agent.x
       this.packed[base + AGENT_FIELD.y] = agent.y
       this.packed[base + AGENT_FIELD.heading] = agent.heading
-      this.packed[base + AGENT_FIELD.speed] = Math.hypot(agent.vx, agent.vy)
+      this.packed[base + AGENT_FIELD.speed] = hypot(agent.vx, agent.vy)
       this.packed[base + AGENT_FIELD.state] = agentStateIndex(agent.state)
       this.packed[base + AGENT_FIELD.profile] = agent.profileIndex
       this.packed[base + AGENT_FIELD.population] = agent.populationIndex
@@ -2827,7 +2828,7 @@ export class Simulation {
     let maxWait = 0
     for (const id of this.live) {
       const agent = this.agents[id]
-      const speed = Math.hypot(agent.vx, agent.vy)
+      const speed = hypot(agent.vx, agent.vy)
       speedSum += speed
       // Somebody sitting at a table, or standing in a queue where they are
       // meant to be, is not congestion. Only people actually trying to get

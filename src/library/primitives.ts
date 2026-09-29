@@ -12,6 +12,8 @@
  * at the centre of its footprint on the floor.
  */
 
+import { cos, sin } from '../core/math/libm'
+
 export type MaterialRole =
   | 'wood'
   | 'woodDark'
@@ -185,8 +187,8 @@ export const translated = (prims: Prim[], dx: number, dy: number, dz: number): P
  * across the hub.
  */
 export const rotated = (prims: Prim[], angle: number): Prim[] => {
-  const c = Math.cos(angle)
-  const s = Math.sin(angle)
+  const c = cos(angle)
+  const s = sin(angle)
   return prims.map((p) => {
     const x = p.x ?? 0
     const z = p.z ?? 0

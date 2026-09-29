@@ -6,6 +6,8 @@
  * document and cross the worker boundary without adapters.
  */
 
+import { atan2, cos, hypot, sin } from './libm'
+
 export interface Vec2 {
   x: number
   y: number
@@ -33,7 +35,7 @@ export const cross = (a: Vec2, b: Vec2): number => a.x * b.y - a.y * b.x
 
 export const lengthSq = (a: Vec2): number => a.x * a.x + a.y * a.y
 
-export const length = (a: Vec2): number => Math.hypot(a.x, a.y)
+export const length = (a: Vec2): number => hypot(a.x, a.y)
 
 export const distanceSq = (a: Vec2, b: Vec2): number => {
   const dx = a.x - b.x
@@ -41,10 +43,10 @@ export const distanceSq = (a: Vec2, b: Vec2): number => {
   return dx * dx + dy * dy
 }
 
-export const distance = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y)
+export const distance = (a: Vec2, b: Vec2): number => hypot(a.x - b.x, a.y - b.y)
 
 export const normalize = (a: Vec2): Vec2 => {
-  const len = Math.hypot(a.x, a.y)
+  const len = hypot(a.x, a.y)
   return len > 1e-12 ? { x: a.x / len, y: a.y / len } : { x: 0, y: 0 }
 }
 
@@ -59,17 +61,17 @@ export const lerp = (a: Vec2, b: Vec2, t: number): Vec2 => ({
 })
 
 export const rotate = (a: Vec2, radians: number): Vec2 => {
-  const c = Math.cos(radians)
-  const s = Math.sin(radians)
+  const c = cos(radians)
+  const s = sin(radians)
   return { x: a.x * c - a.y * s, y: a.x * s + a.y * c }
 }
 
 export const fromAngle = (radians: number, radius = 1): Vec2 => ({
-  x: Math.cos(radians) * radius,
-  y: Math.sin(radians) * radius,
+  x: cos(radians) * radius,
+  y: sin(radians) * radius,
 })
 
-export const angleOf = (a: Vec2): number => Math.atan2(a.y, a.x)
+export const angleOf = (a: Vec2): number => atan2(a.y, a.x)
 
 export const equals = (a: Vec2, b: Vec2, epsilon = 1e-9): boolean =>
   Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon

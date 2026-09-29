@@ -86,6 +86,7 @@ import {
   speedFromDensity,
 } from '../nav/flowFields'
 import { weidmannSpeed } from '../metrics/los'
+import { exp, hypot } from '../../core/math/libm'
 import { Rng } from '../../core/math/random'
 import type { Vec2 } from '../../core/math/vec2'
 
@@ -138,7 +139,7 @@ const erf = (value: number): number => {
     1 -
     ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
       t *
-      Math.exp(-x * x)
+      exp(-x * x)
   return sign * y
 }
 
@@ -336,7 +337,7 @@ const runCorridor = (count: number, totalSeconds: number, transientSeconds: numb
   }
   // Enough jitter to stop a perfect crystal simply translating for two minutes,
   // small enough that no pair can start closer than two radii.
-  const slack = Math.min(LATTICE_DX, Math.hypot(LATTICE_DX / 2, LATTICE_DY)) - 2 * RADIUS
+  const slack = Math.min(LATTICE_DX, hypot(LATTICE_DX / 2, LATTICE_DY)) - 2 * RADIUS
   const jitter = Math.max(0, Math.min(0.06, slack * 0.3))
   for (let i = 0; i < count; i++) {
     const row = i % LATTICE_ROWS
@@ -417,7 +418,7 @@ const runCorridor = (count: number, totalSeconds: number, transientSeconds: numb
           const aheadDx = dxj - PACE_LOOKAHEAD
           const aheadD2 = aheadDx * aheadDx + dyj * dyj
           if (aheadD2 <= DENSITY_RANGE * DENSITY_RANGE) {
-            density += KERNEL_NORM * Math.exp(-aheadD2 / KERNEL_DENOMINATOR)
+            density += KERNEL_NORM * exp(-aheadD2 / KERNEL_DENOMINATOR)
           }
           if (j > i) {
             const separation = Math.sqrt(d2)

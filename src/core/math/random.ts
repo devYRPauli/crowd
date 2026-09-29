@@ -8,6 +8,8 @@
  * draws when an unrelated setting changes.
  */
 
+import { cos, exp, log, sin } from './libm'
+
 const UINT32 = 4294967296
 
 /** 32-bit string hash (FNV-1a), used to derive named sub-streams. */
@@ -86,7 +88,7 @@ export class Rng {
       v = this.next() * 2 - 1
       s = u * u + v * v
     } while (s >= 1 || s === 0)
-    const factor = Math.sqrt((-2 * Math.log(s)) / s)
+    const factor = Math.sqrt((-2 * log(s)) / s)
     this.spare = v * factor
     return mean + u * factor * sd
   }
@@ -101,15 +103,15 @@ export class Rng {
   }
 
   exponential(rate: number): number {
-    return -Math.log(1 - this.next()) / rate
+    return -log(1 - this.next()) / rate
   }
 
   /** Log-normal with the given mean and standard deviation of the *value*. */
   logNormal(mean: number, sd: number): number {
     if (mean <= 0) return 0
-    const variance = Math.log(1 + (sd * sd) / (mean * mean))
-    const mu = Math.log(mean) - variance / 2
-    return Math.exp(this.normal(mu, Math.sqrt(variance)))
+    const variance = log(1 + (sd * sd) / (mean * mean))
+    const mu = log(mean) - variance / 2
+    return exp(this.normal(mu, Math.sqrt(variance)))
   }
 
   triangular(min: number, mode: number, max: number): number {
@@ -164,7 +166,7 @@ export class Rng {
   inUnitDisc(): { x: number; y: number } {
     const angle = this.next() * Math.PI * 2
     const radius = Math.sqrt(this.next())
-    return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+    return { x: cos(angle) * radius, y: sin(angle) * radius }
   }
 }
 

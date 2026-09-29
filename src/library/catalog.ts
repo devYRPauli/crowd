@@ -13,6 +13,7 @@
 
 import type { MaterialRole, Prim } from './primitives'
 import { box, cone, cyl, legs, pedestal, sphere, torus } from './primitives'
+import { cos, sin } from '../core/math/libm'
 
 export type CatalogCategory = 'tables' | 'seating' | 'service' | 'structure' | 'equipment' | 'decor'
 
@@ -86,8 +87,8 @@ const roundSeats = (radius: number, count: number): SeatSlot[] =>
   Array.from({ length: count }, (_, i) => {
     const a = (i / count) * TAU
     return {
-      x: Math.cos(a) * radius,
-      z: Math.sin(a) * radius,
+      x: cos(a) * radius,
+      z: sin(a) * radius,
       facing: a + Math.PI,
       kind: 'seat' as const,
     }
@@ -1083,9 +1084,9 @@ const DECOR: CatalogItem[] = [
         const r = width * 0.26
         out.push(
           sphere(
-            Math.cos(a) * r,
+            cos(a) * r,
             potH + height * 0.3 + (i % 2) * 0.1,
-            Math.sin(a) * r,
+            sin(a) * r,
             width * 0.24,
             'plant',
             1.3,
@@ -1118,9 +1119,9 @@ const DECOR: CatalogItem[] = [
         const a = (i / 5) * Math.PI * 2
         out.push(
           sphere(
-            Math.cos(a) * width * 0.28,
+            cos(a) * width * 0.28,
             height * 0.76 + (i % 2) * height * 0.08,
-            Math.sin(a) * width * 0.28,
+            sin(a) * width * 0.28,
             width * 0.3,
             i % 2 ? 'plant' : 'plantDark',
             0.85,

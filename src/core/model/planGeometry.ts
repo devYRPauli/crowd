@@ -14,6 +14,7 @@ import type { Bounds, Polygon } from '../math/geometry'
 import { EMPTY_BOUNDS, boundsOf, circlePolygon, rectPolygon, unionBounds } from '../math/geometry'
 import type { FurnitureItem, Opening, Plan, ServicePoint, Wall } from './types'
 import { resolveCatalogItem, type SeatSlot } from '../../library/catalog'
+import { cos, sin } from '../math/libm'
 
 /** Openings at floor level let people through; windows and high gates do not. */
 export const isWalkableOpening = (opening: Opening): boolean =>
@@ -191,8 +192,8 @@ export const rowBackPolygon = (item: FurnitureItem): Polygon | null => {
   const size = furnitureSize(item)
   const depth = size.depth / 3
   const z = -size.depth / 2 + depth / 2
-  const c = Math.cos(item.rotation)
-  const s = Math.sin(item.rotation)
+  const c = cos(item.rotation)
+  const s = sin(item.rotation)
   return rectPolygon(
     { x: item.position.x - z * s, y: item.position.y + z * c },
     size.width,
@@ -238,8 +239,8 @@ export const planSeats = (plan: Plan): WorldSeat[] => {
     if (!entry.seats) continue
     const size = furnitureSize(item)
     const slots = entry.seats(size)
-    const c = Math.cos(item.rotation)
-    const s = Math.sin(item.rotation)
+    const c = cos(item.rotation)
+    const s = sin(item.rotation)
     const toWorld = (x: number, z: number): Vec2 => ({
       x: item.position.x + x * c - z * s,
       y: item.position.y + x * s + z * c,

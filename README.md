@@ -209,8 +209,13 @@ and the kernel expects to find about a fifth of its mass in it. Uncorrected, a
 nothing — while the per-area occupancy in the same report, which counts heads in
 a polygon, disagrees by that same fifth.
 
-Everything is deterministic given the seed. The same scenario replayed produces
-the same numbers, which is what makes two layouts comparable.
+Everything is deterministic given the seed, on any machine. The same scenario
+replayed produces the same numbers, which is what makes two layouts comparable,
+and it produces them on a Mac and on Linux alike, which is what makes a result
+somebody else can check. The second half is not free: `Math.sin`, `Math.exp` and
+the rest round their last bit differently on arm64 and x86, and a crowd
+amplifies that bit until an exit splits 160/140 on one machine and 150/150 on
+the other. The engine computes them itself, in `src/core/math/libm.ts`.
 
 ### Modelling choices worth knowing
 
@@ -295,7 +300,8 @@ other test.
   way; 300 spread across both and clear a third faster for it.
 - **Determinism**, because a comparison that is partly noise is worse than no
   comparison: every starter venue is built twice and has to produce identical
-  numbers.
+  numbers, and those numbers are pinned, so a machine that computes them
+  differently fails the test.
 
 Run `npm test` for everything, or `npx vitest run src/sim/validation` for the
 fidelity suite alone. The validation tests print their measured numbers — that

@@ -21,6 +21,7 @@
 
 import type { Vec2 } from '../../core/math/vec2'
 import type { Bounds } from '../../core/math/geometry'
+import { hypot } from '../../core/math/libm'
 
 /** A uniform square grid covering a rectangular region of the plan. */
 export interface NavGrid {
@@ -139,7 +140,7 @@ export const clearanceField = (grid: NavGrid, blocked: Uint8Array): Float32Array
   squaredEdt(toFree, cols, rows)
 
   const out = new Float32Array(count)
-  const span = Math.hypot(cols, rows)
+  const span = hypot(cols, rows)
   for (let r = 0; r < rows; r++) {
     // Solid ground beyond every border is a half-plane, so its nearest cell is
     // always the perpendicular one and a plain min against it stays exact.
@@ -507,7 +508,7 @@ export const sampleGradient = (
   else if (hasNorth) gy = (north - value) / (yn - py)
   else if (hasSouth) gy = (value - south) / (py - ys)
 
-  const len = Math.hypot(gx, gy)
+  const len = hypot(gx, gy)
   if (len < 1e-9) return { dx: 0, dy: 0, value }
   return { dx: -gx / len, dy: -gy / len, value }
 }

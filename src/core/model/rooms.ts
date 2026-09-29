@@ -14,6 +14,7 @@ import type { Vec2 } from '../math/vec2'
 import type { Polygon } from '../math/geometry'
 import { polygonArea, polygonCentroid, signedArea } from '../math/geometry'
 import type { Wall } from './types'
+import { atan2, hypot } from '../math/libm'
 
 export interface Room {
   id: string
@@ -72,7 +73,7 @@ const splitSegments = (
         if (t <= 1e-6 || t >= 1 - 1e-6) continue
         const px = seg.a.x + dx * t
         const py = seg.a.y + dy * t
-        if (Math.hypot(px - p.x, py - p.y) < 0.02) cuts.push(t)
+        if (hypot(px - p.x, py - p.y) < 0.02) cuts.push(t)
       }
     }
     cuts.sort((m, n) => m - n)
@@ -120,7 +121,7 @@ export const detectRooms = (walls: readonly Wall[], minArea = 0.5): Room[] => {
     halfEdges.push({
       from,
       to,
-      angle: Math.atan2(b.point.y - a.point.y, b.point.x - a.point.x),
+      angle: atan2(b.point.y - a.point.y, b.point.x - a.point.x),
       wallId: piece.wallId,
       twin: backward,
       visited: false,
@@ -128,7 +129,7 @@ export const detectRooms = (walls: readonly Wall[], minArea = 0.5): Room[] => {
     halfEdges.push({
       from: to,
       to: from,
-      angle: Math.atan2(a.point.y - b.point.y, a.point.x - b.point.x),
+      angle: atan2(a.point.y - b.point.y, a.point.x - b.point.x),
       wallId: piece.wallId,
       twin: forward,
       visited: false,

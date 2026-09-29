@@ -96,7 +96,7 @@ describe('length and direction', () => {
   })
 
   it('measures a vector that squaring would saturate at either end', () => {
-    // `length` and `distance` go through Math.hypot rather than squaring first.
+    // `length` and `distance` go through libm's hypot rather than squaring first.
     // A squared length saturates to Infinity going up and to zero going down,
     // and either answer survives into whatever goes on to divide by it — here
     // that would be a direction of exactly nothing for a vector that has one.

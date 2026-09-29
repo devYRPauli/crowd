@@ -3,6 +3,51 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
+const platformMath = {
+  'no-restricted-properties': [
+    'error',
+    ...[
+      'sin',
+      'cos',
+      'tan',
+      'asin',
+      'acos',
+      'atan',
+      'atan2',
+      'sinh',
+      'cosh',
+      'tanh',
+      'asinh',
+      'acosh',
+      'atanh',
+      'exp',
+      'expm1',
+      'log',
+      'log1p',
+      'log2',
+      'log10',
+      'pow',
+      'cbrt',
+      'hypot',
+    ].map((property) => ({
+      object: 'Math',
+      property,
+      message: 'Rounds differently by platform. Use src/core/math/libm.',
+    })),
+  ],
+  'no-restricted-syntax': [
+    'error',
+    {
+      selector: "BinaryExpression[operator='**']:not([right.value=2])",
+      message: 'Rounds differently by platform. Use src/core/math/libm.',
+    },
+    {
+      selector: "AssignmentExpression[operator='**=']",
+      message: 'Rounds differently by platform. Use src/core/math/libm.',
+    },
+  ],
+}
+
 export default tseslint.config(
   { ignores: ['dist', 'node_modules', 'coverage', 'out'] },
   js.configs.recommended,
@@ -28,6 +73,18 @@ export default tseslint.config(
       eqeqeq: ['error', 'always', { null: 'ignore' }],
       'prefer-const': 'error',
     },
+  },
+  {
+    // What the simulation computes has to be the same bits on every machine,
+    // and these are not: see src/core/math/libm.ts. The validation harness is
+    // held to it too, because its figures are published.
+    files: ['src/core/**/*.ts', 'src/sim/**/*.ts', 'src/library/**/*.ts'],
+    ignores: ['**/*.test.ts', 'src/core/math/libm.ts'],
+    rules: platformMath,
+  },
+  {
+    files: ['src/sim/validation/**/*.test.ts'],
+    rules: platformMath,
   },
   {
     files: ['**/*.test.ts'],

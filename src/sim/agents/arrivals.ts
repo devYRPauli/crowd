@@ -9,6 +9,7 @@
 
 import type { ArrivalProfile } from '../../core/model/types'
 import type { Rng } from '../../core/math/random'
+import { exp, log } from '../../core/math/libm'
 
 /** Arrival times in seconds from run start, sorted ascending. */
 export const scheduleArrivals = (profile: ArrivalProfile, count: number, rng: Rng): number[] => {
@@ -72,7 +73,7 @@ export const scheduleArrivals = (profile: ArrivalProfile, count: number, rng: Rn
 
     case 'front-loaded':
       for (let i = 0; i < count; i++) {
-        times.push(start + window * Math.pow(rng.next(), 2.2))
+        times.push(start + window * exp(2.2 * log(rng.next())))
       }
       break
 

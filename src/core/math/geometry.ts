@@ -7,6 +7,7 @@
 
 import type { Vec2 } from './vec2'
 import { cross, distance, distanceSq, dot, sub } from './vec2'
+import { cos, hypot, sin } from './libm'
 
 export type Polygon = Vec2[]
 
@@ -223,8 +224,8 @@ export const rectPolygon = (center: Vec2, width: number, depth: number, rotation
   // lower bound under it, so the case is reachable from the document.
   const hw = Math.abs(width) / 2
   const hd = Math.abs(depth) / 2
-  const c = Math.cos(rotation)
-  const s = Math.sin(rotation)
+  const c = cos(rotation)
+  const s = sin(rotation)
   const corners: Array<[number, number]> = [
     [-hw, -hd],
     [hw, -hd],
@@ -241,7 +242,7 @@ export const circlePolygon = (center: Vec2, radius: number, segments = 16): Poly
   const out: Polygon = []
   for (let i = 0; i < segments; i++) {
     const a = (i / segments) * Math.PI * 2
-    out.push({ x: center.x + Math.cos(a) * radius, y: center.y + Math.sin(a) * radius })
+    out.push({ x: center.x + cos(a) * radius, y: center.y + sin(a) * radius })
   }
   return out
 }
@@ -257,7 +258,7 @@ export const polygonEdges = (poly: readonly Vec2[]): Segment[] => {
 export const polylineLength = (points: readonly Vec2[]): number => {
   let total = 0
   for (let i = 1; i < points.length; i++)
-    total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+    total += hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
   return total
 }
 
@@ -267,7 +268,7 @@ export const pointAlongPolyline = (points: readonly Vec2[], s: number): Vec2 => 
   if (points.length === 1 || s <= 0) return { ...points[0] }
   let remaining = s
   for (let i = 1; i < points.length; i++) {
-    const segLen = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+    const segLen = hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
     if (remaining <= segLen || i === points.length - 1) {
       const t = segLen < 1e-9 ? 0 : Math.min(1, remaining / segLen)
       return {
@@ -309,7 +310,7 @@ export const closestPointOnPolyline = (
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]
     const b = points[i]
-    const segLen = Math.hypot(b.x - a.x, b.y - a.y)
+    const segLen = hypot(b.x - a.x, b.y - a.y)
     const t = projectOnSegment(p, a, b)
     const point = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
     const d = distance(p, point)
@@ -326,7 +327,7 @@ export const tangentAlongPolyline = (points: readonly Vec2[], s: number): Vec2 =
   for (let i = 1; i < points.length; i++) {
     const dx = points[i].x - points[i - 1].x
     const dy = points[i].y - points[i - 1].y
-    const segLen = Math.hypot(dx, dy)
+    const segLen = hypot(dx, dy)
     if (remaining <= segLen || i === points.length - 1) {
       return segLen < 1e-9 ? { x: 1, y: 0 } : { x: dx / segLen, y: dy / segLen }
     }
@@ -381,13 +382,13 @@ export const offsetPolygon = (poly: readonly Vec2[], d: number): Polygon => {
     const next = poly[(i + 1) % n]
     const e1 = sub(cur, prev)
     const e2 = sub(next, cur)
-    const l1 = Math.hypot(e1.x, e1.y) || 1
-    const l2 = Math.hypot(e2.x, e2.y) || 1
+    const l1 = hypot(e1.x, e1.y) || 1
+    const l2 = hypot(e2.x, e2.y) || 1
     // Outward normals for the given winding.
     const n1 = { x: (e1.y / l1) * sign, y: (-e1.x / l1) * sign }
     const n2 = { x: (e2.y / l2) * sign, y: (-e2.x / l2) * sign }
     let bis = { x: n1.x + n2.x, y: n1.y + n2.y }
-    const bl = Math.hypot(bis.x, bis.y)
+    const bl = hypot(bis.x, bis.y)
     if (bl < 1e-9) {
       bis = n2
     } else {

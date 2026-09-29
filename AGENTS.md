@@ -27,6 +27,11 @@ somewhere else.
   its id. Ids are minted per document from `Math.random`, so a stream named
   after one makes the same venue built twice simulate differently — and a
   comparison against a baseline then measures the ids rather than the layout.
+- Deterministic on every machine, too. `Math.sin`, `Math.exp` and the rest
+  round differently on arm64 and x86, and a crowd amplifies the last bit: an
+  exit-choice run split 160/140 on a Mac and 150/150 on CI. The engine, the
+  library and the validation harness use `core/math/libm`, lint refuses the
+  others there, and `library/determinism.test.ts` pins each template's numbers.
 - The engine is pure: no DOM, no Three.js, no React, no I/O. It takes a plan and
   a scenario and produces numbers.
 - Derived geometry lives in `core/model/planGeometry.ts` and is shared by the

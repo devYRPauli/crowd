@@ -31,6 +31,7 @@ import {
   DEFAULT_WINDOW_WIDTH,
   DOUBLE_DOOR_FROM,
 } from '../core/model/standards'
+import { cos, sin } from '../core/math/libm'
 
 export interface RoomWalls {
   south: Wall
@@ -130,8 +131,8 @@ export class PlanBuilder {
     const entry = resolveCatalogItem(catalogId)
     const size = table.size ?? entry.size
     const seats = entry.seats?.(size) ?? []
-    const c = Math.cos(rotation)
-    const s = Math.sin(rotation)
+    const c = cos(rotation)
+    const s = sin(rotation)
     for (const seat of seats) {
       if (seat.kind !== 'seat') continue
       this.place(

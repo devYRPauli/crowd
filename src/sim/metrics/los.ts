@@ -16,6 +16,8 @@
  * crowds and it has to fire whichever table is in play.
  */
 
+import { exp } from '../../core/math/libm'
+
 export type FacilityType = 'walkway' | 'stair' | 'queue'
 
 export interface LosBand {
@@ -138,7 +140,7 @@ export const WEIDMANN = {
 export const weidmannSpeed = (density: number, freeSpeed = WEIDMANN.freeSpeed): number => {
   if (density <= 1e-6) return freeSpeed
   if (density >= WEIDMANN.jamDensity) return 0
-  return freeSpeed * (1 - Math.exp(-WEIDMANN.gamma * (1 / density - 1 / WEIDMANN.jamDensity)))
+  return freeSpeed * (1 - exp(-WEIDMANN.gamma * (1 / density - 1 / WEIDMANN.jamDensity)))
 }
 
 /** Weidmann speed as a fraction of free-flow speed, clamped to a usable range. */

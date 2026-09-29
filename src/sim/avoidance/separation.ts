@@ -23,6 +23,8 @@
  * either side of them is not.
  */
 
+import { hypot } from '../../core/math/libm'
+
 export const SEPARATION = {
   /**
    * Relaxation passes per step.
@@ -78,7 +80,7 @@ export const SEPARATION_PASS_CAP = SEPARATION.maxCorrectionPerStep / SEPARATION.
  * case and without dividing by zero.
  */
 export function separationScale(dx: number, dy: number): number {
-  const length = Math.hypot(dx, dy)
+  const length = hypot(dx, dy)
   if (length === 0) return 0
   return Math.min(length, SEPARATION_PASS_CAP) / length
 }

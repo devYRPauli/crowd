@@ -57,6 +57,7 @@ import {
 import { resolveCatalogItem } from '../library/catalog'
 import type { OrcaObstacle } from './avoidance/orca'
 import { buildObstacles } from './avoidance/orca'
+import { atan2 } from '../core/math/libm'
 
 /** Nominal body radius used when dilating the navigation mask. */
 export const NAV_CLEARANCE = 0.26
@@ -600,7 +601,7 @@ export const buildWorld = (
       const ahead = slots[Math.max(0, i - 1)]
       const here = slots[i]
       const dir = i === 0 ? sub(sp.position, here) : sub(ahead, here)
-      return Math.atan2(dir.y, dir.x)
+      return atan2(dir.y, dir.x)
     })
     const tail = slots[slots.length - 1]
     const beforeTail = slots[Math.max(0, slots.length - 2)]
@@ -762,5 +763,5 @@ export const queueSlotPosition = (queue: QueueRecord, slot: number): Vec2 => {
 export const queueSlotFacing = (queue: QueueRecord, slot: number): number => {
   if (slot < queue.slotFacing.length) return queue.slotFacing[slot]
   const dir = scale(queue.overflowDirection, -1)
-  return Math.atan2(dir.y, dir.x)
+  return atan2(dir.y, dir.x)
 }

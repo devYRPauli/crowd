@@ -18,6 +18,7 @@
 
 import type { Vec2 } from '../../core/math/vec2'
 import { cross, dot, lengthSq, normalize, sub } from '../../core/math/vec2'
+import { cos, hypot, sin } from '../../core/math/libm'
 
 export interface OrcaAgentState {
   position: Vec2
@@ -329,7 +330,7 @@ export function buildOrcaLinesInto(
     const tRight = fromRightX * rightLegX + fromRightY * rightLegY
 
     if ((t < 0 && tLeft < 0) || (singleVertex && tLeft < 0 && tRight < 0)) {
-      const wLength = Math.hypot(fromLeftX, fromLeftY)
+      const wLength = hypot(fromLeftX, fromLeftY)
       if (wLength > EPSILON) {
         const unitWx = fromLeftX / wLength
         const unitWy = fromLeftY / wLength
@@ -347,7 +348,7 @@ export function buildOrcaLinesInto(
     }
 
     if (t > 1 && tRight < 0) {
-      const wLength = Math.hypot(fromRightX, fromRightY)
+      const wLength = hypot(fromRightX, fromRightY)
       if (wLength > EPSILON) {
         const unitWx = fromRightX / wLength
         const unitWy = fromRightY / wLength
@@ -426,8 +427,8 @@ export function buildOrcaLinesInto(
 
     if (distSq < COINCIDENT_DISTANCE * COINCIDENT_DISTANCE) {
       const angle = perturbationAngle(agent, other)
-      relX = Math.cos(angle) * COINCIDENT_DISTANCE
-      relY = Math.sin(angle) * COINCIDENT_DISTANCE
+      relX = cos(angle) * COINCIDENT_DISTANCE
+      relY = sin(angle) * COINCIDENT_DISTANCE
       distSq = COINCIDENT_DISTANCE * COINCIDENT_DISTANCE
     }
 
@@ -473,7 +474,7 @@ export function buildOrcaLinesInto(
       // Already overlapping: clear the overlap inside one step instead of one horizon.
       const wX = relVelX - invCollisionStep * relX
       const wY = relVelY - invCollisionStep * relY
-      let wLength = Math.hypot(wX, wY)
+      let wLength = hypot(wX, wY)
       let unitWx: number
       let unitWy: number
       if (wLength > EPSILON) {
@@ -594,7 +595,7 @@ const linearProgram2 = (
     result.x = optX * radius
     result.y = optY * radius
   } else if (optX * optX + optY * optY > radius * radius) {
-    const length = Math.hypot(optX, optY)
+    const length = hypot(optX, optY)
     result.x = (optX / length) * radius
     result.y = (optY / length) * radius
   } else {
@@ -672,7 +673,7 @@ const linearProgram3 = (
 
       let dx = lineJ.direction.x - lineI.direction.x
       let dy = lineJ.direction.y - lineI.direction.y
-      const length = Math.hypot(dx, dy)
+      const length = hypot(dx, dy)
       if (length > EPSILON) {
         dx /= length
         dy /= length
