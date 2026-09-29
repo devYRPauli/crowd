@@ -281,6 +281,24 @@ export const PACE_LOOKAHEAD = 0.45
 /** Body radius of a typical adult, and the one the estimator is calibrated on. */
 export const NOMINAL_BODY_RADIUS = 0.23
 
+/** Standard deviation of the density kernel, in metres. */
+export const DENSITY_BANDWIDTH = 0.7
+
+/** Share of its peak below which the kernel counts as nothing: 1% of a person. */
+const DENSITY_CUTOFF = 0.01
+
+/**
+ * Metres from somebody at which their kernel drops below `DENSITY_CUTOFF`.
+ *
+ * The stamp used to be clipped to a square reaching 2.2 bandwidths from its
+ * centre, short of the cutoff along its axes, so how much of a person it carried
+ * depended on the grid: 99% at a 0.3 m cell, 96% at 0.1 m and 95% at 0.05 m,
+ * and a venue's narrowest door picks the cell. `weightAt` and the corridor
+ * harness both assumed the cutoff, which is now the boundary on every grid.
+ */
+export const densityRange = (bandwidth: number): number =>
+  bandwidth * Math.sqrt(-2 * Math.log(DENSITY_CUTOFF))
+
 /**
  * How much a kernel density estimate under-reads a crowd of solid bodies, and
  * the factor that puts it right.
@@ -337,7 +355,7 @@ export class DensityField {
   constructor(
     private grid: NavGrid,
     /** Kernel standard deviation in metres. */
-    bandwidth = 0.7,
+    bandwidth = DENSITY_BANDWIDTH,
     /** 1 where a cell is solid. Omitted, every cell counts as walkable. */
     blocked?: Uint8Array,
     /** Body radius the hard-core correction is calibrated on. */
@@ -348,7 +366,7 @@ export class DensityField {
     this.values = new Float32Array(cells)
     this.accumulator = new Float32Array(cells)
 
-    const reach = Math.ceil((bandwidth * 2.2) / grid.cellSize)
+    const reach = Math.ceil(densityRange(bandwidth) / grid.cellSize)
     const offsets: number[] = []
     const weights: number[] = []
     const cols: number[] = []
@@ -359,7 +377,7 @@ export class DensityField {
       for (let dx = -reach; dx <= reach; dx++) {
         const distanceSq = (dx * dx + dy * dy) * grid.cellSize * grid.cellSize
         const weight = norm * Math.exp(-distanceSq / (2 * bandwidth * bandwidth))
-        if (weight < norm * 0.01) continue
+        if (weight < norm * DENSITY_CUTOFF) continue
         offsets.push(dy * grid.cols + dx)
         weights.push(weight)
         cols.push(dx)
@@ -448,7 +466,7 @@ export class DensityField {
     const row = Math.round((y - originY) / cellSize - 0.5)
     if (col < 0 || row < 0 || col >= cols || row >= rows) return 0
     const falloff = Math.exp(-(distance * distance) / (2 * this.bandwidth * this.bandwidth))
-    if (falloff < 0.01) return 0
+    if (falloff < DENSITY_CUTOFF) return 0
     return (this.peakWeight * falloff) / this.coverage[row * cols + col]
   }
 

@@ -185,6 +185,22 @@ describe('DensityField', () => {
     expect(carried).toBeLessThanOrEqual(1)
   })
 
+  it('carries the same share of a person whatever the cell size', () => {
+    // The stamp was clipped short of its own cutoff, so the finer grid a narrow
+    // door asks for read everybody lighter: 96% of a person at 0.1 m, 95% at 0.05.
+    // Far enough from every edge that no stamp cell is topped up for floor the
+    // grid does not cover. A Gaussian cut where it falls to 1% of its peak holds
+    // exactly 99% of its mass.
+    for (const cellSize of [0.05, 0.1, 0.2, 0.3]) {
+      const grid = createNavGrid({ minX: 0, minY: 0, maxX: 10, maxY: 10 }, cellSize)
+      const field = new DensityField(grid, BANDWIDTH, undefined, 0)
+      field.update(Float32Array.from([5.02, 5.02]), 1, 0)
+      let mass = 0
+      for (const value of field.values) mass += value
+      expect(mass * cellSize * cellSize).toBeCloseTo(0.99, 2)
+    }
+  })
+
   it('takes a walker their own body off, so a lone walker keeps their free speed', () => {
     const grid = hallGrid()
     const field = new DensityField(grid, BANDWIDTH, corridorMask(grid, 4.5, 7.5))

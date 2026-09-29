@@ -42,7 +42,13 @@ import {
   type SimWorld,
 } from './world'
 import { cellCenter, gridIndex, sampleField, worldToCell } from './nav/eikonal'
-import { DensityField, FlowFieldCache, PACE_LOOKAHEAD, speedFromDensity } from './nav/flowFields'
+import {
+  DENSITY_BANDWIDTH,
+  DensityField,
+  FlowFieldCache,
+  PACE_LOOKAHEAD,
+  speedFromDensity,
+} from './nav/flowFields'
 import { computeNewVelocity, type OrcaAgentState } from './avoidance/orca'
 import { ObstacleIndex } from './avoidance/obstacleIndex'
 import { SEPARATION, separationScale } from './avoidance/separation'
@@ -384,7 +390,7 @@ export class Simulation {
       replanIntervalS: scenario.routing.replanIntervalS,
       budgetPerTick: 2,
     })
-    this.density = new DensityField(this.world.grid, 0.7, this.world.solid)
+    this.density = new DensityField(this.world.grid, DENSITY_BANDWIDTH, this.world.solid)
     this.obstacleIndex = new ObstacleIndex(this.world.obstacles, this.world.bounds, 2)
     this.hash = new SpatialHash(NEIGHBOUR_RANGE)
     this.seatTaken = new Uint8Array(this.world.seats.length)
