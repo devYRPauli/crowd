@@ -2,11 +2,14 @@
 
 What this model reproduces, what it does not, and the numbers either way.
 
-Everything here is printed by the test suite itself — `npx vitest run
-src/sim/validation` — and every figure below was copied from a run of it rather
-than typed from memory. Where the model misses a criterion the test stays at the
-criterion and is marked failing with the measured value; no threshold in the
-suite has been loosened to make a result look better.
+Current-engine figures are printed by the test suite itself — `npx vitest run
+src/sim/validation` — and were copied from a run of it rather than typed from
+memory. Historical and counterfactual figures (before and after a change, the
+personal-space margins) were one-off runs, recorded in the source comments that
+cite them. Where the model misses a criterion the test stays at the criterion
+and is marked failing with the measured value; no threshold in the suite has
+been loosened to make a result look better, except the exit-choice margin,
+explained there.
 
 This is an exploratory planning model. It is not a safety certification, and
 nothing below should be read as one.
@@ -21,7 +24,8 @@ time and the first 60 s are discarded.
 
 What is under test is the locomotion model rather than the whole engine: ORCA
 local avoidance, the crowd slowdown applied to the preferred speed, the density
-estimator, and the positional passes that stop bodies interpenetrating. The
+estimator, the contact resolution in velocity before anyone moves, and the
+positional passes that stop bodies interpenetrating after they have. The
 engine's jam-breaking heuristics are deliberately left out — they exist so a
 venue never deadlocks, and including them would measure the recovery machinery
 instead of the model.
@@ -34,20 +38,20 @@ own hides it.
 ```
    N  rho set  rho box  rho felt   v box  v all  v Weidmann   error  J=rho·v  max overlap
   18     0.30    0.325     0.217   1.339  1.339       1.335   0.004    0.435         0.0%
-  30     0.50    0.523     0.337   1.332  1.331       1.291   0.041    0.697         0.0%
-  45     0.75    0.776     0.584   1.263  1.267       1.178   0.085    0.980         0.0%
-  60     1.00    0.976     0.874   1.119  1.125       1.071   0.048    1.092         0.0%
-  75     1.25    1.164     1.168   0.950  0.967       0.971  -0.021    1.106         0.0%
-  90     1.50    1.442     1.456   0.810  0.824       0.833  -0.024    1.167         0.0%
- 105     1.75    1.723     1.767   0.693  0.688       0.711  -0.017    1.195         0.0%
- 120     2.00    1.996     2.086   0.555  0.571       0.608  -0.052    1.109         0.0%
- 135     2.25    2.431     2.430   0.443  0.469       0.471  -0.027    1.078         0.0%
- 150     2.50    2.679     2.759   0.364  0.390       0.405  -0.041    0.975         0.0%
- 180     3.00    3.307     3.401   0.236  0.257       0.269  -0.033    0.782         0.0%
- 210     3.50    3.614     3.977   0.168  0.176       0.215  -0.047    0.608         0.0%
- 240     4.00    4.067     4.679   0.161  0.161       0.147   0.014    0.654         0.0%
- 270     4.50    4.545     5.286   0.161  0.161       0.086   0.074    0.731         0.1%
-RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0437 m/s   peak J 1.1949 p/m/s at 1.723 p/m²
+  30     0.50    0.522     0.338   1.331  1.331       1.291   0.041    0.696         0.0%
+  45     0.75    0.778     0.584   1.263  1.267       1.177   0.086    0.983         0.0%
+  60     1.00    0.975     0.875   1.119  1.125       1.072   0.047    1.091         0.0%
+  75     1.25    1.151     1.169   0.950  0.967       0.978  -0.028    1.093         0.0%
+  90     1.50    1.440     1.457   0.810  0.823       0.834  -0.024    1.166         0.0%
+ 105     1.75    1.745     1.769   0.693  0.687       0.702  -0.009    1.209         0.0%
+ 120     2.00    1.958     2.086   0.554  0.572       0.621  -0.067    1.085         0.0%
+ 135     2.25    2.448     2.432   0.441  0.469       0.466  -0.025    1.080         0.0%
+ 150     2.50    2.649     2.752   0.364  0.391       0.413  -0.049    0.964         0.0%
+ 180     3.00    3.293     3.404   0.238  0.258       0.272  -0.034    0.782         0.0%
+ 210     3.50    3.801     3.998   0.163  0.176       0.186  -0.023    0.618         0.0%
+ 240     4.00    4.067     4.683   0.161  0.161       0.147   0.014    0.654         0.0%
+ 270     4.50    4.544     5.291   0.161  0.161       0.087   0.074    0.731         0.0%
+RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0447 m/s   peak J 1.2092 p/m/s at 1.745 p/m²
 ```
 
 Pooled the way the experimental literature extracts a fundamental diagram —
@@ -57,35 +61,35 @@ than a whole run averaged into one point:
 ```
  rho box  samples   v meas  v Weidmann   error  J=rho·v
    0.144      158    1.339       1.340  -0.001    0.193
-   0.380      488    1.335       1.328   0.008    0.508
-   0.608      769    1.310       1.258   0.052    0.796
-   0.860      766    1.173       1.134   0.039    1.008
-   1.123      689    1.000       0.992   0.008    1.123
-   1.364      601    0.832       0.870  -0.038    1.136
-   1.622      386    0.739       0.753  -0.014    1.199
-   1.867      602    0.626       0.655  -0.028    1.169
-   2.128      424    0.547       0.563  -0.016    1.164
-   2.367      414    0.447       0.489  -0.041    1.059
-   2.614      443    0.398       0.421  -0.024    1.040
-   2.834      224    0.336       0.368  -0.031    0.953
-   3.116      245    0.282       0.306  -0.024    0.879
-   3.369      384    0.210       0.258  -0.048    0.707
-   3.615      426    0.175       0.215  -0.040    0.633
-   3.859      360    0.166       0.177  -0.011    0.640
-   4.106      331    0.161       0.141   0.020    0.661
-   4.368      280    0.161       0.108   0.053    0.702
-   4.592      307    0.161       0.081   0.080    0.738
-   4.812       90    0.161       0.057   0.104    0.774
-RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0325 m/s   peak J 1.1990 p/m/s at 1.622 p/m²
+   0.380      490    1.335       1.328   0.008    0.508
+   0.608      770    1.309       1.258   0.051    0.796
+   0.863      775    1.170       1.132   0.038    1.009
+   1.117      684    0.998       0.995   0.003    1.116
+   1.366      580    0.838       0.869  -0.031    1.145
+   1.639      462    0.703       0.746  -0.043    1.152
+   1.843      562    0.638       0.663  -0.026    1.175
+   2.128      292    0.566       0.563   0.003    1.204
+   2.371      569    0.454       0.488  -0.034    1.076
+   2.612      431    0.389       0.422  -0.033    1.015
+   2.880      261    0.323       0.357  -0.034    0.931
+   3.107      206    0.279       0.308  -0.029    0.868
+   3.378      218    0.223       0.256  -0.033    0.752
+   3.631      354    0.176       0.212  -0.036    0.639
+   3.859      518    0.162       0.177  -0.015    0.624
+   4.109      380    0.161       0.141   0.020    0.661
+   4.368      281    0.161       0.108   0.053    0.702
+   4.593      309    0.161       0.081   0.080    0.738
+   4.810       87    0.161       0.057   0.104    0.773
+RMSE vs Weidmann over 0.5–4.0 persons/m²: 0.0322 m/s   peak J 1.2044 p/m/s at 2.128 p/m²
 ```
 
 **Free-flow speed** comes out at 1.339 m/s against a configured 1.34.
-**Body exclusion** holds: no pair overlaps by more than 0.1% of two radii
+**Body exclusion** holds: no pair overlaps by as much as 0.1% of two radii
 anywhere in the sweep. **Capacity** — the number a model like this is most
-likely to be quoted on — peaks at 1.195 persons/m/s at 1.72 persons/m², against
+likely to be quoted on — peaks at 1.209 persons/m/s at 1.75 persons/m², against
 Weidmann's own peak of 1.225 at 1.75.
 
-Above about 3.6 persons/m² the model walks faster than Weidmann, and that is
+Above about 4 persons/m² the model walks faster than Weidmann, and that is
 deliberate: the speed multiplier is floored at 0.12, so a jam shuffles at
 0.161 m/s rather than freezing solid. A model that stops completely deadlocks a
 venue and reports nothing useful about it.
@@ -132,10 +136,10 @@ does not get one.
 | Case                             | Criterion                                             | Measured                                                                                                           |                      |
 | -------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------- |
 | **TC1** Corridor speed           | 40 m in 40 ± 1 s at 1.0 m/s                           | 40.01 s per 40 m; mean gate speed 1.000 m/s                                                                        | pass                 |
-| **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2894 m against a 0.23 m body | pass                 |
-| **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 5.8% (adult, 1.417 vs 1.34 m/s); all seven profiles within 5.8%; overall sd 0.324 vs 0.327 implied     | pass                 |
-| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.2 m: **1.251** · 1.5 m: **1.261** · 2.0 m: **1.307**                                                             | pass                 |
-|                                  |                                                       | 0.8 m: 1.011 · 1.0 m: 1.049                                                                                        | **fail, below band** |
+| **TC6** 90° corner               | Nobody walks through a wall                           | 20/20 round the bend; deepest centre inside a wall 0.0000 m; closest centre-to-wall 0.2316 m against a 0.23 m body | pass                 |
+| **TC7** Demographic speeds       | Per-profile free-flow mean within 10% of its profile  | Worst error 5.9% (adult, 1.420 vs 1.34 m/s); all seven profiles within 5.9%; overall sd 0.325 vs 0.327 implied     | pass                 |
+| **TC12** Bottleneck flow         | 1.2–1.4 persons/m/s of clear width                    | 1.5 m: **1.254** · 2.0 m: **1.247**                                                                                | pass                 |
+|                                  |                                                       | 0.8 m: 0.851 · 1.0 m: 1.023 · 1.2 m: 1.111                                                                         | **fail, below band** |
 | TC2, TC3, TC8, TC13              | Stairs and multi-storey egress                        | —                                                                                                                  | not modelled         |
 | TC4                              | Fundamental diagram                                   | measured above, though not in RiMEA's own corridor geometry                                                        | partial              |
 | TC5, TC9, TC10, TC11, TC14, TC15 | Personal data, exit choice, evacuation demonstrations | —                                                                                                                  | not written yet      |
@@ -150,8 +154,8 @@ covered below under its own name rather than the standard's.
 
 ### The narrow openings, stated plainly
 
-Doors of 1.2 m and under pass 0.96–1.16 persons/m/s where the standard wants
-1.2–1.4: 3% low at 1.2 m, 15% at 1.0 m, 20% at 0.8 m. Wider openings are in
+Doors of 1.2 m and under pass 0.85 to 1.11 persons/m/s where the standard wants
+1.2–1.4: 7% low at 1.2 m, 15% at 1.0 m, 29% at 0.8 m. Wider openings are in
 band, so this is specifically a narrow-door result, and it is in the direction
 that understates rather than overstates what a door will carry.
 
@@ -175,11 +179,19 @@ People used to stop existing the moment they reached a threshold, which left the
 floor beyond every opening permanently empty; the person in the gap saw clear
 space ahead and walked out at free speed. Giving them a body for a metre past the
 line (`EXIT_TAIL`) restored the back pressure that makes an opening a bottleneck
-and took the 1.2 m door from 1.164 to **1.251**, inside the band, where it now
-passes as an ordinary test rather than an expected failure. The same change took
-a 3'0" exit door from 2.98 persons/m/s — more than double anything observed — to
-1.10. See `docs/EXPERIMENTS.md` for how it was found and
+and took the 1.2 m door from 1.164 to 1.251, inside the band. The same change
+took a 3'0" exit door from 2.98 persons/m/s — more than double anything
+observed — to 1.10. See `docs/EXPERIMENTS.md` for how it was found and
 `src/sim/validation/egress.test.ts` for the measurement that now holds it.
+
+**What took it back under was the density field counting all of each person.**
+Each body was stamped onto the field out to 2.2 bandwidths, which on this door's
+0.15 m grid carried 97% of a person; stamped out to the kernel's 1% cutoff it
+carries 99%, so a crowd reads about 2% denser and walks the speed-density curve
+that much slower. On the arithmetic the engine uses now, where the old stamp
+read 1.242, that change alone took the 1.2 m door to **1.111**, and it stays: how far the old stamp reached depended on the cell size, which the
+narrowest door picks, so how dense a crowd looked depended on a door somewhere
+else in the building. The test is marked failing again with the measured value.
 
 **And some is a limit that stands.** The engine keeps 0.23 m between a body and
 a wall where SFPE observes people accepting 0.15 m, which bites hardest at the
@@ -222,11 +234,13 @@ rather than a guess:
 
 | Margin per person    | RMSE vs Weidmann | Flow peak at    |
 | -------------------- | ---------------- | --------------- |
-| 0.05 m (**shipped**) | 0.044 m/s        | 1.72 persons/m² |
+| 0.05 m (**shipped**) | 0.045 m/s        | 1.75 persons/m² |
 | 0.10 m               | 0.056 m/s        | 1.23 persons/m² |
 | 0.25 m               | 0.067 m/s        | 1.41 persons/m² |
 
-The band for the flow peak is 1.5–2.1 persons/m², so only the smallest margin
+The shipped row is the current sweep; the two wider margins were measured when
+the margin was chosen, on the engine of the time. The band for the flow peak is
+1.5–2.1 persons/m², so only the smallest margin
 survives: anything larger caps density on its own before the speed law gets to,
 and the curve peaks in the wrong place. So the proxemic distance stays in the
 speed law where it is calibrated, and what is modelled geometrically is the last
@@ -254,16 +268,21 @@ A 40 m × 20 m hall with a 1.2 m door at each end and everybody starting by the
 west one. Each case runs twice: once with congestion-aware routing on, once off.
 The difference between the two runs is the feature.
 
-| People | Routing          | Near door | Far door      | Cleared in  |
+| People | Routing          | Near door | Far door      | 95% out by  |
 | ------ | ---------------- | --------- | ------------- | ----------- |
-| 40     | congestion-aware | 40        | 0             | 27.2 s      |
-| 40     | shortest path    | 40        | 0             | 28.9 s      |
-| 300    | congestion-aware | 160       | **140 (47%)** | **116.2 s** |
-| 300    | shortest path    | 300       | 0             | 161.7 s     |
+| 40     | congestion-aware | 40        | 0             | 26.5 s      |
+| 40     | shortest path    | 40        | 0             | 27.3 s      |
+| 300    | congestion-aware | 175       | **125 (42%)** | **123.5 s** |
+| 300    | shortest path    | 300       | 0             | 158.8 s     |
 
 With nobody in the way the nearer door is simply the right answer and both
 settings give it. With a crowd too big for one door, congestion-aware routing
-spreads 47% of it to the far door and the hall clears **28% sooner**.
+spreads 42% of it to the far door and the hall clears **22% sooner**.
+
+The test asks for at least 10% sooner. That margin was 15% until `f008922`,
+when the finer navigation grid made the single-door baseline 20% faster and so
+left less for the second door to save. It is a floor on whether the saving is
+material, not a target, and the measured saving is printed.
 
 This is the behaviour the tool exists to show, and it did not work until this
 was measured. Exit choice compared travel time over the _static_ field, so
@@ -279,8 +298,9 @@ details of that turned out to matter more than the idea itself.
 **The two are combined with a maximum, not a sum.** The queue drains while you
 walk towards it, so you are through when the door has cleared everybody already
 ahead of you _or_ when you arrive, whichever is later. Adding them double-counts
-the walk, which is the entire advantage the far door has: summed, the same crowd
-sent only 26% to the far door and took 128 s instead of 99.
+the walk, which is the entire advantage the far door has: when this was
+written, summed, the same crowd sent only 26% to the far door and took 128 s
+instead of 99.
 
 **A door nobody has used yet borrows the slowest rate anything in the venue has
 managed, rather than counting as free.** Free is the obvious choice and it is
@@ -314,24 +334,31 @@ behind it, and a crowd that packs through itself.
 
 150 people, one room, one 1.2 m door.
 
-|                    | Measured                                                                                           |      |
-| ------------------ | -------------------------------------------------------------------------------------------------- | ---- |
-| Everybody gets out | 150/150; 25% by 27.4 s, 50% by 50.2 s, 95% by 97.4 s, last at 100.6 s                              | pass |
-| A queue forms      | peaked at 88 people in the 3 m upstream; peak density 6.75 persons/m²                              | pass |
-| Bodies stay apart  | max overlap 0.081 m on a 0.46 m pair distance (p95 0.067 m, median tick 0.030 m), tolerance 0.10 m | pass |
+|                    | Measured                                                                                           |          |
+| ------------------ | -------------------------------------------------------------------------------------------------- | -------- |
+| Everybody gets out | 150/150; 25% by 27.4 s, 50% by 48.7 s, 95% by 99.0 s, last at 102.3 s                              | pass     |
+| A queue forms      | peaked at 87 people in the 3 m upstream; peak density 7.03 persons/m²                              | pass     |
+| Bodies stay apart  | max overlap 0.125 m on a 0.46 m pair distance (p95 0.081 m, median tick 0.028 m), tolerance 0.10 m | **fail** |
 
-The overlap was the honest weak point of this model and is no longer: it
-measured 0.271 m, which is most of a body, and not as a transient — the p95 was
-0.141 m, so for much of the jam somebody was substantially inside somebody else.
-Every density reading downstream inherited it.
+The overlap was the honest weak point of this model. It measured 0.271 m, which
+is most of a body, and not as a transient — the p95 was 0.141 m, so for much of
+the jam somebody was substantially inside somebody else. Every density reading
+downstream inherited it.
 
 What fixed it was resolving contact in _velocity_, before anybody moves, and
 predictively — a pair may close only as fast as the gap between them allows in
 one step. The positional pass afterwards could never keep up, because by the
 time it sees an overlap the step that caused it has already happened. Peak
-density fell from 7.31 to 6.73 persons/m² with it, and the room clears sooner,
+density fell from 7.31 to 6.81 persons/m² with it, and the room clears sooner,
 because people who are not occupying each other's floor are not fighting each
-other for it.
+other for it. That took the worst overlap to 0.081 m, inside the tolerance.
+
+It is over it again, by less. The density field now counts all of each person
+(see the narrow openings above), and on the same arithmetic that change alone
+took the worst overlap from 0.094 to 0.125 m and the peak density in the jam from 6.75 to 7.03 persons
+per square metre. The likely route is personal space, which is spent as the
+crowd reads denser, so the queue packs tighter. That is not yet measured, and
+the test is marked failing with the measured value until it is.
 
 ---
 
@@ -375,16 +402,31 @@ station came out anywhere between 108 and 119 people served on identical input.
 Streams are named after a thing's position in the plan now, which two
 structurally identical plans always agree on.
 
+It did not agree across machines either, and nothing on one machine could show
+it. `Math.sin`, `Math.cos`, `Math.atan2`, `Math.exp` and `Math.log` are not
+required to be correctly rounded, and V8 on arm64 and on x86 disagree about the
+last bit of some of them. Every person interacts with every neighbour, so a
+crowd amplifies that bit rather than averaging it away: the exit-choice run
+split 300 people 160/140 on a Mac and 150/150 on the CI runner, which failed a
+test that passed locally. The engine, the furniture library and the validation
+harness compute those functions themselves now, in `src/core/math/libm.ts`, from
+`+ - * /` and exact bit operations, which IEEE 754 rounds the same everywhere.
+`Math.hypot` goes the same way, as a square root of a sum of squares, because
+engines approximate it differently too. Lint refuses the platform's versions
+there. `src/library/determinism.test.ts` pins a hash of a shortened run of each
+template, so a machine whose arithmetic differs fails that test instead of
+quietly publishing its own numbers.
+
 ---
 
 ## ORCA
 
-The collision-avoidance kernel is checked two ways that do not depend on each
-other. It is **differentially fuzzed** against an independent transliteration of
-the RVO2 reference — random agents, random neighbours, random obstacles, and the
-two implementations must agree — and its own test suite is **mutation-tested**,
-so a test that would not notice the kernel being broken is itself reported as a
-gap.
+The collision-avoidance kernel is unit-tested case by case against RVO2's
+geometry: agent and obstacle constraint lines, and the infeasible case, where
+the fallback is checked against a brute-force search of the velocity disc. It
+also runs RVO2's circle benchmark: no pair overlaps by more than 12% of their
+summed radii, everyone is across within 30 s, and a replay from the same seed
+is bit-identical. The tests are in `src/sim/avoidance/orca.test.ts`.
 
 ---
 

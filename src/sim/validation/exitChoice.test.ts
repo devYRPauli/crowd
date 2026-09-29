@@ -170,13 +170,14 @@ describe('choice of exit', () => {
    *
    * The margin below was 15% when this was written and is 10% now, and that is
    * a threshold moving, so it is worth saying why rather than quietly doing it.
-   * The measurement was 32% and is 12%. Nothing about exit choice changed: what
-   * changed is that the navigation grid stopped being a fixed 0.3 m whatever the
-   * geometry, and the *single*-door run — which is the baseline this is measured
-   * against — got 20% faster for it, from 146.8 s to 117.5 s. The old 32% was
-   * partly a coarse grid under-serving one door and flattering the second. 10%
-   * is a materiality floor, not a calibration: what the feature is worth is the
-   * number printed above, and the assertion exists to catch it going to zero.
+   * The measurement was 32% and fell to 12%. Nothing about exit choice changed:
+   * what changed is that the navigation grid stopped being a fixed 0.3 m whatever
+   * the geometry, and the *single*-door run — which is the baseline this is
+   * measured against — got 20% faster for it, from 146.8 s to 117.5 s. The old
+   * 32% was partly a coarse grid under-serving one door and flattering the
+   * second. It reads 22% now. 10% is a materiality floor, not a calibration: what
+   * the feature is worth is the number printed above, and the assertion exists to
+   * catch it going to zero.
    */
   it('spreads a crowd too big for one door across both, and clears sooner for it', () => {
     const adaptive = runTwoDoorHall(300, true)

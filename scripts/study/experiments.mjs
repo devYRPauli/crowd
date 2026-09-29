@@ -167,7 +167,7 @@ export const exitProvision = () => {
 
 // What furniture costs is a few seconds, against a seed spread of ten in the
 // same room. Over three seeds the classroom came out 3% faster than the empty
-// hall and over twenty 4% slower, so this one experiment runs twenty.
+// hall and over twenty 6% slower, so this one experiment runs twenty.
 const LAYOUT_SEEDS = Array.from({ length: 20 }, (_, i) => i + 1)
 
 export const layouts = () => {

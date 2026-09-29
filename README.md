@@ -119,14 +119,16 @@ profile, a mix of walking abilities, and an **itinerary**:
 > arrive at the main door → queue at whichever registration desk is quickest →
 > sit in the session room for 25 minutes → leave by the side door
 
-Arrivals can be evenly spread, random (Poisson), in waves, front-loaded, or
-clustered around a peak. A service step can name several counters at once, and
-people join the one they expect to get through soonest — which is how parallel
-desks actually balance, rather than everyone queueing at the first one.
+Arrivals can be evenly spread, random (Poisson), in waves, front-loaded,
+clustered around a peak, or all at once. A service step can name several
+counters at once, and people join the one they expect to get through soonest —
+which is how parallel desks actually balance, rather than everyone queueing at
+the first one.
 
-Shipped walking profiles, with free-flow speeds from Weidmann's review: adult
-(1.34 m/s), in a hurry (1.65), older adult (0.97), child (1.10), wheelchair user
-(0.89), staff (1.40), with luggage (1.10).
+Shipped walking profiles: adult (1.34 m/s, Weidmann's mean free-flow speed), in a
+hurry (1.65), older adult (0.97), child (1.10), wheelchair user (0.89), staff
+(1.40), with luggage (1.10). The speeds other than the adult's are CROWD's own
+defaults, not figures from a source.
 
 Six starter venues cover the shapes of movement the tool is for: a coffee bar,
 conference registration, a gallery opening, a polling station, a transit
@@ -170,14 +172,18 @@ once — a deadlock no amount of simulated time resolves. CROWD shortens the tim
 horizon as pressure builds (people in a crush stop planning two seconds ahead and
 deal with the person in front) and lets a jammed person creep forward.
 
-Velocity-space avoidance cannot guarantee separation on its own — when the
+Velocity-space avoidance cannot guarantee separation on its own: when the
 program is infeasible the fallback returns the least-bad velocity, and in a crush
-the least-bad velocity still closes the gap — so positional relaxation passes
-after integration keep the packing physical. One pass is enough up to about
-3 persons/m² and not above it: pushing A off B moves A into C, and with a single
-pass the residual grows with density, reaching 27% of a body radius at 4.7
-persons/m². Three passes hold the pack at contact, and across the whole
-fundamental-diagram sweep no pair now overlaps by more than 0.1% of two radii.
+the least-bad velocity still closes the gap. So contact is also resolved in
+velocity, before anyone moves, and predictively: a pair may close only as fast
+as the gap between them allows in one step. Contact comes in chains, since
+holding A off B changes B, which was also being held off C, so that runs twice.
+Positional relaxation passes after integration take what is left. One of those
+is enough up to about 3 persons/m² and not above it: pushing A off B moves A
+into C, and with a single pass the residual grows with density, reaching 27% of
+a body radius at 4.7 persons/m². Three passes hold the pack at contact, and
+across the whole fundamental-diagram sweep no pair now overlaps by more than
+0.1% of two radii.
 
 **3. Act — a state machine per person.**
 Walk the itinerary: go here, queue there, be served, sit down, leave. People join
@@ -278,43 +284,52 @@ results together so a run can be reopened exactly.
 
 ## Validation
 
-`src/sim/validation/` holds the fidelity checks, and they run in CI like any
+`src/sim/validation/` holds most of the fidelity checks; the ORCA and
+determinism checks live beside the code they test. All of them run in CI like any
 other test.
 
 - **Fundamental diagram.** A periodic corridor swept across densities, measured
   against Weidmann's speed–density curve. This is the cheapest credibility
   artefact a crowd simulator has: if a model change silently breaks it, nothing
-  else in the output is trustworthy. It tracks the curve to **0.044 m/s RMSE**
-  over 0.5–4.0 persons/m² per run, **0.032** pooled, and peaks at **1.194
-  persons/m/s at 1.72 persons/m²** — capacity being the number a model like this
+  else in the output is trustworthy. It tracks the curve to **0.045 m/s RMSE**
+  over 0.5–4.0 persons/m² per run, **0.032** pooled, and peaks at **1.209
+  persons/m/s at 1.75 persons/m²** — capacity being the number a model like this
   is most likely to be quoted on.
 - **RiMEA 3.0 cases** TC1 (corridor speed), TC6 (90° corner), TC7 (demographic
   speeds) and TC12 (bottleneck flow), plus a single-exit evacuation that is
   CROWD's own check rather than a RiMEA case. TC2, TC3, TC8 and TC13 turn on
   stairs, which this version does not model and will not fake as a sloped
-  corridor; the rest are listed as not written yet rather than omitted, with
-  escape-route choice (TC11) called out as the gap that matters most.
+  corridor. TC4 is the fundamental diagram above, though not in RiMEA's own
+  corridor; the rest are listed as not written yet rather than omitted. TC11,
+  escape-route choice, is the one whose behaviour matters most, and it is covered
+  below under CROWD's own name.
 - **Egress through a door** is measured directly, because it is the number the
   tool is actually asked for and it went wrong once without anything noticing.
-  A pair of 3'0" leaves passes **1.47 persons per metre per second** of clear
-  width, a little above the 1.2–1.4 the observational literature reports, and
+  A pair of 3'0" leaves passes **1.41 persons per metre per second** of clear
+  width, at the top of the 1.2–1.4 the observational literature reports, and
   doubling a door's width roughly doubles what it passes. The test that holds
   that relationship exists because for a long time it did not hold: see
   [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
-- **ORCA** is verified by differential fuzzing against an independent
-  transliteration of the RVO2 reference, and its test suite is mutation-tested.
+- **ORCA** is checked against hand-built agent and obstacle cases, a brute-force
+  search of the velocity disc when the constraints are infeasible, and RVO2's
+  circle benchmark.
 - **Choice of exit**, run with congestion-aware routing on and off so the
   difference between the two is visible: 40 people take the near door either
-  way; 300 spread across both and clear a third faster for it.
+  way; 300 spread across both and clear 22% faster for it.
 - **Determinism**, because a comparison that is partly noise is worse than no
   comparison: every starter venue is built twice and has to produce identical
   numbers, and those numbers are pinned, so a machine that computes them
   differently fails the test.
 
-Run `npm test` for everything, or `npx vitest run src/sim/validation` for the
-fidelity suite alone. The validation tests print their measured numbers — that
-output is the point, and [docs/VALIDATION.md](docs/VALIDATION.md) records the
-current ones, including what still misses and by how much.
+Run `npm test` for everything, or this for the fidelity suite alone:
+
+```sh
+npx vitest run src/sim/validation src/sim/avoidance/orca.test.ts src/library/determinism.test.ts
+```
+
+The validation tests print their measured numbers — that output is the point,
+and [docs/VALIDATION.md](docs/VALIDATION.md) records the current ones, including
+what still misses and by how much.
 
 ---
 
@@ -338,13 +353,17 @@ This is an exploratory planning model, not a safety certification.
   audience goes round by the aisles and reaches a seat from the end of its row,
   but somebody shoved in among the seats can still cross a row. Mark the rows as
   obstacles per item to rule that out: measured over twenty seeds, solid rows
-  take 39% of the floor and add 9% to the clearance time of the empty hall,
-  against 4% for rows left passable, and everybody still gets out. See
+  take 39% of the floor and add 11% to the clearance time of the empty hall,
+  against 7% for rows left passable, and everybody still gets out. See
   [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Nothing prompts you to do it.
-- **Narrow doors are pessimistic.** Below about 1.2 m the engine passes fewer
+- **Narrow doors are pessimistic.** Below about 1.5 m the engine passes fewer
   people per metre than the observational literature reports, because it keeps a
   fixed clearance between a body and a jamb and a narrow opening loses
   proportionally more of itself to it. See `docs/VALIDATION.md`.
+- **A dense jam packs slightly too tight.** With 150 people leaving one room by
+  one 1.2 m door, the worst overlap between two bodies is 0.125 m against the
+  0.10 m the suite allows. The test is marked failing with that number; see
+  `docs/VALIDATION.md`.
 - **No balking or reneging at a counter.** Somebody heading for a door will
   change doors when the queue at one makes the walk to the other worth it, but
   somebody who has joined a service queue stays in it however long the line

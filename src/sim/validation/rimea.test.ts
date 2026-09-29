@@ -41,7 +41,9 @@
  *    produce numbers that look like RiMEA results and mean nothing, so those
  *    cases are simply absent. They become implementable when the plan model
  *    gains levels and vertical links.
- *  - TC4, TC5, TC9, TC10, TC11, TC14 and TC15 are not written yet. The
+ *  - TC4 is measured in part by `fundamentalDiagram.test.ts`, not in RiMEA's
+ *    corridor geometry.
+ *  - TC5, TC9, TC10, TC11, TC14 and TC15 are not written yet. The
  *    behaviour behind TC11 — a crowd leaving by two doors at unequal distances
  *    — is covered by `exitChoice.test.ts` in this directory, which claims no
  *    RiMEA number because the clause's own geometry and acceptance criterion
@@ -264,8 +266,8 @@ const BAND_HIGH = 1.4
  * Population scales with the opening (70 per metre plus 30) so that every width
  * yields a comparable number of steady-state crossings without a wide door
  * finishing in seconds or a narrow one running for ten simulated minutes: every
- * run reaches its 90%-through stop between 50 and 95 s of simulated time, and
- * the whole sweep costs about 2 s of wall clock. Arrivals are metered at ~2.2×
+ * run reaches its 90%-through stop within about two minutes of simulated time,
+ * and the whole sweep costs about 2 s of wall clock. Arrivals are metered at ~2.2×
  * the opening's capacity, which keeps the queue permanently saturated (asserted
  * via `minUpstream`) without packing the room so hard that the spawn clearance
  * test starves the inflow.
@@ -370,7 +372,7 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
    * This lives here rather than only in the per-width tests because an
    * `it.fails` test is green whenever its body throws, and it does not care
    * which way it threw. Two mutants proved that matters, both at the 0.8 m
-   * width, which is marked `it.fails` for being 16% *under* the band: deleting
+   * width, which is marked `it.fails` for being *under* the band: deleting
    * the density slowdown (`speedFromDensity` in `preferredVelocity`) took it to
    * 1.998 p/m/s, and halving every agent's radius took it to 1.830. Each is
    * roughly double the true figure and each left the suite green, because
@@ -396,7 +398,7 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
       // Bodies cannot pass through each other, whatever the band says.
       expect(specific, note).toBeLessThan(2.0)
       // A flow reading taken while the queue had drained would be demand, not
-      // capacity. The measured minima are 23–47 people still waiting; widening
+      // capacity. The measured minima are 23–41 people still waiting; widening
       // the window to the whole run drops them to 7–16, which is the reading
       // this floor exists to reject.
       expect(result!.minUpstream, `${width} m opening`).toBeGreaterThanOrEqual(10)
@@ -423,12 +425,12 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   }
 
   /**
-   * KNOWN GAP. MEASURED 1.011 p/m/s of clear width; TARGET 1.2–1.4 — 16% below
+   * KNOWN GAP. MEASURED 0.851 p/m/s of clear width; TARGET 1.2-1.4, 29% below
    * the bottom of the band. A 0.8 m clear opening leaves 0.28 m of
    * unblocked navigation grid once `NAV_CLEARANCE` (0.26 m) is taken off each
    * side, so people thread it strictly one at a time. Charged against the
    * *effective* width instead (clear width less a 0.15 m boundary layer each
-   * side, the SFPE convention) the same run reads 1.618 p/m/s, above the band —
+   * side, the SFPE convention) the same run reads 1.362 p/m/s, inside the band,
    * so the engine moves a single file at about the right rate and the error is
    * in how much of an opening it treats as usable, not in the locomotion.
    *
@@ -453,12 +455,12 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   it.fails('TC12: 0.8 m opening passes 1.2–1.4 p/m/s', bandTest(0.8))
 
   /**
-   * KNOWN GAP. MEASURED 1.049 p/m/s; TARGET 1.2–1.4 — 13% below the band.
+   * KNOWN GAP. MEASURED 1.023 p/m/s; TARGET 1.2-1.4, 15% below the band.
    * Same cause as the 0.8 m case: the usable navigation channel is 0.48 m, two
    * centimetres more than two bodies need, so the file staggers rather than
-   * doubling. Against effective width it reads 1.498 p/m/s, above the band. The
-   * extra 0.2 m of door over the 0.8 m case buys flow roughly in proportion,
-   * 0.81 to 1.05 people a second, so what both widths lose is the fixed
+   * doubling. Against effective width it reads 1.461 p/m/s, above the band. The
+   * extra 0.2 m of door over the 0.8 m case buys more than its share of flow,
+   * 0.68 to 1.02 people a second, so what both widths lose is the fixed
    * clearance at each jamb, not the width in between.
    */
   it.fails('TC12: 1.0 m opening passes 1.2–1.4 p/m/s', bandTest(1.0))

@@ -54,13 +54,13 @@
  * measured curve shows up in CI output rather than only as a pass/fail tick.
  *
  * Where it stands today, from the run this file's comments quote. Free-flow
- * speed and body exclusion are right: 1.338 m/s in a nearly empty corridor
- * against a free speed of 1.34, and no pair overlapping by more than 0.1% of
- * two radii anywhere in the sweep. Agreement with Weidmann is 0.0418 m/s RMSE
- * per run and 0.0318 m/s pooled over 0.5–4.0 persons/m², and the flow peak —
+ * speed and body exclusion are right: 1.339 m/s in a nearly empty corridor
+ * against a free speed of 1.34, and no pair overlapping by as much as 0.1% of
+ * two radii anywhere in the sweep. Agreement with Weidmann is 0.0447 m/s RMSE
+ * per run and 0.0322 m/s pooled over 0.5–4.0 persons/m², and the flow peak —
  * the capacity number this model is most likely to be quoted on — comes out at
- * 1.2327 p/m/s at 1.809 persons/m² against the curve's own 1.2249 at 1.751.
- * Above 3.6 persons/m² the model walks faster than Weidmann, deliberately:
+ * 1.2092 p/m/s at 1.745 persons/m² against the curve's own 1.2249 at 1.751.
+ * Above about 4 persons/m² the model walks faster than Weidmann, deliberately:
  * `weidmannFactor` floors its multiplier at 0.12 so that a jam shuffles at
  * 0.161 m/s rather than freezing, at densities where the curve has the crowd
  * stopped. Every assertion below now holds. None of the thresholds were
@@ -764,7 +764,7 @@ describe('fundamental diagram', () => {
    * different phases of a phase-separated crowd and they sat next to each other
    * in density only because the clustering had scrambled the order the counts
    * were meant to impose. With the crowd staying uniform the sweep falls
-   * monotonically from 1.338 m/s to 0.161.
+   * monotonically from 1.339 m/s to 0.161.
    */
   it('slows down monotonically as density rises', () => {
     // Ordered by the density actually measured, not by the count asked for: the
@@ -787,8 +787,8 @@ describe('fundamental diagram', () => {
   })
 
   /**
-   * MEASURED 0.0546 m/s RMSE over the eleven per-run points in
-   * 0.5–4.0 persons/m², and 0.0500 pooled; TARGET 0.10.
+   * MEASURED 0.0447 m/s RMSE over the eleven per-run points in
+   * 0.5–4.0 persons/m², and 0.0322 pooled; TARGET 0.10.
    *
    * Three things closed this, and all three were in how crowding is sensed or
    * how bodies are kept apart rather than in how people walk. Density is read
@@ -805,10 +805,10 @@ describe('fundamental diagram', () => {
   })
 
   /**
-   * MEASURED a peak specific flow of 1.2327 p/m/s per run and 1.2229 pooled;
+   * MEASURED a peak specific flow of 1.2092 p/m/s per run and 1.2044 pooled;
    * TARGET 1.15–1.35, and Weidmann's own curve peaks at 1.2249. Capacity is the
    * number this model is most likely to be quoted on — how many people an hour
-   * a corridor or a doorway will carry — so landing within 1% of the curve it
+   * a corridor or a doorway will carry — so landing within 2% of the curve it
    * is calibrated against, from both estimators, is the result this file exists
    * to report.
    */
@@ -818,12 +818,16 @@ describe('fundamental diagram', () => {
   })
 
   /**
-   * MEASURED a peak at 1.809 persons/m² per run and 1.882 pooled; TARGET
-   * 1.5–2.1, Weidmann's own peak being at 1.751. Where the flow curve turns
-   * over is the sharper test of the two: it says the model stops gaining
-   * throughput at the density a real crowd stops gaining it, rather than
-   * carrying on into densities where a real crowd has shuffled to a stop. This
-   * peaked at 3.068 persons/m² before the corridor was stopped from clustering.
+   * MEASURED a peak at 1.745 persons/m² per run and 2.128 pooled; TARGET
+   * 1.5–2.1, Weidmann's own peak being at 1.751. The pooled peak lies just
+   * past the band, but its top is nearly flat: 1.175 p/m/s at 1.843 against
+   * 1.204 at 2.128, a bin with fewer samples than either neighbour, so which
+   * bin wins is closer to noise than the per-run peak the assertion is on.
+   * Where the flow curve turns over is the sharper test of the two: it says
+   * the model stops gaining throughput at the density a real crowd stops
+   * gaining it, rather than carrying on into densities where a real crowd has
+   * shuffled to a stop. This peaked at 3.068 persons/m² before the corridor
+   * was stopped from clustering.
    */
   it('peaks at a density of 1.5–2.1 persons/m²', () => {
     expect(peakFlow(curve).density).toBeGreaterThanOrEqual(1.5)
