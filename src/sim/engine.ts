@@ -1516,10 +1516,17 @@ export class Simulation {
    * counters stopped serving for the rest of the dinner. One adjacent swap per
    * pair per step, and only when the one behind is a full place ahead, so two
    * people shuffling side by side do not trade places back and forth.
+   *
+   * Past the drawn places everybody stands behind the person ahead of them, so
+   * the order they joined in is already the order they stand in, and distance
+   * to the end of the line stops meaning anything once the chain winds back
+   * beside it. Reordered there, a desk with seventy waiting swapped people
+   * thousands of times a run, and somebody who joined 50th waited longer than
+   * the last to join.
    */
   private reorderQueue(queue: QueueState): void {
     let changed = false
-    for (let i = 0; i + 1 < queue.waiting.length; i++) {
+    for (let i = 0; i + 1 < queue.waiting.length && i < queue.record.slots.length; i++) {
       const ahead = this.agents[queue.waiting[i]]
       const behind = this.agents[queue.waiting[i + 1]]
       if (ahead?.state !== 'queuing' || behind?.state !== 'queuing') continue
@@ -1846,10 +1853,22 @@ export class Simulation {
             // behind them and nobody could move up.
             const inLine =
               closestPointOnPolyline(queue.record.line, here).distance <= queue.record.spacing
+            // Beside the line and ahead of the back, they are still walking past
+            // the people waiting, and the queue's order is the order people
+            // stand in. Joined there, they were ranked ahead of everybody
+            // further along: at two desks with the line running away from the
+            // door, one person was passed 35 times and waited 1657 s in a
+            // queue whose mean was 300.
+            const beside = this.besideQueueLine(queue.record, agent)
+            const backArc = Math.min(slot * queue.record.spacing, queue.record.lineLength)
+            const pastTheBack = beside !== null && beside.arc < backArc - queue.record.spacing
             // Near is not enough from outside the front door, or from among the
             // tables: joined there, a guest's place was out there too, and the
             // place of everybody who came after them.
-            if (inLine || (distance(here, target) <= reach && this.onQueueFloor(here))) {
+            if (
+              !pastTheBack &&
+              (inLine || (distance(here, target) <= reach && this.onQueueFloor(here)))
+            ) {
               this.joinQueue(agent, queue)
             } else {
               this.aimAtQueue(queue, agent, slot)

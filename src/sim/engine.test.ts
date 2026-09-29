@@ -248,6 +248,116 @@ describe('Simulation', () => {
     expect(summary.clearanceTime).toBeLessThan(900)
   }, 60_000)
 
+  it('does not let newcomers walking up beside a queue join it ahead of the back', () => {
+    // The line runs away from the door, so everybody walks up beside it from
+    // the front. Near enough the back to join while still ahead of whoever
+    // stood there, they were ranked by where they stood and put in front, and
+    // the person at the back was passed by one newcomer after another: at two
+    // desks in the study one of them waited 1657 s in a queue whose mean was
+    // 300. First come, first served, the last of thirty to arrive at a 30 s
+    // desk over 450 s waits about 450 s and nobody longer. Measured 446, 436
+    // and 441; before the fix 623, 620 and 682.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 12, 16)
+    b.door(room.south, 3, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    const desk = b.service(
+      'Desk',
+      6,
+      6,
+      Math.PI,
+      1,
+      { kind: 'constant', mean: 30 },
+      {
+        queue: [
+          { x: 6, y: 7.3 },
+          { x: 6, y: 13.3 },
+        ],
+      },
+    )
+    const entry = b.zone('entry', 1.5, 0.3, 4.5, 1.5, 'In')
+    const plan = b.build()
+
+    for (let seed = 1; seed <= 3; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 1800,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 30,
+            entryIds: [entry.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 450 },
+            itinerary: [
+              { id: 'step-desk', kind: 'service', targetId: desk.id },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const summary = runToCompletion(new Simulation(plan, scenario), 1800)
+      expect(summary.services[0].served).toBe(30)
+      expect(summary.warnings).toEqual([])
+      expect(summary.maxWait).toBeLessThan(500)
+    }
+  }, 60_000)
+
+  it('keeps the people past the end of a queue line in the order they joined', () => {
+    // Past the drawn places everybody stands behind the person ahead, and the
+    // chain winds back beside the line. Reordered by distance to the end of
+    // the line, people who had just joined were ranked ahead of people who had
+    // waited for minutes: at one desk in the study the longest wait belonged
+    // to whoever joined 50th of 120, and was 700 s over first come, first
+    // served. Here 2, 4 and 1 people who arrived well before the last waited
+    // longer than the last did; now nobody does.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 12, 16)
+    b.door(room.south, 3, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    const desk = b.service(
+      'Desk',
+      6,
+      6,
+      Math.PI,
+      1,
+      { kind: 'constant', mean: 30 },
+      {
+        queue: [
+          { x: 6, y: 7.3 },
+          { x: 6, y: 13.3 },
+        ],
+      },
+    )
+    const entry = b.zone('entry', 1.5, 0.3, 4.5, 1.5, 'In')
+    const plan = b.build()
+
+    for (let seed = 1; seed <= 3; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 3600,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 60,
+            entryIds: [entry.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 400 },
+            itinerary: [
+              { id: 'step-desk', kind: 'service', targetId: desk.id },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const sim = new Simulation(plan, scenario)
+      const summary = runToCompletion(sim, 3600)
+      expect(summary.services[0].served).toBe(60)
+      expect(summary.warnings).toEqual([])
+      const byArrival = [...sim.allJourneys].sort((a, b) => a.spawnedAt - b.spawnedAt)
+      const last = byArrival[byArrival.length - 1].queueTime
+      expect(byArrival.slice(0, -5).filter((j) => j.queueTime > last)).toHaveLength(0)
+    }
+  }, 60_000)
+
   it('does not let somebody outside the wall take the head of a queue inside it', () => {
     // The banquet buffet's queue runs down the east wall past an exit door.
     // People squeezed out through the door were near enough the line to count
