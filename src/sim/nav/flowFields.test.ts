@@ -645,6 +645,24 @@ describe('FlowFieldCache', () => {
     expect(Math.abs(turn)).toBeLessThan(0.001)
   })
 
+  it('prices a field made to refresh once on its first refresh and not after', () => {
+    const { grid, cache } = room()
+    cache.ensure('route', [cellAt(grid, 11.5, 3)])
+    cache.ensure('place', [cellAt(grid, 0.5, 3)], 'once')
+    const jam = congestionAt(grid, 4, (x) => x > 5 && x < 7)
+
+    cache.update(10, jam, nobodySeated(grid))
+    cache.update(12, jam, nobodySeated(grid))
+    expect(refreshedAt(cache, 'route')).toBe(12)
+    expect(refreshedAt(cache, 'place')).toBe(10)
+
+    // Asked to, it is priced once more and then left alone again.
+    cache.reprice('place')
+    cache.update(14, jam, nobodySeated(grid))
+    cache.update(16, jam, nobodySeated(grid))
+    expect(refreshedAt(cache, 'place')).toBe(14)
+  })
+
   it('refreshes the most overdue fields first, a budget at a time', () => {
     const { grid, cache } = room()
     cache.ensure('a', [cellAt(grid, 11.5, 3)])

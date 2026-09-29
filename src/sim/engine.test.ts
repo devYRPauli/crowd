@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Simulation } from './engine'
+import { FlowFieldCache } from './nav/flowFields'
 import { AGENT_FIELD, AGENT_STRIDE, agentStateIndex } from './types'
 import type { Plan, Scenario, Wall, Zone } from '../core/model/types'
 import { createScenario, createPopulation } from '../core/model/defaults'
 import { PlanBuilder } from '../library/planBuilder'
+import { getTemplate } from '../library/templates'
 import { furnitureSize } from '../core/model/planGeometry'
 import { DEFAULT_DOOR_WIDTH, DEFAULT_DOUBLE_DOOR_WIDTH } from '../core/model/standards'
 
@@ -490,6 +492,35 @@ describe('Simulation', () => {
       expect(summary.warnings).toEqual([])
     }
   }, 120_000)
+
+  it('does not solve a new route every time the person ahead in an overflow moves', () => {
+    // Somebody past the drawn line is routed to the person ahead of them. The
+    // route was re-solved whenever that person crossed into another cell, so a
+    // shuffling queue minted a field every other step, each went to the front
+    // of the congestion refreshes, and the banquet's buffet queue, starved of
+    // them, served 116 on seed 3 where without the churn it serves 217. The
+    // coffee bar's queue winds past its line within a quarter of an hour: 195
+    // routes solved for it by then, 35 now.
+    const doc = getTemplate('coffee-bar')!.build()
+    const ensure = FlowFieldCache.prototype.ensure
+    let solved = 0
+    const spy = vi.spyOn(FlowFieldCache.prototype, 'ensure').mockImplementation(function (
+      this: FlowFieldCache,
+      id,
+      cells,
+      refresh,
+    ) {
+      if (id.startsWith('queue:') && !this.has(id)) solved++
+      return ensure.call(this, id, cells, refresh)
+    })
+    try {
+      const sim = new Simulation(doc.plan, doc.scenario)
+      while (sim.currentTime < 900) sim.step(0.1)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(solved).toBeLessThan(80)
+  }, 60_000)
 
   it('brings each guest at a table round to a place of their own', () => {
     // A field to the table led everybody to the place of whoever asked first,

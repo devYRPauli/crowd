@@ -47,6 +47,7 @@ import {
   DensityField,
   FlowFieldCache,
   PACE_LOOKAHEAD,
+  type FieldRefresh,
   speedFromDensity,
 } from './nav/flowFields'
 import { computeNewVelocity, type OrcaAgentState } from './avoidance/orca'
@@ -456,14 +457,15 @@ export class Simulation {
   }
 
   /**
-   * A field to a specific point, kept while somebody is walking it.
+   * A field to a specific point, kept while somebody is walking it, or while
+   * they wait in the overflow place past a queue's line that it leads to.
    *
    * A field to one chair is needed by one guest for one walk. Kept after it,
    * the banquet's eighty-odd chairs shared the refresh budget with the routes
    * people were actually on, nearly doubled the cost of a run, and made every
    * route in use wait twice as long to see the crowd.
    */
-  private ensurePointField(id: string, point: Vec2): boolean {
+  private ensurePointField(id: string, point: Vec2, refresh: FieldRefresh = 'repeat'): boolean {
     if (this.fields.has(id)) return true
     if (this.fields.size > 96) return false
     const { col, row } = worldToCell(this.world.grid, point.x, point.y)
@@ -480,7 +482,7 @@ export class Simulation {
       }
     }
     if (cells.length === 0) return false
-    this.fields.ensure(id, cells)
+    this.fields.ensure(id, cells, refresh)
     return true
   }
 
@@ -1449,9 +1451,17 @@ export class Simulation {
     const record = queue.record
     const slotPosition = this.queuePlace(queue, agent, slotIndex)
     const here = { x: agent.x, y: agent.y }
+    const prefix = `queue:${record.id}:`
+    const overflow = slotIndex >= record.slots.length
     if (distance(here, slotPosition) <= DIRECT_RANGE && this.lineIsWalkable(agent, slotPosition)) {
       agent.exactTarget = slotPosition
-      agent.fieldTarget = null
+      // Past the line, a route already solved is kept while they step straight
+      // at their place and while they stand in it. Dropped here, it was solved
+      // again the next time a table cut the line of sight: one guest at the
+      // coffee bar did that 1208 times. Dropped only once they arrive, the
+      // banquet solved 830 where it solves 490. Kept, the most fields any
+      // template holds at once is 72, against the cap of 97.
+      if (!(overflow && agent.fieldTarget?.startsWith(prefix))) agent.fieldTarget = null
       return
     }
     // Past the drawn line the place is behind the person ahead, not on the
@@ -1460,13 +1470,25 @@ export class Simulation {
     // joining the banquet bar's queue as it wound off behind a table bounced
     // off the table, fell back out of range of the line, walked back to it,
     // and did that until they gave up.
-    if (slotIndex >= record.slots.length) {
+    if (overflow) {
       const ahead = this.agents[queue.waiting[slotIndex - 1]]
       const anchor = ahead && ahead !== agent && ahead.state === 'queuing' ? ahead : slotPosition
-      const { col, row } = worldToCell(this.world.grid, anchor.x, anchor.y)
-      const fieldId = `queue:${record.id}:${gridIndex(this.world.grid, col, row)}`
       agent.exactTarget = slotPosition
-      agent.fieldTarget = this.ensurePointField(fieldId, anchor) ? fieldId : null
+      // The route only has to bring them near; the last metres are steered
+      // straight at the place. Re-solved whenever the person ahead crossed into
+      // another cell, a queue winding off its line solved a field every other
+      // step, each new one went to the front of the congestion refreshes, and a
+      // step cost three times what it had.
+      const current = agent.fieldTarget
+      if (current?.startsWith(prefix) && this.fields.cost(current, anchor) <= record.spacing) return
+      const { col, row } = worldToCell(this.world.grid, anchor.x, anchor.y)
+      const fieldId = `${prefix}${gridIndex(this.world.grid, col, row)}`
+      // Priced for the crowd once, when it is made. Kept and refreshed like a
+      // destination, one per person past the line, these took the congestion
+      // refreshes over and the conference solved twice the fields it had. Not
+      // priced at all, they led the banquet's buffet queue through seated
+      // guests, and on seed 1 it served 126 where it serves 220.
+      agent.fieldTarget = this.ensurePointField(fieldId, anchor, 'once') ? fieldId : null
       return
     }
     const onLine = this.besideQueueLine(record, agent)
@@ -1712,6 +1734,10 @@ export class Simulation {
     // shortest route does not know a seated guest has filled the gap it runs
     // through.
     if (this.scenario.routing.adaptive) agent.routeAwareness = 1
+    // A route to the person ahead in an overflow is priced for the crowd once,
+    // when it is made, and kept while it still reaches them. Somebody stuck on
+    // the way to the back of one is looking at the crowd as it was then.
+    if (agent.fieldTarget?.startsWith('queue:')) this.fields.reprice(agent.fieldTarget)
     // After a few attempts, accept that this person cannot do what they came
     // for and send them to an exit. Leaving them wandering would quietly skew
     // every average for the rest of the run, and a plan that strands people is

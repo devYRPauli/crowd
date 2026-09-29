@@ -28,11 +28,15 @@ export interface RouteField {
   goalCells: number[]
   /** Shortest-path potential; recomputed only when the plan changes. */
   staticPotential: Float32Array
-  /** Congestion-aware potential; recomputed on the replan interval. */
+  /** Congestion-aware potential; recomputed on the replan interval, or as `refresh` says. */
   congestedPotential: Float32Array
   /** Simulation time the congested field was last solved. */
   refreshedAt: number
+  /** 'once' prices the crowd on the first refresh after it is made, then only when repriced. */
+  refresh: FieldRefresh
 }
+
+export type FieldRefresh = 'repeat' | 'once'
 
 export interface RouteDirection {
   dx: number
@@ -87,7 +91,7 @@ export class FlowFieldCache {
   }
 
   /** Register a destination. Its shortest-path field is solved immediately. */
-  ensure(id: string, goalCells: readonly number[]): RouteField {
+  ensure(id: string, goalCells: readonly number[], refresh: FieldRefresh = 'repeat'): RouteField {
     const existing = this.fields.get(id)
     if (existing) return existing
     const cells = [...goalCells]
@@ -98,6 +102,7 @@ export class FlowFieldCache {
       staticPotential,
       congestedPotential: staticPotential.slice(),
       refreshedAt: -Infinity,
+      refresh,
     }
     this.fields.set(id, field)
     this.queue.push(id)
@@ -123,7 +128,11 @@ export class FlowFieldCache {
     const due = this.queue
       .map((id) => this.fields.get(id))
       .filter((field): field is RouteField => Boolean(field))
-      .filter((field) => time - field.refreshedAt >= this.options.replanIntervalS)
+      .filter(
+        (field) =>
+          field.refreshedAt === -Infinity ||
+          (field.refresh === 'repeat' && time - field.refreshedAt >= this.options.replanIntervalS),
+      )
       .sort((a, b) => a.refreshedAt - b.refreshedAt)
       .slice(0, this.options.budgetPerTick)
     if (due.length === 0) return
@@ -218,6 +227,12 @@ export class FlowFieldCache {
     const congested = sampleGradient(this.grid, field.congestedPotential, point.x, point.y)
     if (!congested) return shortest.value
     return shortest.value * (1 - awareness) + congested.value * awareness
+  }
+
+  /** Price a field for the crowd again on the next refresh, whatever its schedule. */
+  reprice(id: string): void {
+    const field = this.fields.get(id)
+    if (field) field.refreshedAt = -Infinity
   }
 
   /** Drop fields for destinations that no longer exist. */
