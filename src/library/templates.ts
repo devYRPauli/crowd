@@ -204,16 +204,31 @@ const conference = (): CrowdDocument => {
   b.place('lectern', 19.5, 23.1)
   // Unturned, a row faces north, at the stage. Turned half round, the
   // delegates sat with their backs to it, facing the doors.
+  const rowWidth = 11
+  const [westBlock, eastBlock] = [7.8, 22.2]
   for (let row = 0; row < 9; row++) {
-    for (const x of [7.8, 22.2]) {
+    for (const x of [westBlock, eastBlock]) {
       b.place('seat-row', x, 13.4 + row * 0.95, 0, {
-        size: { width: 11, depth: 0.7, height: 0.95 },
+        size: { width: rowWidth, depth: 0.7, height: 0.95 },
       })
     }
   }
 
   const session = b.zone('seating', 1.8, 12.8, 28.2, 21.8, 'Session room')
-  b.zone('keep-clear', 13.6, 12.4, 16.4, 22.2, 'Centre aisle', { cost: 5 })
+  // The aisle runs from row end to row end. Stopped 0.3 m short of both, it
+  // left a strip of open floor one cell wide between the chairs and the zone,
+  // cheaper than either, and the route out of every row ran down it. A strip
+  // narrower than a body has no floor to walk along, and one delegate leaving
+  // by it stepped from one side of it to the other for twenty minutes.
+  b.zone(
+    'keep-clear',
+    westBlock + rowWidth / 2,
+    12.4,
+    eastBlock - rowWidth / 2,
+    22.2,
+    'Centre aisle',
+    { cost: 5 },
+  )
   b.zone('measure', 0.4, 12.2, 29.6, 13.0, 'Session doorway')
 
   return makeDocument('Conference registration', b.build(), {
