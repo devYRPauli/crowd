@@ -220,11 +220,14 @@ describe('the shortcut sheet', () => {
     const keys = printed[0]
     const named = keys.filter((key) => key !== '⌘' && key !== '⇧')
     expect(named, `"${label}" names ${named.length} keys, not one`).toHaveLength(1)
-    fireEvent.keyDown(window.document.body, {
+    const chord = {
       key: EVENT_KEY[named[0]] ?? named[0],
       metaKey: keys.includes('⌘'),
       shiftKey: keys.includes('⇧'),
-    })
+    }
+    // Pressed and let go: Space acts on the release, since held it pans.
+    fireEvent.keyDown(window.document.body, chord)
+    fireEvent.keyUp(window.document.body, chord)
   }
 
   const withKeyboard = () => {

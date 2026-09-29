@@ -134,6 +134,12 @@ export class Viewport {
   private navigating: 'orbit' | 'pan' | null = null
   private lastPointer = { x: 0, y: 0 }
   private spaceHeld = false
+  /**
+   * Whether the view moved while Space was down, for the press held now or the
+   * one just released. Space is also run and pause, and a press that was a pan
+   * must not be that as well.
+   */
+  spacePanned = false
   /** Set by the controller while the active tool hands the left button to the camera. */
   leftButtonNavigates = false
   private capturedPointerId: number | null = null
@@ -615,6 +621,7 @@ export class Viewport {
       (event.button === 0 && (this.spaceHeld || this.leftButtonNavigates))
     if (navigate) {
       event.preventDefault()
+      if (this.spaceHeld) this.spacePanned = true
       this.navigating = event.button === 1 || this.spaceHeld || event.shiftKey ? 'pan' : 'orbit'
       this.lastPointer = { x: event.clientX, y: event.clientY }
       this.capturedPointerId = event.pointerId
@@ -672,7 +679,9 @@ export class Viewport {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
-    if (event.code === 'Space') this.spaceHeld = true
+    if (event.code !== 'Space') return
+    if (!event.repeat) this.spacePanned = false
+    this.spaceHeld = true
   }
 
   private onKeyUp = (event: KeyboardEvent): void => {

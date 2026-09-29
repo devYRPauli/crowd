@@ -78,6 +78,12 @@ export const useKeyboard = ({
   overlayOpen: boolean
 }) => {
   useEffect(() => {
+    /**
+     * A Space press this listener accepted, waiting to be let go, and what it
+     * asked for. Decided on the press, because Shift is often let go first.
+     */
+    let spacePress: 'stop' | 'toggle' | null = null
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return
       // A dialog handles its own keys — in particular Escape, which the editor
@@ -85,7 +91,6 @@ export const useKeyboard = ({
       if (overlayOpen) return
 
       const editor = useEditor.getState()
-      const simulation = useSimulation.getState()
       const mod = event.metaKey || event.ctrlKey
 
       // The active tool gets first refusal.
@@ -195,21 +200,11 @@ export const useKeyboard = ({
           onShowShortcuts()
           return
         case ' ':
+          // Acted on when it is let go, in `onKeyUp`. Space held is also the
+          // pan modifier, and acting on the press toggled the run under every
+          // Space-drag, and again on every auto-repeat while it was held.
           event.preventDefault()
-          if (event.shiftKey) {
-            simulation.stop()
-          } else if (simulation.phase === 'running') {
-            simulation.pause()
-          } else if (simulation.phase === 'paused') {
-            simulation.resume()
-          } else if (simulation.phase !== 'preparing') {
-            // Not while it is preparing: building the navigation grid is
-            // seconds of work on a large venue, and starting again on a second
-            // press throws that away and begins the wait over — an impatient
-            // user could hold the run a moment from starting indefinitely.
-            // Shift-space is how a prepare is called off.
-            simulation.run(editor.document, editor.document.name)
-          }
+          if (!event.repeat) spacePress = event.shiftKey ? 'stop' : 'toggle'
           return
         default:
           break
@@ -228,7 +223,34 @@ export const useKeyboard = ({
       }
     }
 
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== ' ' || spacePress === null) return
+      const press = spacePress
+      spacePress = null
+      if (viewportRef.current.viewport?.spacePanned) return
+      const editor = useEditor.getState()
+      const simulation = useSimulation.getState()
+      if (press === 'stop') {
+        simulation.stop()
+      } else if (simulation.phase === 'running') {
+        simulation.pause()
+      } else if (simulation.phase === 'paused') {
+        simulation.resume()
+      } else if (simulation.phase !== 'preparing') {
+        // Not while it is preparing: building the navigation grid is
+        // seconds of work on a large venue, and starting again on a second
+        // press throws that away and begins the wait over — an impatient
+        // user could hold the run a moment from starting indefinitely.
+        // Shift-space is how a prepare is called off.
+        simulation.run(editor.document, editor.document.name)
+      }
+    }
+
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
   }, [viewportRef, onToggleHeatmap, onShowShortcuts, overlayOpen])
 }

@@ -106,6 +106,7 @@ interface Chord {
 /** A keystroke on the page itself, the way one arrives when nothing is focused. */
 const press = (key: string, chord: Chord = {}): void => {
   fireEvent.keyDown(window.document.body, { key, ...chord })
+  fireEvent.keyUp(window.document.body, { key, ...chord })
 }
 
 /** False when the editor swallowed the key, so the browser never sees it. */
@@ -114,13 +115,14 @@ const reachedTheBrowser = (key: string, chord: Chord = {}): boolean =>
 
 const mount = (options: { overlayOpen?: boolean; toolConsumes?: boolean } = {}) => {
   const frame = vi.fn()
+  const viewport = { frame, spacePanned: false }
   const handleKeyDown = vi.fn(() => options.toolConsumes ?? false)
   const onToggleHeatmap = vi.fn()
   const onShowShortcuts = vi.fn()
 
   const Harness = () => {
     const viewportRef = useRef<ViewportHandle>({
-      viewport: { frame } as unknown as ViewportHandle['viewport'],
+      viewport: viewport as unknown as ViewportHandle['viewport'],
       controller: { handleKeyDown } as unknown as ViewportHandle['controller'],
     })
     useKeyboard({
@@ -142,7 +144,7 @@ const mount = (options: { overlayOpen?: boolean; toolConsumes?: boolean } = {}) 
   }
 
   render(<Harness />)
-  return { frame, handleKeyDown, onToggleHeatmap, onShowShortcuts }
+  return { frame, viewport, handleKeyDown, onToggleHeatmap, onShowShortcuts }
 }
 
 const TOOL_KEYS: Array<[string, ToolId]> = [
@@ -502,6 +504,43 @@ describe('the view and the run', () => {
     press(' ', { shiftKey: true })
     expect(sim().phase).toBe('idle')
     expect(sim().runId).toBeNull()
+  })
+
+  it('leaves the run alone when Space was held to pan the view', () => {
+    const { viewport } = mount()
+    press(' ')
+    useSimulation.setState({ phase: 'running' })
+
+    // Space-drag is how the view is panned with the left button, and the press
+    // under it used to pause the run as well.
+    fireEvent.keyDown(window.document.body, { key: ' ' })
+    viewport.spacePanned = true
+    fireEvent.keyUp(window.document.body, { key: ' ' })
+
+    expect(sim().phase).toBe('running')
+  })
+
+  it('answers a held Space once, not once per auto-repeat', () => {
+    mount()
+    press(' ')
+    useSimulation.setState({ phase: 'running' })
+
+    fireEvent.keyDown(window.document.body, { key: ' ' })
+    fireEvent.keyDown(window.document.body, { key: ' ', repeat: true })
+    fireEvent.keyUp(window.document.body, { key: ' ' })
+
+    expect(sim().phase).toBe('paused')
+  })
+
+  it('stops on Shift-Space when Shift is let go before Space', () => {
+    mount()
+    press(' ')
+    useSimulation.setState({ phase: 'running' })
+
+    fireEvent.keyDown(window.document.body, { key: ' ', shiftKey: true })
+    fireEvent.keyUp(window.document.body, { key: ' ' })
+
+    expect(sim().phase).toBe('idle')
   })
 
   it('runs the venue on screen, under its own name', () => {
