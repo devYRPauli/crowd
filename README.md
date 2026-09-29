@@ -5,10 +5,13 @@
 Draw a venue in 3D. Say who turns up and what they came to do. Watch them move
 through it, and read what went wrong.
 
-CROWD runs entirely in the browser. There is no install, no backend, no licence
-and no import step: the plan _is_ the model. Every wall you draw is a wall people
-collide with, every counter you place is a server with a queue, and every area
-you mark is somewhere the simulation measures.
+CROWD runs entirely in the browser. It is a static site that needs only WebGL 2:
+no desktop install, no backend, no licence fee and no import step. The plan _is_
+the model. Every wall you draw is a wall people collide with, every counter you
+place is a server with a queue, and every area you mark is somewhere the
+simulation measures.
+
+**Try it: <https://devyrpauli.github.io/crowd/>**
 
 ---
 
