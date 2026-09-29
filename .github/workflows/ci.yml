@@ -9,8 +9,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -24,20 +24,15 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run build
-      - run: npx vite preview --port 4173 --host 127.0.0.1 &
-      - run: npx wait-on http://127.0.0.1:4173 || sleep 5
-      - run: node scripts/smoke.mjs
-        env:
-          CROWD_CHROME: ''
-      - uses: actions/upload-artifact@v4
+      - run: npm run smoke
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-screenshots

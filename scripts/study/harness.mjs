@@ -7,7 +7,7 @@
  * happens when you *change* a plan, and a template is a fixed answer.
  *
  * Every figure the study reports comes out of `run`. Derived numbers are
- * computed here, once, so that no experiment can quietly define specific flow
+ * computed here, once, so that no experiment can quietly define flow
  * differently from its neighbour.
  */
 
@@ -15,6 +15,7 @@ import { Simulation } from '../../src/sim/engine.ts'
 import { PlanBuilder } from '../../src/library/planBuilder.ts'
 import { createScenario } from '../../src/core/model/defaults.ts'
 import { DOOR_WIDTHS } from '../../src/core/model/standards.ts'
+import { DEFAULT_SIM_OPTIONS } from '../../src/sim/types.ts'
 
 /**
  * A door by the name a supplier calls it.
@@ -34,7 +35,7 @@ export const door = (imperial) => {
 }
 
 /** The physics step the app itself runs at. */
-export const DT = 0.1
+const DT = DEFAULT_SIM_OPTIONS.timeStep
 
 /** Seeds every configuration is replicated across. */
 export const SEEDS = [1, 2, 3]
@@ -205,17 +206,6 @@ export const run = ({ plan, scenario, maxSteps = 30_000, sampleDensity = false }
 }
 
 /**
- * Specific flow: people per metre of clear exit width per second.
- *
- * This is the figure egress capacity is quoted in, and the one that can be
- * checked against a published number rather than against CROWD's own past self.
- * It is measured over the clearance time — the point 95% of people are out —
- * because the long tail of stragglers is not what the capacity figure describes.
- */
-export const specificFlow = (summary, exitWidth) =>
-  summary.clearanceTime > 0 ? (summary.completed * 0.95) / (summary.clearanceTime * exitWidth) : 0
-
-/**
  * People per second across the saturated middle of a run, between the 20th and
  * 80th percentile of the crowd out, the window `egress.test.ts` measures. The
  * walk-up at the start and the stragglers at the end are not what a door's
@@ -236,13 +226,6 @@ export const across = (values) => {
   const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / n
   return { mean, min: Math.min(...values), max: Math.max(...values), sd: Math.sqrt(variance) }
 }
-
-/** One configuration, run once per seed. */
-export const replicate = (build, { seeds = SEEDS, ...options } = {}) =>
-  seeds.map((seed) => {
-    const { plan, scenario } = build(seed)
-    return run({ plan, scenario, ...options })
-  })
 
 export const scenarioFor = ({
   population,

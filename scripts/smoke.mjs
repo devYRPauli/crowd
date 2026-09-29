@@ -9,15 +9,21 @@
 
 import { chromium } from 'playwright'
 import { mkdir } from 'node:fs/promises'
+import { preview } from 'vite'
 
-const BASE = process.env.CROWD_URL ?? 'http://127.0.0.1:4173'
 const OUT = 'out/smoke'
 
 const run = async () => {
   await mkdir(OUT, { recursive: true })
+  // Served from this process rather than beside it, so the server is listening
+  // before the first request and gone when the run ends. Started with `&` and a
+  // sleep, it raced the build and outlived every run.
+  const server = process.env.CROWD_URL
+    ? null
+    : await preview({ preview: { port: 4173, host: '127.0.0.1', strictPort: true } })
+  const BASE = process.env.CROWD_URL || server.resolvedUrls.local[0]
   const browser = await chromium.launch({
-    executablePath:
-      process.env.CROWD_CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+    executablePath: process.env.CROWD_CHROME || undefined,
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
   })
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } })
@@ -352,7 +358,7 @@ const run = async () => {
   await step('plan view', async () => {
     await page.getByRole('button', { name: 'Plan', exact: true }).click()
     await page.waitForTimeout(1200)
-    await page.screenshot({ path: `${OUT}/08-plan.png` })
+    await page.screenshot({ path: `${OUT}/07-plan.png` })
     await page.getByRole('button', { name: '3D', exact: true }).click()
     await page.waitForTimeout(900)
   })
@@ -440,7 +446,7 @@ const run = async () => {
     if (walls < 4) throw new Error(`Drew four walls but the plan has ${walls}.`)
   })
 
-  await page.screenshot({ path: `${OUT}/06-drawn-room.png` })
+  await page.screenshot({ path: `${OUT}/08-drawn-room.png` })
 
   await step('cut a door into a wall', async () => {
     await page.keyboard.press('d')
@@ -502,7 +508,7 @@ const run = async () => {
     await page.waitForTimeout(900)
   })
 
-  await page.screenshot({ path: `${OUT}/07-furnished.png` })
+  await page.screenshot({ path: `${OUT}/09-furnished.png` })
 
   await step('put a crowd in it', async () => {
     await page.getByRole('button', { name: 'Scenario', exact: true }).click()
@@ -542,7 +548,7 @@ const run = async () => {
     await page.waitForTimeout(2500)
   })
 
-  await page.screenshot({ path: `${OUT}/08-scratch-running.png` })
+  await page.screenshot({ path: `${OUT}/10-scratch-running.png` })
 
   await step('read a number back out of it', async () => {
     await page.getByRole('button', { name: 'Results', exact: true }).click()
@@ -589,10 +595,11 @@ const run = async () => {
     await page.getByRole('button', { name: 'Settings', exact: true }).click()
     await page.getByRole('button', { name: 'Dark', exact: true }).click()
     await page.waitForTimeout(900)
-    await page.screenshot({ path: `${OUT}/07-dark.png` })
+    await page.screenshot({ path: `${OUT}/11-dark.png` })
   })
 
   await browser.close()
+  await server?.close()
 
   // Ignore noise we cannot control and that does not indicate a fault.
   const real = errors.filter(

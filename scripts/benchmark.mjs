@@ -6,14 +6,14 @@
  * not measured here: it depends entirely on the GPU, and the CI machine has
  * none.
  *
- * Run with: node --experimental-strip-types scripts/benchmark.mjs, or through
- * `npx vite-node scripts/benchmark.mjs`.
+ * Run with `npm run bench`.
  */
 
 import { Simulation } from '../src/sim/engine.ts'
 import { getTemplate } from '../src/library/templates.ts'
+import { DEFAULT_SIM_OPTIONS } from '../src/sim/types.ts'
 
-const TIME_STEP = 0.1
+const TIME_STEP = DEFAULT_SIM_OPTIONS.timeStep
 const WARMUP_STEPS = 200
 const MEASURE_STEPS = 300
 
@@ -31,9 +31,7 @@ const bench = (templateId, count) => {
   }
   const sim = new Simulation(doc.plan, scenario, { maxAgents: count * 2 })
 
-  const built = performance.now()
   for (let i = 0; i < WARMUP_STEPS; i++) sim.step(TIME_STEP)
-  const warm = performance.now()
 
   let peakActive = 0
   const started = performance.now()
@@ -50,7 +48,6 @@ const bench = (templateId, count) => {
     template: templateId,
     requested: count,
     active: peakActive,
-    buildMs: warm - built,
     perStepMs: perStep,
     perAgentUs: peakActive > 0 ? (perStep * 1000) / peakActive : 0,
     realTimeFactor,

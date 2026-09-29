@@ -35,6 +35,8 @@ while you are still deciding where the bar goes.
 
 ## Running it
 
+Needs Node 22.22.2+, 24.15+ or 26+.
+
 ```sh
 npm install
 npm run dev          # http://localhost:5173
@@ -44,8 +46,11 @@ npm run dev          # http://localhost:5173
 npm run build        # typecheck + production bundle into dist/
 npm run preview      # serve the build
 npm run check        # typecheck, lint, format check and unit tests
+npx playwright install chromium   # once, for npm run smoke
 npm run smoke        # build, serve, and drive the real app in a real browser
 ```
+
+`npm run smoke` can use a local Chrome instead: set `CROWD_CHROME` to its path.
 
 The build is a static site. `dist/` can be served from anywhere — no headers,
 no COOP/COEP, no server-side anything. That constraint is deliberate and it
