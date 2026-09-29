@@ -419,4 +419,15 @@ Method for the navigation potential, and the RiMEA 3.0 test cases for validation
 An earlier Python and JuPedSim prototype of this idea lives in the git history at
 `cc8c210`. This is a ground-up rewrite.
 
-MIT licensed.
+---
+
+## Licence and credit
+
+MIT licensed, copyright Yash Raj Pandey. Use it, fork it, build on it; the
+licence asks only that its notice travels with the code. If CROWD
+helps your work, please credit it by name with a link to this repository.
+[`CITATION.cff`](CITATION.cff) has the details, and GitHub's "Cite this
+repository" button formats them.
+
+Contributions are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) says what a pull
+request needs.

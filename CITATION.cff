@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: If you use CROWD in your work, please cite it as below.
+title: 'CROWD: Constraint-aware Rehearsal and Optimisation of Walking Dynamics'
+type: software
+authors:
+  - given-names: Yash Raj
+    family-names: Pandey
+version: 1.0.0
+date-released: 2026-09-29
+license: MIT
+repository-code: https://github.com/devYRPauli/crowd
+url: https://devyrpauli.github.io/crowd/
+abstract: >-
+  A browser-based venue editor and crowd simulator. Draw a venue in 3D, say who
+  comes and what they came to do, and rehearse how people move through it.
+keywords:
+  - crowd simulation
+  - pedestrian dynamics
+  - egress
+  - evacuation
+  - floor plan

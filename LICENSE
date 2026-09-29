@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Crowd contributors
+Copyright (c) 2026 Yash Raj Pandey
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,10 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Third-party notice
-------------------
-The MIT license above covers Crowd's own code. JuPedSim is a separate
-dependency licensed under GNU LGPL version 3 or later; its license and
-obligations are not replaced by this MIT license. Other dependencies and
-third-party assets retain their own licenses.
