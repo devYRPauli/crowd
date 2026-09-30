@@ -14,8 +14,9 @@
 
 import type { Plan } from '../model/types'
 import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
-import { pointInPolygon, polygonCentroid } from '../math/geometry'
+import { polygonsOverlap } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
+import { CODE_MINIMUMS } from '../model/standards'
 
 const SQFT_PER_SQM = 10.7639
 const MM_PER_INCH = 25.4
@@ -46,6 +47,12 @@ export interface ComplianceInput {
   /** Target evacuation time for the UK capacity calculation, in minutes. */
   targetEgressMinutes: number
 }
+
+/** The part of a code check the planner chooses rather than draws. */
+export type CodeCheckSettings = Pick<
+  ComplianceInput,
+  'occupancy' | 'sprinklered' | 'targetEgressMinutes'
+>
 
 export interface ComplianceResult {
   floorAreaSqm: number
@@ -84,7 +91,7 @@ export const BOUNDARY_LAYER = 0.15
 /** Green Guide level-route flow rate, persons per metre per minute. */
 export const GREEN_GUIDE_RATE = 82
 /** Minimum clear door width under IBC, in metres (32 in). */
-export const MIN_DOOR_WIDTH_M = (32 * MM_PER_INCH) / 1000
+export const MIN_DOOR_WIDTH_M = CODE_MINIMUMS.egressDoorClearWidth
 
 const exitCountRequired = (occupants: number): number => {
   if (occupants <= 49) return 1
@@ -114,17 +121,25 @@ export const computeCompliance = ({
   // is still one exit, so the door is not counted again.
   const exitZones = plan.zones.filter((zone) => zone.kind === 'exit')
   const wallsById = new Map(plan.walls.map((wall) => [wall.id, wall]))
-  const exitDoors = plan.openings.filter((opening) => {
-    if (!isWalkableOpening(opening)) return false
-    if (opening.use !== 'exit' && opening.use !== 'both') return false
+  const doors = plan.openings.filter(isWalkableOpening).flatMap((opening) => {
     const wall = wallsById.get(opening.wallId)
-    if (!wall) return false
-    const centre = polygonCentroid(openingThreshold(wall, opening))
-    return !exitZones.some((zone) => pointInPolygon(centre, zone.polygon))
+    if (!wall) return []
+    // An exit area is drawn from the outer face, often over one side of a
+    // doorway rather than across its middle. Tested at the threshold's centre,
+    // on the wall's centre line, the door everybody left by added no width,
+    // and so did a pair whose zone covered one leaf. Any overlap counts.
+    const threshold = openingThreshold(wall, opening)
+    const marked = opening.use === 'exit' || opening.use === 'both'
+    const inExitZone = exitZones.some((zone) => polygonsOverlap(threshold, zone.polygon))
+    return [{ width: opening.width, marked, inExitZone }]
   })
-  const doorWidths = plan.openings.filter(isWalkableOpening).map((opening) => opening.width)
-  const exitsProvided = exitZones.length + exitDoors.length
-  const totalExitWidthM = doorWidths.reduce((sum, width) => sum + width, 0)
+  const doorWidths = doors.map((door) => door.width)
+  // Exit width is the width of the ways out. Summing every doorway counted the
+  // doors between rooms and the ways in, and passed a hall on width it did not
+  // have.
+  const exitWidths = doors.filter((d) => d.marked || d.inExitZone).map((d) => d.width)
+  const exitsProvided = exitZones.length + doors.filter((d) => d.marked && !d.inExitZone).length
+  const totalExitWidthM = exitWidths.reduce((sum, width) => sum + width, 0)
 
   const widthPerOccupantInches = sprinklered ? 0.15 : 0.2
   const calculatedWidthM = (designOccupantLoad * widthPerOccupantInches * MM_PER_INCH) / 1000
@@ -135,7 +150,7 @@ export const computeCompliance = ({
   // SFPE: a 1.0 m door has only 0.7 m of effective width. Omitting the boundary
   // layer overstates capacity by about 30%, and it is the step most often left
   // out of a hand calculation.
-  const effectiveWidthM = doorWidths.reduce(
+  const effectiveWidthM = exitWidths.reduce(
     (sum, width) => sum + Math.max(0, width - BOUNDARY_LAYER * 2),
     0,
   )

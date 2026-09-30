@@ -46,7 +46,6 @@ interface Egress {
   perSecond: number
   /** Per second per metre of clear width — the figure capacity is quoted in. */
   specific: number
-  clearanceS: number
   completed: number
 }
 
@@ -99,12 +98,10 @@ const emptyThrough = (width: number, seed = 1): Egress => {
     }
   }
 
-  const summary = sim.summary()
   const perSecond = atLow !== null && atHigh !== null ? (high - low) / (atHigh - atLow) : NaN
   return {
     perSecond,
     specific: perSecond / width,
-    clearanceS: summary.clearanceTime,
     completed: sim.stats().completed,
   }
 }
@@ -133,7 +130,7 @@ describe('egress through a door', () => {
    *
    * Doubling the clear width has to roughly double the flow. Under the old exit
    * test this ratio was 1.12 — the extra leaf bought almost nothing, because
-   * the leaf was not what people were passing through. It measures 2.3 now,
+   * the leaf was not what people were passing through. It measures 2.24 now,
    * above 2 because a wide door loses proportionally less of itself to the
    * clearance the engine keeps between a shoulder and a jamb.
    *
@@ -152,14 +149,14 @@ describe('egress through a door', () => {
    *
    * 1.2–1.4 persons per metre per second is where SFPE and Fruin put a door's
    * capacity, and it is the band RiMEA TC12 grades against. A pair of 3'0"
-   * leaves reads 1.41, at the top of it.
+   * leaves reads 1.36, inside it, and a single 3'0" leaf 1.22.
    *
-   * A narrow leaf reads lower — the same known gap TC12 records at its 0.8,
+   * A 2'0" leaf reads 0.96, below it: the same known gap TC12 records at its
    * 1.0 and 1.2 m widths. The engine keeps a fixed clearance between a body and a
    * jamb, so a narrow opening loses proportionally more of itself to it, and
    * people thread it closer to single file than they should. Charged against
    * SFPE's effective width instead — clear width less a 0.15 m boundary layer
-   * each side — every width here reads between 1.68 and 1.83 p/m/s, so the
+   * each side, every width here reads between 1.63 and 1.89 p/m/s, so the
    * engine is consistent with itself and the disagreement is about how much of
    * an opening is usable, not about how fast people walk through one.
    */

@@ -339,10 +339,17 @@ export const readBrief = (text: string, document: CrowdDocument): BriefResult =>
       ],
     ],
   ]
+  // These are made of the starter profiles, and a file that brings its own may
+  // not have them. Applied anyway, the crowd was one the engine refuses to run.
+  const known = new Set(document.scenario.profiles.map((profile) => profile.id))
   for (const [pattern, label, mix] of mixes) {
     const match = lower.match(pattern)
     if (match && population) {
-      add(`mix-${label}`, label, match[0], (doc) => patchPopulation(doc, { profileMix: mix }))
+      if (mix.every((entry) => known.has(entry.profileId))) {
+        add(`mix-${label}`, label, match[0], (doc) => patchPopulation(doc, { profileMix: mix }))
+      } else {
+        unread.push(match[0])
+      }
       break
     }
   }

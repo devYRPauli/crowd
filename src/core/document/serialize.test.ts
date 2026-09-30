@@ -294,6 +294,18 @@ describe('the crowd a damaged file comes back with', () => {
     expect(result.warnings.join(' ')).not.toMatch(/group\(s\) of people/i)
   })
 
+  it('does not give a starter crowd to a file whose profiles it is not made of', () => {
+    // It parsed cleanly and then the run refused to start, because the
+    // starter crowd is made of the starter profiles and this file replaces them.
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: { name: 'Own profiles', profiles: [{ id: 'custom', name: 'Custom' }] },
+    })
+
+    expect(result.document.scenario.populations).toEqual([])
+    expect(result.warnings.join(' ')).toMatch(/not a profile in this file/i)
+  })
+
   it('respects a file that says, explicitly, that nobody comes', () => {
     const result = parseDocument({
       plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
@@ -332,6 +344,21 @@ describe('files that are not documents', () => {
     // this document and offers to simulate it.
     expect(document.scenario.populations.length).toBeGreaterThan(0)
     expect(document.scenario.profiles.length).toBeGreaterThan(0)
+  })
+
+  it('tells a CROWD document, however damaged, from anything else', () => {
+    expect(parseDocument({ name: 'pkg', version: '1.0.0' }).recognised).toBe(false)
+    expect(parseDocumentJson('not json').recognised).toBe(false)
+    for (const [, input] of hostile.slice(0, 5)) expect(parseDocument(input).recognised).toBe(false)
+    expect(parseDocument({ schemaVersion: SCHEMA_VERSION }).recognised).toBe(true)
+    expect(parseDocument({ plan: { walls: 'four' } }).recognised).toBe(true)
+    expect(reload(loadedVenue()).recognised).toBe(true)
+    expect(
+      parseDocument({
+        format: 'crowd-report',
+        document: JSON.parse(serializeDocument(loadedVenue())),
+      }).recognised,
+    ).toBe(true)
   })
 
   it('reports the JSON failure ahead of the empty document it fell back to', () => {
@@ -403,6 +430,67 @@ describe('repairs the parser reports', () => {
     expect(said).toContain('1 furniture item(s)')
     expect(said).toContain('1 zone(s)')
     expect(said).toContain('1 service point(s)')
+  })
+
+  it('drops what it cannot place rather than putting it at the origin', () => {
+    // Read leniently, a wall saved as ending at { x: 5 } came back ending at
+    // y = 0, a desk with no position stood at the origin, and nothing said so.
+    const result = parseDocument({
+      plan: {
+        walls: [
+          { id: 'w1', a: [0, 0], b: [8, 0] },
+          { id: 'w2', a: { x: 0, y: 0 }, b: { x: 5 } },
+        ],
+        openings: [{ id: 'o1', wallId: 'w1', width: 1 }],
+        furniture: [{ id: 'f1', catalogId: 'chair' }],
+        zones: [
+          {
+            id: 'z1',
+            kind: 'exit',
+            polygon: [
+              [0, 0],
+              [1, 'a'],
+              [1, 1],
+            ],
+          },
+        ],
+        servicePoints: [
+          { id: 's1', name: 'Desk' },
+          { id: 's2', name: 'Bar', position: [2, 2], queue: [[2, 3], [2]] },
+        ],
+      },
+    })
+    const { plan } = result.document
+
+    expect(plan.walls.map((w) => w.id)).toEqual(['w1'])
+    expect(plan.openings).toEqual([])
+    expect(plan.furniture).toEqual([])
+    expect(plan.zones).toEqual([])
+    expect(plan.servicePoints).toEqual([])
+    const said = result.warnings.join('\n')
+    expect(said).toContain('1 wall(s)')
+    expect(said).toContain('1 opening(s)')
+    expect(said).toContain('1 furniture item(s)')
+    expect(said).toContain('1 zone(s)')
+    expect(said).toContain('2 service point(s)')
+  })
+
+  it('drops a group made of a kind of person the file does not describe', () => {
+    // It walked at the first profile's speed, whoever that was.
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: {
+        populations: [
+          { id: 'p1', name: 'Guests', count: 40, profileMix: [{ profileId: 'adult', weight: 1 }] },
+          { id: 'p2', name: 'Robots', count: 5, profileMix: [{ profileId: 'robot', weight: 1 }] },
+        ],
+      },
+    })
+
+    expect(result.document.scenario.populations.map((p) => p.name)).toEqual(['Guests'])
+    expect(result.warnings).toEqual([
+      'Robots is made of "robot", which is not a profile in this file, and was dropped.',
+    ])
   })
 
   it('says nothing about a plan it read whole', () => {
@@ -478,7 +566,9 @@ describe('repairs the parser reports', () => {
     const desk = result.document.plan.servicePoints[0]
     const { arrival, itinerary } = result.document.scenario.populations[0]
 
-    expect(result.document.plan.walls[0].b.x).toBe(0)
+    // A corner that is not a number is not somewhere a wall can end.
+    expect(result.document.plan.walls).toEqual([])
+    expect(result.warnings.join(' ')).toContain('1 wall(s)')
     expect(result.document.scenario.evacuationAtS).toBeNull()
 
     // An unusable optional number has to arrive as an absent one, so the engine

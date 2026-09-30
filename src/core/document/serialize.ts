@@ -9,6 +9,7 @@
  */
 
 import type {
+  AgentProfile,
   ArrivalProfile,
   CrowdDocument,
   DocumentSettings,
@@ -45,6 +46,12 @@ const ADULT = (() => {
 export interface ParseResult {
   document: CrowdDocument
   warnings: string[]
+  /**
+   * Whether the input was a CROWD document at all, damaged or not. Anything
+   * without a plan or a schema version is something else, and opening it as
+   * an empty venue full of the starter crowd hands back a project nobody made.
+   */
+  recognised: boolean
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -76,7 +83,27 @@ const point = (value: unknown, fallback: Vec2 = { x: 0, y: 0 }): Vec2 => {
   return { ...fallback }
 }
 
-const points = (value: unknown): Vec2[] => (Array.isArray(value) ? value.map((p) => point(p)) : [])
+/**
+ * A position that says where something is, or null. Read leniently, a wall
+ * saved as ending at `{ x: 5 }` came back ending at y = 0 and nothing said so;
+ * an object whose place cannot be read is dropped and counted instead.
+ */
+const place = (value: unknown): Vec2 | null => {
+  const [x, y] = Array.isArray(value)
+    ? [value[0], value[1]]
+    : isObject(value)
+      ? [value.x, value.y]
+      : [undefined, undefined]
+  return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
+    ? { x, y }
+    : null
+}
+
+/** Every corner readable, or null. */
+const places = (value: unknown): Vec2[] | null => {
+  const read = array(value).map(place)
+  return read.every((p) => p !== null) ? (read as Vec2[]) : null
+}
 
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 
@@ -108,9 +135,9 @@ const parseDistribution = (value: unknown, fallbackMean: number): Distribution |
 
 const parseWall = (raw: unknown): Wall | null => {
   if (!isObject(raw)) return null
-  const a = point(raw.a)
-  const b = point(raw.b)
-  if (hypot(b.x - a.x, b.y - a.y) < 1e-4) return null
+  const a = place(raw.a)
+  const b = place(raw.b)
+  if (!a || !b || hypot(b.x - a.x, b.y - a.y) < 1e-4) return null
   return {
     id: str(raw.id, newId('wall')),
     a,
@@ -144,10 +171,13 @@ const parseOpening = (
     ? (raw.kind as Opening['kind'])
     : 'door'
   const isWindow = kind === 'window'
+  // Where along its wall a door is decides where people go through it.
+  const offset = optNum(raw.offset)
+  if (offset === undefined) return null
   return {
     id: str(raw.id, newId('open')),
     wallId,
-    offset: Math.max(0, num(raw.offset, 1)),
+    offset: Math.max(0, offset),
     width: Math.max(
       0.1,
       num(raw.width, isWindow ? settings.defaultWindowWidth : settings.defaultDoorWidth),
@@ -169,7 +199,8 @@ const parseOpening = (
 const parseFurniture = (raw: unknown): FurnitureItem | null => {
   if (!isObject(raw)) return null
   const catalogId = str(raw.catalogId, '')
-  if (!catalogId) return null
+  const position = place(raw.position)
+  if (!catalogId || !position) return null
   const size = isObject(raw.size)
     ? {
         width: Math.max(0.05, num(raw.size.width, 1)),
@@ -180,7 +211,7 @@ const parseFurniture = (raw: unknown): FurnitureItem | null => {
   return {
     id: str(raw.id, newId('item')),
     catalogId,
-    position: point(raw.position),
+    position,
     rotation: num(raw.rotation, 0),
     ...(size ? { size } : {}),
     ...(typeof raw.name === 'string' ? { name: raw.name } : {}),
@@ -192,8 +223,8 @@ const parseFurniture = (raw: unknown): FurnitureItem | null => {
 
 const parseZone = (raw: unknown): Zone | null => {
   if (!isObject(raw)) return null
-  const polygon = points(raw.polygon)
-  if (polygon.length < 3) return null
+  const polygon = places(raw.polygon)
+  if (!polygon || polygon.length < 3) return null
   const kind = (
     ['entry', 'exit', 'waypoint', 'obstacle', 'keep-clear', 'seating', 'measure'] as const
   ).includes(raw.kind as never)
@@ -216,13 +247,15 @@ const parseZone = (raw: unknown): Zone | null => {
 
 const parseServicePoint = (raw: unknown): ServicePoint | null => {
   if (!isObject(raw)) return null
-  const queue = points(raw.queue)
+  const position = place(raw.position)
+  const queue = places(raw.queue)
+  if (!position || !queue) return null
   const opensAt = optNum(raw.opensAt)
   const closesAt = optNum(raw.closesAt)
   return {
     id: str(raw.id, newId('svc')),
     name: str(raw.name, 'Service point'),
-    position: point(raw.position),
+    position,
     rotation: num(raw.rotation, 0),
     width: Math.max(0.3, num(raw.width, DEFAULT_SERVICE_POINT.width)),
     depth: Math.max(0.2, num(raw.depth, DEFAULT_SERVICE_POINT.depth)),
@@ -335,7 +368,7 @@ const parseScenario = (raw: unknown, warnings: string[]): Scenario => {
   if (lostPopulations > 0) {
     warnings.push(`${lostPopulations} group(s) of people could not be read and were dropped.`)
   }
-  const profiles = array(raw.profiles).filter(isObject).length
+  const profiles: AgentProfile[] = array(raw.profiles).filter(isObject).length
     ? array(raw.profiles)
         .filter(isObject)
         .map((p) => ({
@@ -359,12 +392,29 @@ const parseScenario = (raw: unknown, warnings: string[]): Scenario => {
             : 'walking',
         }))
     : base.profiles
+  // A group made of a kind of person the file does not describe was walked at
+  // the first profile's speed, whoever that was, and nothing said so.
+  // The starter crowd is checked too: it is made of the starter profiles, and a
+  // file that brings its own profiles without a crowd would otherwise parse
+  // cleanly and then fail to run.
+  const known = new Set(profiles.map((p) => p.id))
+  const crowd = (populations.length || described ? populations : base.populations).filter(
+    (population) => {
+      const unknown = population.profileMix.find((entry) => !known.has(entry.profileId))
+      if (unknown) {
+        warnings.push(
+          `${population.name} is made of "${unknown.profileId}", which is not a profile in this file, and was dropped.`,
+        )
+      }
+      return !unknown
+    },
+  )
   const routing = isObject(raw.routing) ? raw.routing : {}
   return {
     name: str(raw.name, base.name),
     durationS: Math.max(10, num(raw.durationS, base.durationS)),
     seed: Math.max(0, Math.round(num(raw.seed, base.seed))),
-    populations: populations.length || described ? populations : base.populations,
+    populations: crowd,
     profiles,
     speedFactor: Math.max(0.1, num(raw.speedFactor, base.speedFactor)),
     routing: {
@@ -437,6 +487,7 @@ export const parseDocument = (input: unknown): ParseResult => {
     raw = raw.document
   }
   if (!isObject(input)) warnings.push('The file did not contain a CROWD document; started empty.')
+  const recognised = isObject(raw.plan) || typeof raw.schemaVersion === 'number'
 
   const version = num(raw.schemaVersion, 0)
   if (version > SCHEMA_VERSION) {
@@ -520,6 +571,7 @@ export const parseDocument = (input: unknown): ParseResult => {
       scenario: parseScenario(raw.scenario, warnings),
     },
     warnings,
+    recognised,
   }
 }
 

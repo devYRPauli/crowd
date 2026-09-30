@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeCompliance, BOUNDARY_LAYER, MIN_DOOR_WIDTH_M, SPECIFIC_FLOW } from './compliance'
 import { PlanBuilder } from '../../library/planBuilder'
+import { DEFAULT_WALL_THICKNESS } from '../model/standards'
 
 const hall = (width: number, depth: number, doorWidths: number[]) => {
   const b = new PlanBuilder()
@@ -96,6 +97,24 @@ describe('compliance calculator', () => {
     expect(result.issues.some((issue) => issue.message.includes('marked on the plan'))).toBe(false)
   })
 
+  it('counts the width of the ways out, not of every door', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 2, 1.22, 'door', 'exit')
+    b.door(room.north, 2, 1.22, 'door', 'both')
+    b.door(room.east, 2, 2.13)
+    b.door(room.west, 2, 1.0, 'door', 'entry')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 100,
+      targetEgressMinutes: 8,
+    })
+    expect(result.totalExitWidthM).toBeCloseTo(2.44, 6)
+    expect(result.effectiveWidthM).toBeCloseTo(2.44 - 4 * BOUNDARY_LAYER, 6)
+  })
+
   it('counts an exit zone drawn over a marked door once', () => {
     const b = new PlanBuilder()
     const room = b.room(0, 0, 10, 10)
@@ -109,6 +128,58 @@ describe('compliance calculator', () => {
       targetEgressMinutes: 8,
     })
     expect(result.exitsProvided).toBe(1)
+  })
+
+  it('counts the width of a door that opens onto an exit zone drawn outside it', () => {
+    // The threshold's centre is on the wall's centre line, and a zone drawn
+    // from the outer face, which is where an exit area is drawn, missed it.
+    // The door everybody left by then added nothing and the hall failed on
+    // 0 m of egress width.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 2.5, 1.0)
+    b.zone('exit', 1.5, -2, 3.5, -DEFAULT_WALL_THICKNESS / 2, 'Street')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 20,
+      targetEgressMinutes: 8,
+    })
+    expect(result.exitsProvided).toBe(1)
+    expect(result.totalExitWidthM).toBeCloseTo(1.0, 6)
+  })
+
+  it('counts a pair of doors whose exit zone covers one leaf', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 3, 1.83)
+    // Outside the wall, over the left leaf only: nowhere near the pair's middle.
+    b.zone('exit', 1.5, -2, 2.5, -DEFAULT_WALL_THICKNESS / 2, 'Street')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 20,
+      targetEgressMinutes: 8,
+    })
+    expect(result.totalExitWidthM).toBeCloseTo(1.83, 6)
+  })
+
+  it('does not count a door the exit zone is nowhere near', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 3, 1.0)
+    b.zone('exit', 6, -2, 8, -DEFAULT_WALL_THICKNESS / 2, 'Street')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 20,
+      targetEgressMinutes: 8,
+    })
+    expect(result.exitsProvided).toBe(1)
+    expect(result.totalExitWidthM).toBe(0)
   })
 
   it('flags a door below the clear minimum', () => {

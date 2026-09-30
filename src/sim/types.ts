@@ -86,9 +86,10 @@ export interface ServiceSummary {
   name: string
   servers: number
   served: number
-  meanWait: number
+  /** Null when nobody was served. */
+  meanWait: number | null
   maxWait: number
-  meanService: number
+  meanService: number | null
   /** Share of run time the counters were busy. */
   utilisation: number
   maxQueue: number
@@ -126,14 +127,15 @@ export interface RunSummary {
   seed: number
   totalPeople: number
   completed: number
-  /** Mean time from arrival to leaving. */
-  meanJourney: number
-  p95Journey: number
-  meanWait: number
+  /** Mean time from arrival to leaving. Null when nobody has left. */
+  meanJourney: number | null
+  p95Journey: number | null
+  /** Null when no counter served anybody. */
+  meanWait: number | null
   maxWait: number
-  meanQueueTime: number
-  /** Time by which 95% of people had left, in seconds. */
-  clearanceTime: number
+  meanQueueTime: number | null
+  /** Time by which 95% of people had left, in seconds. Null until they have. */
+  clearanceTime: number | null
   walkableArea: number
   peakOccupancy: number
   peakDensity: number

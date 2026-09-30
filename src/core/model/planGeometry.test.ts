@@ -389,6 +389,19 @@ describe('service points', () => {
     },
   )
 
+  it('serves from the side its drawn queue is on, whichever way it was turned', () => {
+    // Half a turn from the queue, the person at the front walked round the end
+    // of the counter to be served from behind it: every template did that.
+    const point = counterAt(Math.PI, {
+      queue: [
+        { x: 2, y: -2.4 },
+        { x: 2, y: -6 },
+      ],
+    })
+    for (const served of servicePositions(point)) expect(served.y).toBeCloseTo(-1.8, 12)
+    for (const staff of serverPositions(point)) expect(staff.y).toBeCloseTo(-0.15, 12)
+  })
+
   it('spreads stations along the counter face and keeps them on it', () => {
     const point = counterAt(0, { servers: 3 })
     const along = fromAngle(point.rotation)

@@ -82,6 +82,24 @@ describe('brief parser', () => {
     expect(hurriedWeight?.weight).toBeGreaterThan(30)
   })
 
+  it('does not offer a crowd made of profiles the file does not have', () => {
+    const doc = base()
+    const adultsOnly: CrowdDocument = {
+      ...doc,
+      scenario: {
+        ...doc.scenario,
+        profiles: doc.scenario.profiles.filter((profile) => profile.id === 'adult'),
+        populations: doc.scenario.populations.map((population) => ({
+          ...population,
+          profileMix: [{ profileId: 'adult', weight: 1 }],
+        })),
+      },
+    }
+    const result = readBrief('100 older voters', adultsOnly)
+    expect(result.assumptions.some((entry) => entry.id.startsWith('mix-'))).toBe(false)
+    expect(result.unread).toContain('older')
+  })
+
   it('handles a full sentence', () => {
     const doc = base()
     const text = '200 guests arriving over 45 minutes, three staff on the bar, a minute each'

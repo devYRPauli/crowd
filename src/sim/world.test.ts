@@ -539,6 +539,39 @@ describe('keep-clear zones', () => {
     // strict one underneath it.
     expect(world.baseSpeed[cellAt(world, 10, 6)]).toBe(0.125)
   })
+
+  it('prices a gap narrower than a body like the floor either side of it', () => {
+    const gapped = (gap: number): SimWorld => {
+      const b = new PlanBuilder()
+      b.room(0, 0, 20, 12)
+      b.zone('keep-clear', 0, 2, 20, 6 - gap / 2, 'North band', { cost: 5 })
+      b.zone('keep-clear', 0, 6 + gap / 2, 20, 10, 'South band', { cost: 5 })
+      return compile(b.build(), { cellSize: 0.2 })
+    }
+    /** Prices down x = 10 for every row whose centre lies strictly inside (lo, hi). */
+    const column = (world: SimWorld, lo: number, hi: number): number[] => {
+      const { grid } = world
+      const { col } = worldToCell(grid, 10, 0)
+      const out: number[] = []
+      for (let row = 0; row < grid.rows; row++) {
+        const { y } = cellCenter(grid, col, row)
+        if (y > lo && y < hi) out.push(world.baseSpeed[gridIndex(grid, col, row)])
+      }
+      return out
+    }
+    // Priced as drawn, a 0.3 m gap was a V in the field a cell or two wide, and
+    // its gradient flipped at every step for the one walker sent down it.
+    const gap = column(gapped(0.3), 5.85, 6.15)
+    expect(gap.length).toBeGreaterThan(0)
+    for (const v of gap) expect(v).toBeCloseTo(0.2, 6)
+    // A body fits down a metre, so every row of that lane stays open floor and
+    // every row of a band keeps its price: nothing a body fits moves an edge.
+    const lane = gapped(1)
+    for (const v of column(lane, 5.5, 6.5)) expect(v).toBe(1)
+    for (const v of [...column(lane, 2, 5.5), ...column(lane, 6.5, 10)])
+      expect(v).toBeCloseTo(0.2, 6)
+    for (const v of column(lane, 0.5, 2)) expect(v).toBe(1)
+  })
 })
 
 describe('obstacle zones', () => {

@@ -68,8 +68,8 @@ export const formatClock = (seconds: number): string => {
 }
 
 /** `4 min 20 s`, `45 s`, `1 h 05 min`. */
-export const formatDuration = (seconds: number): string => {
-  if (!Number.isFinite(seconds)) return '—'
+export const formatDuration = (seconds: number | null): string => {
+  if (seconds === null || !Number.isFinite(seconds)) return '—'
   const total = Math.max(0, Math.round(seconds))
   if (total < 60) return `${total} s`
   if (total < 3600) {

@@ -5,6 +5,7 @@ import { parseDocument, serializeDocument } from '../core/document/serialize'
 import { detectRooms } from '../core/model/rooms'
 import { planSeats } from '../core/model/planGeometry'
 import { buildWorld } from '../sim/world'
+import { gridIndex, solveEikonal, worldToCell } from '../sim/nav/eikonal'
 
 describe('starter templates', () => {
   it.each(TEMPLATES.map((t) => [t.id, t] as const))(
@@ -163,6 +164,31 @@ describe('starter templates', () => {
     }
     expect(checked).toBe(360)
   })
+
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))(
+    '%s serves each counter on the side its queue is on',
+    (_id, template) => {
+      // Every counter was drawn half a turn from its own queue, and whoever got
+      // to the front walked round the end of the counter to be served from
+      // behind it. Measured as a walk from the head of the queue, because a
+      // station inside the turnstiles beside a counter is just as unreachable.
+      const doc = template.build()
+      const world = buildWorld(doc.plan, doc.scenario)
+      const { grid, navBlocked } = world
+      const cellOf = (p: { x: number; y: number }) => {
+        const { col, row } = worldToCell(grid, p.x, p.y)
+        return gridIndex(grid, col, row)
+      }
+      const flat = new Float32Array(grid.cols * grid.rows).fill(1)
+      for (const queue of world.queues) {
+        const walk = solveEikonal(grid, navBlocked, flat, [cellOf(queue.slots[0])])
+        for (const station of queue.stations) {
+          const straight = Math.hypot(station.x - queue.slots[0].x, station.y - queue.slots[0].y)
+          expect(walk[cellOf(station)], queue.name).toBeLessThan(straight * 1.1 + 0.5)
+        }
+      }
+    },
+  )
 
   it.each(TEMPLATES.map((t) => [t.id, t] as const))(
     '%s gives the simulation every seat it lays out',

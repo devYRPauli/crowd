@@ -12,7 +12,7 @@ import type { CrowdDocument } from '../model/types'
 import type { RunSummary } from '../../sim/types'
 import type { Finding } from '../../sim/metrics/findings'
 import { formatArea, formatDuration } from '../model/units'
-import { computeCompliance, type OccupancyId } from './compliance'
+import { computeCompliance, type CodeCheckSettings } from './compliance'
 
 export interface ReportInput {
   document: CrowdDocument
@@ -26,7 +26,8 @@ export interface ReportInput {
     peakDensity: Float32Array
     queueTotal: Float32Array
   }
-  occupancy?: OccupancyId
+  /** What the code check panel is set to, so the brief checks what the planner sees. */
+  codeCheck: CodeCheckSettings
 }
 
 const csvEscape = (value: string): string =>
@@ -45,7 +46,7 @@ export const toCsv = ({ document, summary }: ReportInput): string => {
   lines.push('')
 
   lines.push(csvRow(['Metric', 'Value', 'Units']))
-  const metrics: Array<[string, number | string, string]> = [
+  const metrics: Array<[string, number | string | null, string]> = [
     ['Run length', summary.durationS, 's'],
     ['Seed', summary.seed, ''],
     ['People simulated', summary.totalPeople, ''],
@@ -61,7 +62,8 @@ export const toCsv = ({ document, summary }: ReportInput): string => {
     ['Peak density', summary.peakDensity, 'persons/m2'],
   ]
   for (const [name, value, units] of metrics) {
-    lines.push(csvRow([name, typeof value === 'number' ? value.toFixed(3) : value, units]))
+    // A figure with nothing to measure is a blank cell, not a zero.
+    lines.push(csvRow([name, typeof value === 'number' ? value.toFixed(3) : (value ?? ''), units]))
   }
   lines.push('')
 
@@ -91,9 +93,9 @@ export const toCsv = ({ document, summary }: ReportInput): string => {
           service.name,
           service.servers,
           service.served,
-          service.meanWait.toFixed(2),
+          service.meanWait?.toFixed(2) ?? '',
           service.maxWait.toFixed(2),
-          service.meanService.toFixed(2),
+          service.meanService?.toFixed(2) ?? '',
           service.utilisation.toFixed(4),
           service.maxQueue,
           service.unserved,
@@ -210,11 +212,9 @@ export const toJsonBundle = (input: ReportInput): string =>
 export const toBrief = (input: ReportInput): string => {
   const { document, summary, findings } = input
   const compliance = computeCompliance({
+    ...input.codeCheck,
     plan: document.plan,
-    occupancy: input.occupancy ?? 'assembly-tables',
-    sprinklered: false,
     plannedAttendance: document.scenario.populations.reduce((sum, p) => sum + p.count, 0),
-    targetEgressMinutes: 8,
   })
   const units = document.settings.units
 
@@ -226,7 +226,7 @@ export const toBrief = (input: ReportInput): string => {
     `${summary.totalPeople} people over ${formatDuration(summary.durationS)}, seed ${summary.seed}.`,
   )
   lines.push(
-    `${summary.completed} completed their journey. Mean ${formatDuration(summary.meanJourney)}, ` +
+    `${summary.completed} of them left. Mean journey ${formatDuration(summary.meanJourney)}, ` +
       `with one in twenty taking ${formatDuration(summary.p95Journey)}.`,
   )
   lines.push(
@@ -281,7 +281,7 @@ export const toBrief = (input: ReportInput): string => {
     `• Exits: ${compliance.exitsProvided} marked, ${compliance.exitsRequired} required for ${compliance.designOccupantLoad} occupants.`,
   )
   lines.push(
-    `• Egress width: ${compliance.totalExitWidthM.toFixed(2)} m drawn against ${compliance.requiredWidthM.toFixed(2)} m required.`,
+    `• Egress width: ${compliance.totalExitWidthM.toFixed(2)} m drawn against ${compliance.requiredWidthM.toFixed(2)} m required, ${input.codeCheck.sprinklered ? 'sprinklered' : 'not sprinklered'}.`,
   )
   lines.push(
     `• SFPE hand calculation: ${formatDuration(compliance.hydraulicEgressSeconds)} to clear, using ${compliance.effectiveWidthM.toFixed(2)} m of effective width.`,

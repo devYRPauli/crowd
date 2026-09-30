@@ -34,7 +34,8 @@ describe('plans that do not make sense', () => {
     const sim = run(plan, scenarioWith())
     const summary = sim.summary()
     expect(summary.warnings.join(' ')).toMatch(/entry/i)
-    expect(Number.isFinite(summary.meanJourney)).toBe(true)
+    // Nobody could arrive, so there is no journey time to report, not a zero.
+    expect(summary.meanJourney).toBeNull()
   })
 
   it('reports a venue with no exit instead of stranding people silently', () => {
@@ -149,8 +150,10 @@ describe('plans that do not make sense', () => {
     )
     const summary = sim.summary()
     expect(summary.totalPeople).toBe(0)
-    expect(summary.meanJourney).toBe(0)
-    expect(Number.isNaN(summary.meanWait)).toBe(false)
+    // Nobody walked, so there is no journey time and no wait to report.
+    expect(summary.meanJourney).toBeNull()
+    expect(summary.meanWait).toBeNull()
+    expect(summary.clearanceTime).toBeNull()
   })
 
   it('drops itinerary steps whose target no longer exists', () => {

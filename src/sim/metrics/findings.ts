@@ -96,19 +96,20 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
       })
     }
 
-    if (service.meanWait > 300) {
+    const meanWait = service.meanWait ?? 0
+    if (meanWait > 300) {
       findings.push({
         id: `wait-${service.id}`,
-        severity: service.meanWait > 600 ? 'high' : 'medium',
-        headline: `${service.name} kept people waiting ${formatDuration(service.meanWait)} on average`,
-        detail: `The longest wait was ${formatDuration(service.maxWait)}, and the queue peaked at ${service.maxQueue} people. Mean service time is ${service.meanService.toFixed(0)} s across ${service.servers} ${service.servers === 1 ? 'position' : 'positions'}.`,
+        severity: meanWait > 600 ? 'high' : 'medium',
+        headline: `${service.name} kept people waiting ${formatDuration(meanWait)} on average`,
+        detail: `The longest wait was ${formatDuration(service.maxWait)}, and the queue peaked at ${service.maxQueue} people. Mean service time is ${formatDuration(service.meanService)} across ${service.servers} ${service.servers === 1 ? 'position' : 'positions'}.`,
         targetId: service.id,
       })
-    } else if (service.meanWait > 90) {
+    } else if (meanWait > 90) {
       findings.push({
         id: `wait-${service.id}`,
         severity: 'low',
-        headline: `${service.name} averaged a ${formatDuration(service.meanWait)} wait`,
+        headline: `${service.name} averaged a ${formatDuration(meanWait)} wait`,
         detail: `Longest ${formatDuration(service.maxWait)}, queue peaked at ${service.maxQueue}. Comfortable for a bar; long for a registration desk.`,
         targetId: service.id,
       })
@@ -217,7 +218,7 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
   }
 
   // --- journeys ------------------------------------------------------------
-  if (summary.p95Journey > 0 && summary.meanJourney > 0) {
+  if (summary.p95Journey !== null && summary.meanJourney !== null && summary.meanJourney > 0) {
     const spread = summary.p95Journey / summary.meanJourney
     if (spread > 2.2) {
       findings.push({

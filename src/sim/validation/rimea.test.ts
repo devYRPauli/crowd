@@ -372,7 +372,7 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
    * This lives here rather than only in the per-width tests because an
    * `it.fails` test is green whenever its body throws, and it does not care
    * which way it threw. Two mutants proved that matters, both at the 0.8 m
-   * width, which is marked `it.fails` for being *under* the band: deleting
+   * width, which was then marked `it.fails` for being *under* the band: deleting
    * the density slowdown (`speedFromDensity` in `preferredVelocity`) took it to
    * 1.998 p/m/s, and halving every agent's radius took it to 1.830. Each is
    * roughly double the true figure and each left the suite green, because
@@ -425,43 +425,35 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
   }
 
   /**
-   * KNOWN GAP. MEASURED 0.851 p/m/s of clear width; TARGET 1.2-1.4, 29% below
-   * the bottom of the band. A 0.8 m clear opening leaves 0.28 m of
-   * unblocked navigation grid once `NAV_CLEARANCE` (0.26 m) is taken off each
-   * side, so people thread it strictly one at a time. Charged against the
-   * *effective* width instead (clear width less a 0.15 m boundary layer each
-   * side, the SFPE convention) the same run reads 1.362 p/m/s, inside the band,
-   * so the engine moves a single file at about the right rate and the error is
-   * in how much of an opening it treats as usable, not in the locomotion.
+   * MEASURED 1.209 p/m/s of clear width; TARGET 1.2-1.4. In the band, by 0.009.
    *
-   * Two experiments locate it and neither is the fix.
+   * It read 0.851 for a long time, and the reason was the walker's read-ahead,
+   * not the doorway. The density that sets somebody's pace is read
+   * `PACE_LOOKAHEAD` ahead of them, and it used to fall back to their own spot
+   * whenever the line to that point came near a wall. In a 0.8 m opening it
+   * always does, so everybody angling into it past a jamb read a ring round
+   * their own spot in the densest part of the jam and walked the slow end of
+   * the speed-density curve. It falls back now only when the line is blocked.
    *
-   * Setting `NAV_CLEARANCE` to 0 raised this width to 1.487 p/m/s and the 1.0 m
-   * width to 1.179, and stranded 17 of 20 people at the corner in TC6.
-   *
-   * Setting it to the 0.15 m boundary layer — with proximity to a wall charged
-   * as a traversal cost instead, so routes still prefer open floor — made the
-   * narrow openings *worse*, not better: 0.809 p/m/s here and 0.776 at 1.0 m.
-   * The reason is the useful one. Routing a body centre to 0.15 m of a jamb
-   * when `relaxOverlaps` pushes it back out to a full 0.23 m radius puts churn
-   * at exactly the point that meters the flow. The navigation grid cannot claim
-   * width the body exclusion will not let a body occupy, so the two numbers are
-   * bound together, and the real lever is the 0.23 m the engine keeps between a
-   * body and a wall where SFPE observes people accepting 0.15 m. Relaxing that
-   * would buy the flow at the price of shoulders visibly inside walls — TC6
-   * allows 0.05 m of that and this would need 0.08 m — which is a bad trade for
-   * a tool whose output people watch. It stands as a stated limit instead.
+   * What the opening still loses is at the jambs. `NAV_CLEARANCE` (0.26 m) off
+   * each side leaves 0.28 m of navigation grid, so people thread it strictly one
+   * at a time; against effective width (clear width less a 0.15 m boundary
+   * layer each side, the SFPE convention) the run reads 1.934. Setting
+   * `NAV_CLEARANCE` to 0 raised this width and stranded 17 of 20 people at the
+   * corner in TC6; setting it to the 0.15 m boundary layer made the narrow
+   * openings worse, because `relaxOverlaps` pushes a body back out to a full
+   * 0.23 m radius and puts churn at the point that meters the flow.
    */
-  it.fails('TC12: 0.8 m opening passes 1.2–1.4 p/m/s', bandTest(0.8))
+  it('TC12: 0.8 m opening passes 1.2–1.4 p/m/s', bandTest(0.8))
 
   /**
-   * KNOWN GAP. MEASURED 1.023 p/m/s; TARGET 1.2-1.4, 15% below the band.
-   * Same cause as the 0.8 m case: the usable navigation channel is 0.48 m, two
-   * centimetres more than two bodies need, so the file staggers rather than
-   * doubling. Against effective width it reads 1.461 p/m/s, above the band. The
-   * extra 0.2 m of door over the 0.8 m case buys more than its share of flow,
-   * 0.68 to 1.02 people a second, so what both widths lose is the fixed
-   * clearance at each jamb, not the width in between.
+   * KNOWN GAP. MEASURED 1.009 p/m/s; TARGET 1.2-1.4, 16% below the band.
+   * The usable navigation channel is 0.48 m, two centimetres more than two
+   * bodies need, so the file staggers rather than doubling. The 0.8 m opening
+   * passes 0.967 people a second and this one 1.009: the extra 0.2 m buys
+   * almost nothing, because it is still one file. What this width lacks is room
+   * for a second file, not the width in between. Against effective width it
+   * reads 1.442 p/m/s, above the band.
    */
   it.fails('TC12: 1.0 m opening passes 1.2–1.4 p/m/s', bandTest(1.0))
 
@@ -493,7 +485,7 @@ describe('RiMEA TC12 — flow through a bottleneck', () => {
    * dense a crowd looked depend on the venue's narrowest door, which picks the
    * cell size.
    *
-   * 1.5 m and 2.0 m sit in band, at 1.254 and 1.247.
+   * 1.5 m and 2.0 m sit in band, at 1.245 and 1.247.
    */
   it.fails('TC12: 1.2 m opening passes 1.2–1.4 p/m/s', bandTest(1.2))
 
@@ -859,14 +851,16 @@ describe('Single-exit congestion', () => {
   /**
    * People do not walk through each other, even in a crush.
    *
-   * KNOWN GAP. MEASURED worst body overlap 0.125 m on a 0.46 m pair distance,
-   * p95 0.081, median tick 0.028; TOLERANCE 0.10 m. It read 0.081 (p95 0.067)
-   * until the density field was made to count the whole of each person (see
-   * the 1.2 m bottleneck above). That change alone, on the same arithmetic,
-   * took the worst overlap from 0.094 to 0.125 and the peak density in the jam
-   * from 6.75 to 7.03 persons per square metre. The likely route is personal
-   * space, which shrinks as the crowd reads denser, so the queue packs
-   * tighter; that is not yet measured.
+   * KNOWN GAP. MEASURED worst body overlap 0.115 m on a 0.46 m pair distance,
+   * p95 0.079, median tick 0.024; TOLERANCE 0.10 m.
+   *
+   * The mechanism is walls. Contact between people is resolved in velocity
+   * before anyone moves and in position after, and a wall is in neither. It
+   * pushes a body back out once the passes are done, by writing its position,
+   * without looking at who is standing there, so in the crush at the door a
+   * body pressed out of a wall is pressed into its neighbour and the step ends
+   * on the overlap it made. The fix is walls in the contact rules, not a
+   * different push-out.
    *
    * It was once much the worst of the known gaps: it measured 0.271 m, which
    * is most of a body, and it was not a transient — the p95 was 0.141 m, so for

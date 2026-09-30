@@ -49,6 +49,11 @@ const runOnce = () => {
     summary,
     series,
     findings: deriveFindings({ summary, series, totalPeople: 16 }),
+    codeCheck: {
+      occupancy: 'assembly-tables' as const,
+      sprinklered: false,
+      targetEgressMinutes: 8,
+    },
   }
 }
 
@@ -100,6 +105,19 @@ describe('report export', () => {
     expect(brief).toContain('not a safety certification')
     // No placeholder or NaN should ever reach a shared document.
     expect(brief).not.toMatch(/NaN|undefined|Infinity/)
+  })
+
+  it('checks the code against the settings the panel shows, not its own', () => {
+    const line = (brief: string) => brief.split('\n').find((l) => l.includes('Egress width'))
+    const open = toBrief(input)
+    const sprinklered = toBrief({
+      ...input,
+      codeCheck: { occupancy: 'assembly-standing', sprinklered: true, targetEgressMinutes: 8 },
+    })
+    expect(open).toContain('assembly, tables and chairs')
+    expect(sprinklered).toContain('assembly, standing')
+    expect(line(open)).toContain('not sprinklered')
+    expect(line(sprinklered)).toContain(', sprinklered')
   })
 
   it('names files safely', () => {

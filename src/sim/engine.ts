@@ -366,6 +366,8 @@ export class Simulation {
   private peakDensity = 0
   private warnings: string[] = []
   private abandoned = 0
+  /** Seat steps somebody stood through, as `person:step`, until they sit in one. */
+  private unseated = new Set<string>()
   private evacuated = false
 
   private overlapScratch = new Float32Array(0)
@@ -505,11 +507,14 @@ export class Simulation {
         const entryIndex = rng.int(0, entryCount - 1)
         for (let member = 0; member < size && index < count; member++, index++) {
           const mixIndex = rng.weightedIndex(weights)
-          const profileId = population.profileMix[mixIndex]?.profileId ?? 'adult'
-          const profileIndex = Math.max(
-            0,
-            this.scenario.profiles.findIndex((p) => p.id === profileId),
-          )
+          const profileId = population.profileMix[mixIndex]?.profileId
+          const profileIndex = this.scenario.profiles.findIndex((p) => p.id === profileId)
+          // The parser drops a group made of a profile the file does not have,
+          // so this is a caller's mistake, and walking them as somebody else
+          // would hide it.
+          if (profileIndex < 0) {
+            throw new Error(`${population.name} is made of "${profileId}", which is not a profile.`)
+          }
           arrivals.push({
             time: size > 1 ? groupTime : (times[index] ?? groupTime),
             populationIndex,
@@ -769,12 +774,12 @@ export class Simulation {
             // than teleporting or vanishing. Standing there for the meal was
             // tried, and the standing guests kept the seated ones off their chairs.
             const fallback = this.world.waypoints.find((w) => w.id === step.targetId)
+            this.unseated.add(`${agent.id}:${agent.stepIndex}`)
             agent.state = 'walking'
             agent.fieldTarget = fallback?.id ?? null
             agent.exactTarget = fallback
               ? samplePointInDestination(this.world, fallback, () => rng.next())
               : null
-            agent.timer = step.duration ? sampleDistribution(rng, step.duration) : 120
             return
           }
           const record = this.world.seats[seat]
@@ -1123,8 +1128,11 @@ export class Simulation {
     const seat = this.world.seats[seatIndex]
     const row = seat.row
     if (!row) return true
-    const [a, b] = row.ends
-    const far = distance(seat.position, a) > distance(seat.position, b) ? a : b
+    // A row of one seat has nothing past it to shut. Asked which end was far,
+    // it answered with the end the seat was entered by, and a lone seat with a
+    // wall at one side refused a wheelchair it could seat.
+    if (row.ownEnds.length === 2) return true
+    const far = row.ends[row.ownEnds[0] === 0 ? 1 : 0]
     if (sampleField(this.world.grid, this.world.clearance, far.x, far.y, 10) < agent.radius) {
       return false
     }
@@ -1134,6 +1142,17 @@ export class Simulation {
       if (this.world.seats[other.seatIndex].furnitureId === seat.furnitureId) return false
     }
     return true
+  }
+
+  /** Whether a seat is at an end of its row that somebody this broad can come in by. */
+  private atOpenEnd(agent: Agent, seatIndex: number): boolean {
+    const seat = this.world.seats[seatIndex]
+    const row = seat.row
+    if (!row) return false
+    return row.ownEnds.some((end) => {
+      const near = row.ends[end]
+      return sampleField(this.world.grid, this.world.clearance, near.x, near.y, 10) >= agent.radius
+    })
   }
 
   private claimSeat(agent: Agent, zoneId: string | undefined, rng: Rng): number {
@@ -1146,8 +1165,9 @@ export class Simulation {
       if (zone && !pointInPolygon(seat.position, zone.polygon)) continue
       // A wheelchair does not go along a row. Seated in the middle of one, its
       // user could not leave, and sat half in the passage behind, where nobody
-      // could get past them to the rest of that row either.
-      if (!agent.sidles && seat.row && !seat.row.atEnd) continue
+      // could get past them to the rest of that row either. Nor to the end seat
+      // against a wall, which is the far end of the row from the only way in.
+      if (!agent.sidles && seat.row && !this.atOpenEnd(agent, i)) continue
       if (!agent.sidles && seat.row && !this.rowStaysOpen(agent, i)) continue
       if (!this.seatingSpot(agent.radius, seat.position)) continue
       // Prefer near seats, but jitter so a table fills plausibly rather than in index order.
@@ -1260,8 +1280,8 @@ export class Simulation {
     if (cached) return cached
     const ideal = queueSlotPosition(record, index)
     let resolved = ideal
-    if (!this.onQueueFloor(ideal)) {
-      const cell = nearestFreeCell(this.world.grid, this.world.queueBlocked, ideal)
+    if (!this.onQueueFloor(record, ideal)) {
+      const cell = nearestFreeCell(this.world.grid, record.queueBlocked, ideal)
       if (cell >= 0) {
         const c = cell % this.world.grid.cols
         const r = (cell / this.world.grid.cols) | 0
@@ -1346,27 +1366,33 @@ export class Simulation {
    * Move somebody's spot in a destination they are already standing in to one
    * they can walk to in a straight line.
    *
-   * Inside its own goal a destination's field is flat, so it cannot lead
-   * anybody round anything. A spot drawn from anywhere on the banquet's dining
+   * Inside its own goal a destination's field has nowhere left to lead: flat
+   * where the goal is wide, and pointing back at the nearest of its cells where
+   * it narrows beside furniture or an edge. It leads nobody round anything, and
+   * nobody to their spot. A spot drawn from anywhere on the banquet's dining
    * floor was usually behind a table: the guests sent to one walked into the
    * table, stood there, and in the end gave up and left. Inside is tested on
    * the zone itself, because at its edge the field still reads a faint slope
    * from the floor outside, and a guest there followed it nowhere.
+   *
+   * Says whether they are standing in it with a straight walk to their spot,
+   * which is then the way there however far it is.
    */
-  private retargetInside(agent: Agent): void {
+  private retargetInside(agent: Agent): boolean {
     const target = agent.exactTarget
-    if (agent.state !== 'walking' || !target || !agent.fieldTarget) return
+    if (agent.state !== 'walking' || !target || !agent.fieldTarget) return false
     const destination = this.world.waypoints.find((w) => w.id === agent.fieldTarget)
-    if (!destination || !pointInPolygon(agent, destination.polygon)) return
-    if (this.lineIsWalkable(agent, target)) return
+    if (!destination || !pointInPolygon(agent, destination.polygon)) return false
+    if (this.lineIsWalkable(agent, target)) return true
     const rng = this.rng.branch(`retarget:${agent.id}:${Math.round(this.time * 10)}`)
     for (let attempt = 0; attempt < 12; attempt++) {
       const spot = samplePointInDestination(this.world, destination, () => rng.next())
       if (this.lineIsWalkable(agent, spot)) {
         agent.exactTarget = spot
-        return
+        return true
       }
     }
+    return false
   }
 
   /** Is this point somewhere the navigation grid never solved a route for? */
@@ -1412,23 +1438,23 @@ export class Simulation {
     for (let turn = 0; turn <= PLACE_TURNS; turn++) {
       for (const side of turn === 0 || turn === PLACE_TURNS ? [1] : [1, -1]) {
         const place = placeAt(heading + (side * turn * Math.PI) / PLACE_TURNS)
-        if (this.queueFloorBetween(ahead, place)) return place
+        if (this.queueFloorBetween(record, ahead, place)) return place
       }
     }
     // Hemmed in, or the person ahead has been shoved off the floor: the nearest
     // floor to where the place would be. The line's straight extension is
     // somewhere else entirely by now.
-    const { grid, queueBlocked } = this.world
-    const cell = nearestFreeCell(grid, queueBlocked, placeAt(heading))
+    const { grid } = this.world
+    const cell = nearestFreeCell(grid, record.queueBlocked, placeAt(heading))
     if (cell < 0) return this.slotPosition(queue, slotIndex)
     return cellCenter(grid, cell % grid.cols, (cell / grid.cols) | 0)
   }
 
-  private onQueueFloor(p: Vec2): boolean {
-    const { grid, queueBlocked } = this.world
+  private onQueueFloor(record: QueueRecord, p: Vec2): boolean {
+    const { grid } = this.world
     const { col, row } = worldToCell(grid, p.x, p.y)
     if (col < 0 || row < 0 || col >= grid.cols || row >= grid.rows) return false
-    return queueBlocked[gridIndex(grid, col, row)] === 0
+    return record.queueBlocked[gridIndex(grid, col, row)] === 0
   }
 
   /**
@@ -1437,12 +1463,17 @@ export class Simulation {
    * before it. Where the first stands is not checked: they may have been shoved
    * off it, and that is no reason to send the person behind anywhere else.
    */
-  private queueFloorBetween(from: Vec2, to: Vec2): boolean {
+  private queueFloorBetween(record: QueueRecord, from: Vec2, to: Vec2): boolean {
     const length = distance(from, to)
     const steps = Math.max(1, Math.ceil(length / this.world.grid.cellSize))
     for (let i = 1; i <= steps; i++) {
       const t = i / steps
-      if (!this.onQueueFloor({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }))
+      if (
+        !this.onQueueFloor(record, {
+          x: from.x + (to.x - from.x) * t,
+          y: from.y + (to.y - from.y) * t,
+        })
+      )
         return false
     }
     return true
@@ -1898,12 +1929,15 @@ export class Simulation {
             const beside = this.besideQueueLine(queue.record, agent)
             const backArc = Math.min(slot * queue.record.spacing, queue.record.lineLength)
             const pastTheBack = beside !== null && beside.arc < backArc - queue.record.spacing
-            // Near is not enough from outside the front door, or from among the
-            // tables: joined there, a guest's place was out there too, and the
-            // place of everybody who came after them.
+            // Near is not enough from outside the front door, from among the
+            // tables or from beyond a wall: joined there, a guest's place was out
+            // there too, and the place of everybody who came after them.
             if (
               !pastTheBack &&
-              (inLine || (distance(here, target) <= reach && this.onQueueFloor(here)))
+              (inLine ||
+                (distance(here, target) <= reach &&
+                  this.onQueueFloor(queue.record, here) &&
+                  this.queueFloorBetween(queue.record, here, target)))
             ) {
               this.joinQueue(agent, queue)
             } else {
@@ -1962,6 +1996,7 @@ export class Simulation {
           if (!arrived) break
           if (agent.seatIndex >= 0) {
             agent.state = 'seated'
+            this.unseated.delete(`${agent.id}:${agent.stepIndex}`)
             agent.along = null
             agent.vx = 0
             agent.vy = 0
@@ -2238,7 +2273,11 @@ export class Simulation {
     let dirY = 0
     let speed = agent.preferredSpeed
 
-    this.retargetInside(agent)
+    // Standing in their destination, its field only leads back to the nearest
+    // of its open cells, so it is no guide to their spot however far that is. A
+    // guest in the corner of the gallery's back room, 5.3 m from theirs, stepped
+    // to and fro on one spot by it until they gave up and left.
+    const straight = this.retargetInside(agent)
     const target = agent.exactTarget
     const toTarget = target ? distance({ x: agent.x, y: agent.y }, target) : Infinity
 
@@ -2247,7 +2286,10 @@ export class Simulation {
       const d = normalize({ x: pass.x - agent.x, y: pass.y - agent.y })
       dirX = d.x
       dirY = d.y
-    } else if (target && toTarget <= DIRECT_RANGE && this.lineIsWalkable(agent, target)) {
+    } else if (
+      target &&
+      (straight || (toTarget <= DIRECT_RANGE && this.lineIsWalkable(agent, target)))
+    ) {
       const d = normalize({ x: target.x - agent.x, y: target.y - agent.y })
       dirX = d.x
       dirY = d.y
@@ -2315,15 +2357,16 @@ export class Simulation {
     // not their own body, so the lookahead moves the sample and their own
     // contribution comes off it. Looking through a wall would read the empty
     // floor on the far side as free space, so a blocked sight line falls back to
-    // where the walker is standing.
-    let senseX = agent.x + dirX * PACE_LOOKAHEAD
-    let senseY = agent.y + dirY * PACE_LOOKAHEAD
-    let senseDistance = PACE_LOOKAHEAD
-    if (sampleField(this.world.grid, this.world.clearance, senseX, senseY, 0) < agent.radius) {
-      senseX = agent.x
-      senseY = agent.y
-      senseDistance = 0
-    }
+    // where the walker is standing. Only a blocked one: a read-ahead point that
+    // merely came near a wall also fell back, for everybody angling into a
+    // doorway past a jamb, and read them a ring round their own spot in the
+    // densest part of the jam.
+    const aheadX = agent.x + dirX * PACE_LOOKAHEAD
+    const aheadY = agent.y + dirY * PACE_LOOKAHEAD
+    const seen = this.freeFraction(agent.x, agent.y, aheadX, aheadY) === 1
+    const senseX = seen ? aheadX : agent.x
+    const senseY = seen ? aheadY : agent.y
+    const senseDistance = seen ? PACE_LOOKAHEAD : 0
     const sampled = sampleField(this.world.grid, this.density.values, senseX, senseY, 0)
     speed *= speedFromDensity(this.density.othersAt(senseX, senseY, sampled, senseDistance))
 
@@ -2902,9 +2945,9 @@ export class Simulation {
       name: queue.record.name,
       servers: queue.servers.length,
       served: queue.served,
-      meanWait: queue.served > 0 ? queue.totalWait / queue.served : 0,
+      meanWait: queue.served > 0 ? queue.totalWait / queue.served : null,
       maxWait: queue.maxWait,
-      meanService: queue.served > 0 ? queue.totalService / queue.served : 0,
+      meanService: queue.served > 0 ? queue.totalService / queue.served : null,
       utilisation: this.time > 0 ? Math.min(1, queue.busyTime / this.time) : 0,
       maxQueue: queue.maxQueue,
       unserved: queue.waiting.length,
@@ -2915,10 +2958,10 @@ export class Simulation {
   summary(): RunSummary {
     const finished = this.journeys.filter((j) => j.totalTime !== null)
     const times = finished.map((j) => j.totalTime as number).sort((a, b) => a - b)
-    const mean = times.length ? times.reduce((s, t) => s + t, 0) / times.length : 0
+    const mean = times.length ? times.reduce((s, t) => s + t, 0) / times.length : null
     const p95 = times.length
       ? times[Math.min(times.length - 1, Math.floor(times.length * 0.95))]
-      : 0
+      : null
     const queueTimes = this.journeys.map((j) => j.queueTime)
     const services = this.serviceSummaries()
     const totalLos = Array.from(this.losSeconds).reduce((s, v) => s + v, 0) || 1
@@ -2927,17 +2970,26 @@ export class Simulation {
       losShare[band.level] = this.losSeconds[index] / totalLos
     })
 
-    const clearanceIndex = Math.floor(finished.length * 0.95)
-    const clearance = finished.length
-      ? ([...finished].sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0))[
-          Math.min(finished.length - 1, clearanceIndex)
-        ].finishedAt ?? 0)
-      : 0
+    // Counted against everybody in the run, not against those who got out: it
+    // was the 95th percentile of the finishers, so a run that stranded half its
+    // crowd still reported a time by which 95% of people had left.
+    const need = Math.ceil(this.agents.length * 0.95)
+    const leftAt = finished.map((j) => j.finishedAt as number).sort((a, b) => a - b)
+    const clearance = need > 0 && leftAt.length >= need ? leftAt[need - 1] : null
+    const served = services.reduce((s, v) => s + v.served, 0)
 
     const warnings = [...this.warnings]
     if (this.abandoned > 0) {
       warnings.push(
         `${this.abandoned} ${this.abandoned === 1 ? 'person' : 'people'} could not reach somewhere on their route and left instead. Check for a destination that is blocked or hard to get to.`,
+      )
+    }
+    // Going without a seat is not what the plan asked of them. Unreported, the
+    // banquet left 61 of its guests unseated through the meal and said nothing.
+    const standing = new Set([...this.unseated].map((key) => key.split(':')[0])).size
+    if (standing > 0) {
+      warnings.push(
+        `${standing} ${standing === 1 ? 'person' : 'people'} found no free seat they could take and went on without sitting.`,
       )
     }
     if (this.live.length > 0 && this.time >= this.scenario.durationS) {
@@ -2958,17 +3010,12 @@ export class Simulation {
       completed: this.completed,
       meanJourney: mean,
       p95Journey: p95,
-      meanWait: services.length
-        ? services.reduce((s, v) => s + v.meanWait * v.served, 0) /
-          Math.max(
-            1,
-            services.reduce((s, v) => s + v.served, 0),
-          )
-        : 0,
+      meanWait:
+        served > 0 ? services.reduce((s, v) => s + (v.meanWait ?? 0) * v.served, 0) / served : null,
       maxWait: services.reduce((s, v) => Math.max(s, v.maxWait), 0),
       meanQueueTime: queueTimes.length
         ? queueTimes.reduce((s, t) => s + t, 0) / queueTimes.length
-        : 0,
+        : null,
       clearanceTime: clearance,
       walkableArea: this.world.stats.walkableArea,
       peakOccupancy: this.peakOccupancy,

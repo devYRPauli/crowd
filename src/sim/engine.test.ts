@@ -97,6 +97,28 @@ describe('Simulation', () => {
     expect(summary.meanJourney).toBeLessThan(45)
   })
 
+  it('does not report a clearance time for a crowd that has not cleared', () => {
+    const near = zone('entry', 36, 0.5, 37.5, 1.5)
+    const far = zone('entry', 0.4, 0.5, 1.4, 1.5)
+    const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
+    const base = scenarioFor(near.id, 10, 1.0)
+    const scenario: Scenario = {
+      ...base,
+      durationS: 15,
+      populations: [base.populations[0], { ...base.populations[0], id: 'far', entryIds: [far.id] }],
+    }
+    const plan = { ...corridorPlan(near, exit), zones: [near, far, exit] }
+    const summary = runToCompletion(new Simulation(plan, scenario), 20)
+
+    // Half the corridor is out and half is 38 m from the door. The 95th
+    // percentile of those who left is a number; the time by which 95% of the
+    // people had left does not exist yet.
+    expect(summary.completed).toBe(10)
+    expect(summary.totalPeople).toBe(20)
+    expect(summary.meanJourney).not.toBeNull()
+    expect(summary.clearanceTime).toBeNull()
+  })
+
   it('never lets anyone end up inside a wall', () => {
     const entry = zone('entry', 0.4, 0.5, 1.4, 1.5)
     const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
@@ -195,6 +217,26 @@ describe('Simulation', () => {
     // Twelve people, one server, two seconds each: the last waits about 22 s.
     expect(summary.services[0].maxWait).toBeGreaterThan(10)
     expect(summary.completed).toBe(12)
+  })
+
+  it('walks a gap narrower than a body between keep-clear bands at walking pace', () => {
+    const journey = (banded: boolean): number => {
+      const b = new PlanBuilder()
+      b.room(0, 0, 20, 6)
+      if (banded) {
+        b.zone('keep-clear', 3, 0, 17, 2.85, 'South band', { cost: 5 })
+        b.zone('keep-clear', 3, 3.15, 17, 6, 'North band', { cost: 5 })
+      }
+      const entry = b.zone('entry', 0.5, 2.5, 1.5, 3.5, 'In')
+      b.zone('exit', 18.5, 2.5, 19.5, 3.5, 'Out')
+      const sim = new Simulation(b.build(), scenarioFor(entry.id, 1, 1.3), { cellSize: 0.2 })
+      const summary = runToCompletion(sim, 120)
+      expect(summary.completed).toBe(1)
+      return summary.meanJourney as number
+    }
+    // Priced as drawn, the gap was a V in the field a cell wide, and the walker
+    // zigzagged down it: 32.7 s for a walk of 13.4 s.
+    expect(journey(true)).toBeLessThan(journey(false) * 1.1)
   })
 
   it('keeps serving when the queue outgrows the line drawn for it', () => {
@@ -493,6 +535,76 @@ describe('Simulation', () => {
     }
   }, 120_000)
 
+  it('does not let a queue grow out into the yard of an L-shaped building', () => {
+    // Inside the building meant inside the walls' bounding box, so the yard in
+    // the crook of an L was floor a queue could wait on. A newcomer arriving
+    // there stood within reach of the back of the line through the wall and
+    // joined it, and every place behind them was built out in the yard too.
+    const b = new PlanBuilder()
+    b.wall({ x: 0, y: 0 }, { x: 14, y: 0 })
+    b.wall({ x: 14, y: 0 }, { x: 14, y: 6 })
+    const yardWall = b.wall({ x: 14, y: 6 }, { x: 5, y: 6 })
+    b.wall({ x: 5, y: 6 }, { x: 5, y: 12 })
+    b.wall({ x: 5, y: 12 }, { x: 0, y: 12 })
+    b.wall({ x: 0, y: 12 }, { x: 0, y: 0 })
+    b.door(yardWall, 7.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    const bar = b.service(
+      'Bar',
+      12.6,
+      1.2,
+      Math.PI,
+      1,
+      { kind: 'constant', mean: 12 },
+      {
+        width: 2.4,
+        depth: 0.7,
+        queue: [
+          { x: 12.6, y: 2.4 },
+          { x: 12.6, y: 5.0 },
+        ],
+      },
+    )
+    const yard = b.zone('entry', 11.8, 6.5, 13.4, 7.2, 'Yard')
+    const plan = b.build()
+    const inYard = (p: { x: number; y: number }) => p.x > 5 && p.y > 6
+
+    for (let seed = 1; seed <= 3; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 1200,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 40,
+            entryIds: [yard.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 60 },
+            itinerary: [
+              { id: 'step-bar', kind: 'service', targetId: bar.id },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const sim = new Simulation(plan, scenario)
+      const sentToYard = new Set<number>()
+      while (!sim.isFinished && sim.currentTime < 1200) {
+        sim.step(0.1)
+        const { agents, count } = sim.snapshot()
+        for (let i = 0; i < count; i++) {
+          const person = sim.inspect(agents[i * AGENT_STRIDE + AGENT_FIELD.id])
+          if (person?.state === 'queuing' && person.exactTarget && inYard(person.exactTarget)) {
+            sentToYard.add(person.id)
+          }
+        }
+      }
+      expect({ seed, yard: sentToYard.size }).toEqual({ seed, yard: 0 })
+      const summary = sim.summary()
+      expect(summary.services[0].served).toBe(40)
+      expect(summary.warnings).toEqual([])
+    }
+  }, 120_000)
+
   it('does not solve a new route every time the person ahead in an overflow moves', () => {
     // Somebody past the drawn line is routed to the person ahead of them. The
     // route was re-solved whenever that person crossed into another cell, so a
@@ -520,6 +632,49 @@ describe('Simulation', () => {
       spy.mockRestore()
     }
     expect(solved).toBeLessThan(80)
+  }, 60_000)
+
+  it('walks somebody in a destination to their spot however far across it that is', () => {
+    // Inside a destination its field leads only back to the nearest of its
+    // open cells. In the corner between a partition and a table, further from
+    // their spot than the range people steered straight in, a guest stepped to
+    // and fro on one spot by it until they gave up and left.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 14, 12)
+    b.door(room.south, 2.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.wall({ x: 4, y: 3 }, { x: 4, y: 11.8 }, { kind: 'partition', thickness: 0.2, height: 3 })
+    for (const x of [6, 7.4, 8.8]) b.place('table-poseur', x, 4.6)
+    const back = b.zone('waypoint', 5, 4, 11.4, 10, 'Back')
+    const entry = b.zone('entry', 1.5, 0.3, 3.5, 1.3, 'In')
+    const plan = b.build()
+
+    for (let seed = 1; seed <= 4; seed++) {
+      const scenario: Scenario = {
+        ...createScenario(),
+        seed,
+        durationS: 900,
+        populations: [
+          {
+            ...createPopulation(0),
+            count: 30,
+            entryIds: [entry.id],
+            arrival: { kind: 'uniform', startS: 0, windowS: 120 },
+            itinerary: [
+              {
+                id: 'step-look',
+                kind: 'dwell',
+                targetId: back.id,
+                duration: { kind: 'constant', mean: 60 },
+              },
+              { id: 'step-exit', kind: 'exit' },
+            ],
+          },
+        ],
+      }
+      const summary = runToCompletion(new Simulation(plan, scenario), 900)
+      expect(summary.completed).toBe(30)
+      expect(summary.warnings).toEqual([])
+    }
   }, 60_000)
 
   it('brings each guest at a table round to a place of their own', () => {
@@ -599,11 +754,14 @@ describe('Simulation', () => {
     // sitting down, left half a metre between two seated rows too tight to
     // walk along. And whoever sat beside a wheelchair user could never reach
     // the middle of their own seat, and stood a fifth of a metre off it.
+    // An aisle at both ends: with the block against a wall, a wheelchair user
+    // has no seat they may take, the wall seat being out of reach and the open
+    // end seat shutting the rest of its row.
     const b = new PlanBuilder()
     const room = b.room(0, 0, 6, 8)
     b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
-    b.seatingBlock(1.7, 3, 2, 3.3)
-    const seating = b.zone('seating', 0, 2.4, 3.4, 4.9, 'Rows')
+    b.seatingBlock(2.4, 3, 2, 3.3)
+    const seating = b.zone('seating', 0, 2.4, 4.4, 4.9, 'Rows')
     const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
     const plan = b.build()
     const rows = plan.furniture.filter((f) => f.catalogId === 'seat-row').map((f) => f.position.y)
@@ -714,6 +872,48 @@ describe('Simulation', () => {
       expect(runToCompletion(sim, 900).warnings).toEqual([])
     }
   }, 120_000)
+
+  it('says how many people found no seat and went on without one', () => {
+    // Sent to sit with every seat taken, people stand on the floor for the
+    // time they would have sat. The banquet stood 61 of its guests through the
+    // meal like that, and the run did not say so.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(1.7, 3, 3, 3.3)
+    const seating = b.zone('seating', 0, 2.4, 3.4, 5.9, 'Rows')
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const plan = b.build()
+    const population = createPopulation(0)
+    const scenario: Scenario = {
+      ...createScenario(),
+      seed: 1,
+      durationS: 900,
+      populations: [
+        {
+          ...population,
+          count: 21,
+          entryIds: [entry.id],
+          arrival: { kind: 'uniform', startS: 0, windowS: 60 },
+          profileMix: population.profileMix.filter(
+            (entry) => entry.profileId !== 'wheelchair' && entry.profileId !== 'luggage',
+          ),
+          itinerary: [
+            {
+              id: 'step-seat',
+              kind: 'seat',
+              targetId: seating.id,
+              duration: { kind: 'constant', mean: 300 },
+            },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    expect(runToCompletion(new Simulation(plan, scenario), 900).warnings).toEqual([
+      '3 people found no free seat they could take and went on without sitting.',
+    ])
+  }, 60_000)
 
   it('reaches and leaves a seat in a row from the end of the row', () => {
     // A row is not an obstacle, and on the grid the passage in front of a seat
@@ -875,9 +1075,10 @@ describe('Simulation', () => {
 
   it('does not take a seated audience for a queue that will move up', () => {
     // A wheelchair cannot turn side-on, so it cannot get along a row past
-    // people already sitting in it. Held at the end of the row it is not
-    // closing on its seat, and the seated around it once excused that as a
-    // crowd it was waiting behind, so it was never re-planned.
+    // people already sitting in it. It is given no seat in the middle of one
+    // and heads for the floor over the row instead. Held at the end of the row
+    // it is not closing on that spot, and the seated around it once excused
+    // that as a crowd it was waiting behind, so it was never re-planned.
     const b = new PlanBuilder()
     const room = b.room(0, 0, 6, 8)
     b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
@@ -928,6 +1129,96 @@ describe('Simulation', () => {
     const inspected = sim.inspect(wheelchair)
     expect(inspected?.state).toBe('walking')
     expect(inspected?.replanCount).toBeGreaterThan(0)
+  }, 60_000)
+
+  it('does not send a wheelchair along a row to the seat against the wall', () => {
+    // The end seat against a wall is an end seat, and a wheelchair was handed
+    // it and sent in by the open end, along the whole row past everybody
+    // already sitting in it.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(1.7, 3, 3, 3.3)
+    const zones = [
+      b.zone('seating', 1.2, 3.4, 3.4, 4.4, 'Middle row, aisle side'),
+      b.zone('seating', 0, 3.4, 0.6, 4.4, 'Middle row, wall seat'),
+    ]
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const population = createPopulation(0)
+    const group = (index: number, count: number, profileId: string, startS: number) => ({
+      ...population,
+      id: `pop-${index}`,
+      count,
+      entryIds: [entry.id],
+      arrival: { kind: 'uniform' as const, startS, windowS: 30 },
+      profileMix: [{ profileId, weight: 1 }],
+      itinerary: [
+        {
+          id: `step-seat-${index}`,
+          kind: 'seat' as const,
+          targetId: zones[index].id,
+          duration: { kind: 'constant' as const, mean: 600 },
+        },
+        { id: `step-exit-${index}`, kind: 'exit' as const },
+      ],
+    })
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 900,
+      populations: [group(0, 4, 'adult', 0), group(1, 1, 'wheelchair', 45)],
+    }
+    const sim = new Simulation(b.build(), scenario)
+    let wheelchair = -1
+    while (wheelchair < 0 && sim.currentTime < 120) {
+      sim.step(0.1)
+      const { agents, count } = sim.snapshot()
+      for (let i = 0; i < count; i++) {
+        const base = i * AGENT_STRIDE
+        if (agents[base + AGENT_FIELD.population] === 1) wheelchair = agents[base + AGENT_FIELD.id]
+      }
+    }
+    // Sent to the wall seat, it was sent to the far end of the row, x 3.65.
+    expect(sim.inspect(wheelchair)?.exactTarget?.x).toBeLessThan(0.6)
+    expect(runToCompletion(sim, 900).warnings).toContain(
+      '1 person found no free seat they could take and went on without sitting.',
+    )
+  }, 60_000)
+
+  it('seats a wheelchair in a row of one seat with a wall at one side', () => {
+    // Both of its ends are the same distance from the seat, and one rule took
+    // the open end as the way in while the other took the wall end as the far
+    // end to keep open, so the seat was refused.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 6, 8)
+    b.door(room.south, 4.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(0.35, 3, 1, 0.6)
+    const seating = b.zone('seating', 0, 2.4, 1.2, 3.4, 'Lone seat')
+    const entry = b.zone('entry', 3.8, 0.3, 5.5, 1.3, 'In')
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 900,
+      populations: [
+        {
+          ...createPopulation(0),
+          count: 1,
+          entryIds: [entry.id],
+          arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
+          profileMix: [{ profileId: 'wheelchair', weight: 1 }],
+          itinerary: [
+            {
+              id: 'step-seat',
+              kind: 'seat',
+              targetId: seating.id,
+              duration: { kind: 'constant', mean: 30 },
+            },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    const summary = runToCompletion(new Simulation(b.build(), scenario), 900)
+    expect(summary.completed).toBe(1)
+    expect(summary.warnings.join(' ')).not.toMatch(/no free seat/)
   }, 60_000)
 
   it('seats people on sofas, armchairs and benches, at the front of each', () => {

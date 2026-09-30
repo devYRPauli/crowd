@@ -175,7 +175,7 @@ describe('choice of exit', () => {
    * the geometry, and the *single*-door run — which is the baseline this is
    * measured against — got 20% faster for it, from 146.8 s to 117.5 s. The old
    * 32% was partly a coarse grid under-serving one door and flattering the
-   * second. It reads 22% now. 10% is a materiality floor, not a calibration: what
+   * second. It reads 20% now. 10% is a materiality floor, not a calibration: what
    * the feature is worth is the number printed above, and the assertion exists to
    * catch it going to zero.
    */

@@ -9,7 +9,7 @@
  */
 
 import type { Vec2 } from '../math/vec2'
-import { add, angleOf, distance, fromAngle, normalize, perp, scale, sub } from '../math/vec2'
+import { add, angleOf, distance, dot, fromAngle, normalize, perp, scale, sub } from '../math/vec2'
 import type { Bounds, Polygon } from '../math/geometry'
 import { EMPTY_BOUNDS, boundsOf, circlePolygon, rectPolygon, unionBounds } from '../math/geometry'
 import type { FurnitureItem, Opening, Plan, ServicePoint, Wall } from './types'
@@ -218,8 +218,11 @@ export interface SeatRowAccess {
   ends: readonly [Vec2, Vec2]
   /** The point on that passage in front of this seat. */
   front: Vec2
-  /** Whether this is a seat at one end of the row, next to the aisle. */
-  atEnd: boolean
+  /**
+   * Which of `ends` this seat is next to: none in the middle of a row, the
+   * nearer one at an end, and both in a row of one seat.
+   */
+  ownEnds: readonly (0 | 1)[]
 }
 
 /**
@@ -272,7 +275,12 @@ export const planSeats = (plan: Plan): WorldSeat[] => {
               row: {
                 ends,
                 front: toWorld(slot.x, passage),
-                atEnd: index === 0 || index === slots.length - 1,
+                ownEnds:
+                  slots.length === 1
+                    ? [0, 1]
+                    : index === 0 || index === slots.length - 1
+                      ? [distance(position, ends[0]) <= distance(position, ends[1]) ? 0 : 1]
+                      : [],
               },
             }
           : {}),
@@ -286,8 +294,17 @@ export const planSeats = (plan: Plan): WorldSeat[] => {
 export const servicePolygon = (point: ServicePoint, inflate = 0): Polygon =>
   rectPolygon(point.position, point.width + inflate * 2, point.depth + inflate * 2, point.rotation)
 
-/** Unit vector pointing away from the counter face, towards the people served. */
-export const serviceFacing = (point: ServicePoint): Vec2 => fromAngle(point.rotation - Math.PI / 2)
+/**
+ * Unit vector pointing away from the counter face, towards the people served.
+ * A drawn queue says which side that is. Every template counter was turned half
+ * a turn from its own queue, and whoever reached the front walked round the end
+ * of the counter to be served from behind it, among the staff's own markers.
+ */
+export const serviceFacing = (point: ServicePoint): Vec2 => {
+  const out = fromAngle(point.rotation - Math.PI / 2)
+  const head = point.queue && point.queue.length >= 2 ? point.queue[0] : null
+  return head && dot(sub(head, point.position), out) < 0 ? scale(out, -1) : out
+}
 
 const serverOffsets = (point: ServicePoint): Vec2[] => {
   const along = fromAngle(point.rotation)

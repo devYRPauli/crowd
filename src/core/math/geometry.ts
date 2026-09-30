@@ -193,6 +193,20 @@ export const segmentsIntersect = (p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2): boole
   return false
 }
 
+/**
+ * True when two simple polygons share any area or boundary. Either may be
+ * concave, which the separating-axis test below cannot take.
+ */
+export const polygonsOverlap = (a: readonly Vec2[], b: readonly Vec2[]): boolean => {
+  if (a.some((p) => pointInPolygon(p, b)) || b.some((p) => pointInPolygon(p, a))) return true
+  for (let i = 0, j = a.length - 1; i < a.length; j = i++) {
+    for (let k = 0, l = b.length - 1; k < b.length; l = k++) {
+      if (segmentsIntersect(a[j], a[i], b[l], b[k])) return true
+    }
+  }
+  return false
+}
+
 export interface RayHit {
   t: number
   point: Vec2

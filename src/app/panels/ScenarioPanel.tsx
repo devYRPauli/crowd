@@ -452,7 +452,11 @@ export const ScenarioPanel = () => {
           className="btn"
           onClick={() =>
             apply(
-              (doc) => addPopulation(doc, createPopulation(doc.scenario.populations.length)),
+              (doc) =>
+                addPopulation(
+                  doc,
+                  createPopulation(doc.scenario.populations.length, doc.scenario.profiles),
+                ),
               'Add group',
             )
           }

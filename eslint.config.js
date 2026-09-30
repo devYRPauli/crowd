@@ -48,6 +48,26 @@ const platformMath = {
   ],
 }
 
+const nondeterministic =
+  'The engine and the library are deterministic given the seed. Draw from a seeded Rng.'
+
+// On top of platformMath, not instead of it: a flat config replaces a rule's
+// options wholesale, so the two lists have to be one list here.
+const deterministic = {
+  'no-restricted-properties': [
+    ...platformMath['no-restricted-properties'],
+    { object: 'Math', property: 'random', message: nondeterministic },
+    { object: 'Date', property: 'now', message: nondeterministic },
+  ],
+  'no-restricted-syntax': [
+    ...platformMath['no-restricted-syntax'],
+    {
+      selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+      message: nondeterministic,
+    },
+  ],
+}
+
 export default tseslint.config(
   { ignores: ['dist', 'node_modules', 'coverage', 'out'] },
   js.configs.recommended,
@@ -78,13 +98,18 @@ export default tseslint.config(
     // What the simulation computes has to be the same bits on every machine,
     // and these are not: see src/core/math/libm.ts. The validation harness is
     // held to it too, because its figures are published.
-    files: ['src/core/**/*.ts', 'src/sim/**/*.ts', 'src/library/**/*.ts'],
+    files: ['src/core/**/*.ts'],
     ignores: ['**/*.test.ts', 'src/core/math/libm.ts'],
     rules: platformMath,
   },
   {
+    files: ['src/sim/**/*.ts', 'src/library/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: deterministic,
+  },
+  {
     files: ['src/sim/validation/**/*.test.ts'],
-    rules: platformMath,
+    rules: deterministic,
   },
   {
     files: ['**/*.test.ts'],

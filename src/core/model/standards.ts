@@ -19,8 +19,10 @@
  * are enforced nowhere.
  */
 
-const inches = (value: number): number => Math.round(value * 25.4) / 1000
-const feet = (value: number, extraInches = 0): number => inches(value * 12 + extraInches)
+/** Inches, in metres, to the millimetre. */
+export const inches = (value: number): number => Math.round(value * 25.4) / 1000
+/** Feet and inches, in metres, the way a drawing carries them. */
+export const feet = (value: number, extraInches = 0): number => inches(value * 12 + extraInches)
 
 export interface StandardSize {
   /** Metres — what the document stores. */

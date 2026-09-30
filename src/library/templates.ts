@@ -10,14 +10,14 @@
  */
 
 import type { CrowdDocument, Population, Scenario } from '../core/model/types'
-import { SCHEMA_VERSION } from '../core/model/types'
 import {
   AGENT_PROFILES,
+  createDocument,
   DEFAULT_PROFILE_MIX,
-  DEFAULT_SETTINGS,
   POPULATION_COLORS,
 } from '../core/model/defaults'
-import { newDocumentId, newId } from '../core/model/ids'
+import { newId } from '../core/model/ids'
+import { feet, inches } from '../core/model/standards'
 import { PlanBuilder, step } from './planBuilder'
 
 export interface Template {
@@ -33,19 +33,11 @@ const makeDocument = (
   name: string,
   plan: ReturnType<PlanBuilder['build']>,
   scenario: Omit<Scenario, 'profiles'>,
-): CrowdDocument => {
-  const now = new Date().toISOString()
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    id: newDocumentId(),
-    name,
-    createdAt: now,
-    updatedAt: now,
-    settings: { ...DEFAULT_SETTINGS },
-    plan,
-    scenario: { ...scenario, profiles: AGENT_PROFILES.map((p) => ({ ...p })) },
-  }
-}
+): CrowdDocument => ({
+  ...createDocument(name),
+  plan,
+  scenario: { ...scenario, profiles: AGENT_PROFILES.map((p) => ({ ...p })) },
+})
 
 const population = (
   overrides: Partial<Population> & Pick<Population, 'name' | 'count' | 'entryIds' | 'itinerary'>,
@@ -56,16 +48,6 @@ const population = (
   profileMix: DEFAULT_PROFILE_MIX.map((entry) => ({ ...entry })),
   ...overrides,
 })
-
-/**
- * Feet, in metres.
- *
- * US buildings are laid out in round feet and ordered in even inches, so the
- * dimensions below are written the way a drawing would carry them and converted
- * once. The document stays metric; the imperial display setting reads them back
- * as what they are called.
- */
-const ft = (feet: number, inches = 0): number => Math.round((feet * 12 + inches) * 25.4) / 1000
 
 const baseRouting: Scenario['routing'] = {
   adaptive: true,
@@ -78,11 +60,11 @@ const baseRouting: Scenario['routing'] = {
 
 const coffeeBar = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, ft(46), ft(33), { height: ft(10) })
-  const street = b.door(room.south, 2.0, ft(6), 'door', 'both')
-  b.window(room.west, 3, ft(8))
-  b.window(room.west, 7, ft(8))
-  b.window(room.north, 5, ft(8))
+  const room = b.room(0, 0, feet(46), feet(33), { height: feet(10) })
+  const street = b.door(room.south, 2.0, feet(6), 'door', 'both')
+  b.window(room.west, 3, feet(8))
+  b.window(room.west, 7, feet(8))
+  b.window(room.north, 5, feet(8))
 
   const counter = b.service(
     'Coffee bar',
@@ -153,17 +135,17 @@ const coffeeBar = (): CrowdDocument => {
 
 const conference = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, ft(99), ft(86), { height: ft(14) })
-  const mainDoor = b.door(hall.south, 4, ft(8), 'door', 'both')
-  const sideDoor = b.door(hall.south, 12, ft(8), 'door', 'both')
+  const hall = b.room(0, 0, feet(99), feet(86), { height: feet(14) })
+  const mainDoor = b.door(hall.south, 4, feet(8), 'door', 'both')
+  const sideDoor = b.door(hall.south, 12, feet(8), 'door', 'both')
   // Partition between the foyer and the session room.
   const partition = b.wall(
     { x: 0, y: 12 },
     { x: 30, y: 12 },
-    { kind: 'partition', thickness: 0.15 },
+    { kind: 'partition', thickness: inches(4.5) },
   )
-  b.door(partition, 8, ft(8))
-  b.door(partition, 22, ft(8))
+  b.door(partition, 8, feet(8))
+  b.door(partition, 22, feet(8))
 
   const desks = [6, 11, 16, 21].map((x, index) =>
     b.service(
@@ -199,7 +181,7 @@ const conference = (): CrowdDocument => {
   // 16 ft wide, 16:9, and it has to fit under a 14 ft ceiling: this one used
   // to be 3.4 m tall in a 3.2 m room.
   b.place('projector-screen', 15, 24.9, 0, {
-    size: { width: ft(16), depth: 0.2, height: ft(9) },
+    size: { width: feet(16), depth: 0.2, height: feet(9) },
   })
   b.place('lectern', 19.5, 23.1)
   // Unturned, a row faces north, at the stage. Turned half round, the
@@ -260,22 +242,22 @@ const conference = (): CrowdDocument => {
 
 const gallery = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, ft(79), ft(53), { height: ft(12) })
-  const frontDoor = b.door(room.south, 3, ft(8), 'door', 'both')
-  b.door(room.east, 8, ft(5))
+  const room = b.room(0, 0, feet(79), feet(53), { height: feet(12) })
+  const frontDoor = b.door(room.south, 3, feet(8), 'door', 'both')
+  b.door(room.east, 8, feet(5))
   // Interior partitions that make a route rather than one big box.
   const p1 = b.wall(
     { x: 8, y: 0.2 },
     { x: 8, y: 9 },
-    { kind: 'partition', thickness: 0.2, height: 3 },
+    { kind: 'partition', thickness: inches(8), height: feet(10) },
   )
   const p2 = b.wall(
     { x: 16, y: 7 },
     { x: 16, y: 15.8 },
-    { kind: 'partition', thickness: 0.2, height: 3 },
+    { kind: 'partition', thickness: inches(8), height: feet(10) },
   )
-  b.door(p1, 5.5, ft(7), 'opening')
-  b.door(p2, 4.0, ft(7), 'opening')
+  b.door(p1, 5.5, feet(7), 'opening')
+  b.door(p2, 4.0, feet(7), 'opening')
 
   for (const [x, y, rot] of [
     [3, 15.7, 0],
@@ -297,7 +279,7 @@ const gallery = (): CrowdDocument => {
   ]) {
     // A column runs floor to ceiling; the catalog cannot know which ceiling.
     b.place('column-round', at.x, at.y, 0, {
-      size: { width: 0.5, depth: 0.5, height: ft(12) },
+      size: { width: 0.5, depth: 0.5, height: feet(12) },
     })
   }
 
@@ -362,9 +344,9 @@ const gallery = (): CrowdDocument => {
 
 const pollingStation = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const room = b.room(0, 0, ft(60), ft(40), { height: ft(10) })
-  const wayIn = b.door(room.south, 3, ft(6), 'door', 'entry')
-  const wayOut = b.door(room.north, 15, ft(6), 'door', 'exit')
+  const room = b.room(0, 0, feet(60), feet(40), { height: feet(10) })
+  const wayIn = b.door(room.south, 3, feet(6), 'door', 'entry')
+  const wayOut = b.door(room.north, 15, feet(6), 'door', 'exit')
 
   // Four poll-book stations, because two cannot keep up with the door: voters
   // arrive at about 2.9 a minute averaged over the session and a station clears
@@ -443,12 +425,12 @@ const pollingStation = (): CrowdDocument => {
 
 const concourse = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, ft(132), ft(60), { height: ft(16) })
+  const hall = b.room(0, 0, feet(132), feet(60), { height: feet(16) })
   // A concourse's ways in and out are its portals, and people use them both
   // directions all day, so each is marked for both.
-  const westPortals = [6, 12].map((y) => b.door(hall.west, y, ft(10), 'opening', 'both'))
-  const platformPortals = [6, 12].map((y) => b.door(hall.east, y, ft(10), 'opening', 'both'))
-  const streetStair = b.door(hall.south, 20, ft(12), 'opening', 'entry')
+  const westPortals = [6, 12].map((y) => b.door(hall.west, y, feet(10), 'opening', 'both'))
+  const platformPortals = [6, 12].map((y) => b.door(hall.east, y, feet(10), 'opening', 'both'))
+  const streetStair = b.door(hall.south, 20, feet(12), 'opening', 'entry')
 
   for (const x of [9, 11, 13]) b.place('kiosk', x, 16.6, Math.PI)
   for (const x of [26, 27.4, 28.8, 30.2]) b.place('turnstile', x, 9, 0)
@@ -458,25 +440,27 @@ const concourse = (): CrowdDocument => {
   b.place('screen-tv', 20, 2.0, 0, { size: { width: 2.4, depth: 0.3, height: 2.4 } })
   for (const x of [15, 25]) {
     b.place('column-square', x, 9, 0, {
-      size: { width: 0.6, depth: 0.6, height: ft(16) },
+      size: { width: 0.6, depth: 0.6, height: feet(16) },
     })
   }
   b.place('bin', 35, 2)
   b.place('plant-tree', 34, 16)
 
+  // The gate is the turnstile bank itself. A counter drawn behind it put the
+  // place each passenger stands to tap in inside a turnstile.
   const gate = b.service(
     'Ticket gate',
     28,
-    9.6,
+    9,
     Math.PI,
     4,
     { kind: 'lognormal', mean: 4.5, sd: 1.6, min: 1.5 },
     {
       width: 5.2,
-      depth: 0.6,
+      depth: 1.2,
       queueSpacing: 0.55,
       queue: [
-        { x: 28, y: 8.4 },
+        { x: 28, y: 7.5 },
         { x: 28, y: 4.0 },
       ],
     },
@@ -528,15 +512,15 @@ const concourse = (): CrowdDocument => {
 
 const banquet = (): CrowdDocument => {
   const b = new PlanBuilder()
-  const hall = b.room(0, 0, ft(92), ft(66), { height: ft(16) })
-  const mainDoors = b.door(hall.south, 6, ft(8), 'door', 'both')
-  const secondDoors = b.door(hall.south, 22, ft(8), 'door', 'both')
-  b.door(hall.east, 10, ft(5), 'door', 'exit')
+  const hall = b.room(0, 0, feet(92), feet(66), { height: feet(16) })
+  const mainDoors = b.door(hall.south, 6, feet(8), 'door', 'both')
+  const secondDoors = b.door(hall.south, 22, feet(8), 'door', 'both')
+  b.door(hall.east, 10, feet(5), 'door', 'exit')
 
   b.place('stage', 14, 18.2, 0, { size: { width: 9, depth: 3.0, height: 0.6 } })
   b.place('lectern', 17.5, 18.4)
   b.place('projector-screen', 14, 19.5, 0, {
-    size: { width: ft(18), depth: 0.2, height: ft(10, 2) },
+    size: { width: feet(18), depth: 0.2, height: feet(10, 2) },
   })
 
   // Ten banquet rounds of eight with a clear centre aisle. The floor stops short

@@ -88,6 +88,12 @@ export interface QueueRecord {
   overflowDirection: Vec2
   /** The building, so an overflowing queue does not line up outside it. */
   overflowBounds: Bounds
+  /**
+   * 1 where this queue may not wait: blocked, outside the building, in a
+   * seating zone or among loose chairs, in a doorway, or anywhere its own line
+   * cannot reach without crossing one of those.
+   */
+  queueBlocked: Uint8Array
   spacing: number
   serviceTime: Distribution
   opensAt: number
@@ -120,11 +126,6 @@ export interface SimWorld {
   grid: NavGrid
   /** 1 where an agent centre cannot go (solid, dilated by NAV_CLEARANCE). */
   navBlocked: Uint8Array
-  /**
-   * 1 where nobody may wait in a queue: blocked, outside the building, in a
-   * seating zone or among loose chairs.
-   */
-  queueBlocked: Uint8Array
   /** 1 where geometry is solid, undilated. */
   solid: Uint8Array
   /** Metres to the nearest solid cell. */
@@ -192,6 +193,32 @@ export const nearestFreeCell = (
     }
   }
   return -1
+}
+
+/** 1 on every cell the seeds cannot reach over unblocked cells, stepping edge to edge. */
+const unreachedFrom = (
+  grid: NavGrid,
+  blocked: Uint8Array,
+  seeds: readonly number[],
+): Uint8Array => {
+  const { cols, rows } = grid
+  const out = new Uint8Array(blocked.length).fill(1)
+  const stack: number[] = []
+  const visit = (cell: number) => {
+    if (blocked[cell] || !out[cell]) return
+    out[cell] = 0
+    stack.push(cell)
+  }
+  for (const seed of seeds) visit(seed)
+  while (stack.length > 0) {
+    const cell = stack.pop()!
+    const col = cell % cols
+    if (col > 0) visit(cell - 1)
+    if (col < cols - 1) visit(cell + 1)
+    if (cell >= cols) visit(cell - cols)
+    if (cell < (rows - 1) * cols) visit(cell + cols)
+  }
+  return out
 }
 
 /**
@@ -298,6 +325,48 @@ export const collectObstaclePolygons = (plan: Plan): Polygon[] => {
 
 /** How many times open floor it costs to cross a chair rather than go round it. */
 const LOOSE_SEATING_COST = 4
+
+/**
+ * Opens the speed field by a disc: floor cheaper than what surrounds it and
+ * narrower than the disc takes the price around it, and anything the disc fits
+ * inside, drawn edges included, keeps its own. A wall counts as cheap, since it
+ * bounds a strip by being a wall, and counted as dear it would price a narrow
+ * doorway shut.
+ */
+const openSpeedField = (
+  grid: NavGrid,
+  speed: Float32Array,
+  blocked: Uint8Array,
+  radius: number,
+): void => {
+  const { cols, rows, cellSize } = grid
+  const q = radius / cellSize
+  const reach = Math.floor(q)
+  const offsets: number[] = []
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) if (dx * dx + dy * dy <= q * q) offsets.push(dx, dy)
+  }
+  const filter = (from: Float32Array, to: Float32Array, pick: (a: number, b: number) => number) => {
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const i = row * cols + col
+        let value = from[i]
+        for (let k = 0; k < offsets.length; k += 2) {
+          const c = col + offsets[k]
+          const r = row + offsets[k + 1]
+          if (c >= 0 && r >= 0 && c < cols && r < rows) value = pick(value, from[r * cols + c])
+        }
+        to[i] = value
+      }
+    }
+  }
+  const input = new Float32Array(speed.length)
+  for (let i = 0; i < input.length; i++) input[i] = blocked[i] ? 1 : speed[i]
+  const eroded = new Float32Array(input.length)
+  filter(input, eroded, Math.min)
+  filter(eroded, input, Math.max)
+  for (let i = 0; i < speed.length; i++) if (!blocked[i]) speed[i] = input[i]
+}
 
 /** Cells wanted across the narrowest doorway people have to walk through. */
 const CELLS_ACROSS_AN_OPENING = 8
@@ -409,6 +478,13 @@ export const buildWorld = (
   for (let i = 0; i < cells; i++) {
     if (seating[i]) baseSpeed[i] = Math.min(baseSpeed[i], 1 / LOOSE_SEATING_COST)
   }
+  // Cheap floor narrower than a body is not floor anyone can walk along. The
+  // field across it is a V a cell wide, its gradient flipped at every step, and
+  // a lone walker down a 0.3 m gap between two keep-clear bands zigzagged the
+  // whole way, 32.7 s for a walk of 13.4 s, too fast for anything to call it
+  // stuck. On a grid coarser than NAV_CLEARANCE the disc is one cell and this
+  // does nothing.
+  openSpeedField(grid, baseSpeed, navBlocked, NAV_CLEARANCE)
   // Not priced into the field: somebody pushed in among the seated from behind
   // was then sent forward between two of them rather than back the way they
   // came, and stood there. It is the straight line to a target that must not
@@ -622,6 +698,16 @@ export const buildWorld = (
       overflowAnchor: tail,
       overflowDirection,
       overflowBounds: venueBounds,
+      // Inside is the walls' bounding box, so the yard in the crook of an L was
+      // queue floor, and so was the room beyond a door. A newcomer in the yard
+      // stood within reach of the back of the line through the wall and joined,
+      // and every place behind them was out there too. Doorways are off queue
+      // floor, so what the line reaches over it is the room the queue is in.
+      queueBlocked: unreachedFrom(
+        grid,
+        queueBlocked,
+        slots.map((slot) => nearestFreeCell(grid, queueBlocked, slot)).filter((cell) => cell >= 0),
+      ),
       spacing,
       serviceTime: sp.serviceTime,
       opensAt: sp.opensAt ?? 0,
@@ -704,7 +790,6 @@ export const buildWorld = (
     bounds,
     grid,
     navBlocked,
-    queueBlocked,
     solid,
     clearance,
     baseSpeed,

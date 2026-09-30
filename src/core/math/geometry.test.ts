@@ -13,6 +13,7 @@ import {
   closestPointOnSegment,
   convexHull,
   convexPolygonsOverlap,
+  polygonsOverlap,
   distanceToPolygonEdge,
   distanceToSegment,
   distanceToSegmentSq,
@@ -805,6 +806,17 @@ describe('convex overlap', () => {
     expect(convexPolygonsOverlap(square, poly([3, 1], [4, 0], [5, 1], [4, 2]))).toBe(false)
     expect(convexPolygonsOverlap(square, poly([2.5, 1], [3.5, 0], [4.5, 1], [3.5, 2]))).toBe(false)
     expect(convexPolygonsOverlap(square, poly([1.5, 1], [2.5, 0], [3.5, 1], [2.5, 2]))).toBe(true)
+  })
+
+  it('finds the overlap of concave polygons, and none in the notch', () => {
+    const lShape = poly([0, 0], [4, 0], [4, 4], [2, 4], [2, 1], [0, 1])
+    expect(polygonsOverlap(lShape, poly([0.5, 2], [1.5, 2], [1.5, 3], [0.5, 3]))).toBe(false)
+    // Crossing without either holding a vertex of the other.
+    expect(polygonsOverlap(poly([-1, 0.3], [5, 0.3], [5, 0.6], [-1, 0.6]), lShape)).toBe(true)
+    expect(polygonsOverlap(lShape, poly([1, 0.2], [1.5, 0.2], [1.5, 0.8], [1, 0.8]))).toBe(true)
+    // Sharing an edge is sharing boundary.
+    expect(polygonsOverlap(lShape, poly([4, 0], [5, 0], [5, 1], [4, 1]))).toBe(true)
+    expect(polygonsOverlap(lShape, poly([4.1, 0], [5, 0], [5, 1], [4.1, 1]))).toBe(false)
   })
 
   it('claims an overlap that is not there once a footprint is concave', () => {

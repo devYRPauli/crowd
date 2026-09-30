@@ -158,16 +158,30 @@ export const createItineraryStep = (
   targetId?: string,
 ): ItineraryStep => ({ id: newId('step'), kind, targetId })
 
-export const createPopulation = (index = 0): Population => ({
-  id: newId('pop'),
-  name: index === 0 ? 'Attendees' : `Group ${index + 1}`,
-  count: 120,
-  color: POPULATION_COLORS[index % POPULATION_COLORS.length],
-  entryIds: [],
-  arrival: { kind: 'uniform', startS: 0, windowS: 600 },
-  profileMix: DEFAULT_PROFILE_MIX.map((entry) => ({ ...entry })),
-  itinerary: [createItineraryStep('exit')],
-})
+/**
+ * A new group, made of the default mix as far as `profiles` has it. A file can
+ * bring its own profiles, and a group made of ones it does not have is a group
+ * the engine refuses to run, with no panel to change what it is made of.
+ */
+export const createPopulation = (
+  index = 0,
+  profiles: readonly AgentProfile[] = AGENT_PROFILES,
+): Population => {
+  const known = new Set(profiles.map((profile) => profile.id))
+  const mix = DEFAULT_PROFILE_MIX.filter((entry) => known.has(entry.profileId))
+  return {
+    id: newId('pop'),
+    name: index === 0 ? 'Attendees' : `Group ${index + 1}`,
+    count: 120,
+    color: POPULATION_COLORS[index % POPULATION_COLORS.length],
+    entryIds: [],
+    arrival: { kind: 'uniform', startS: 0, windowS: 600 },
+    profileMix: mix.length
+      ? mix.map((entry) => ({ ...entry }))
+      : [{ profileId: profiles[0].id, weight: 1 }],
+    itinerary: [createItineraryStep('exit')],
+  }
+}
 
 export const createScenario = (): Scenario => ({
   name: 'Baseline',

@@ -33,6 +33,8 @@ const gather = (make, pick, seeds = SEEDS) => {
   return Object.fromEntries(
     Object.entries(pick).map(([key, get]) => {
       const values = runs.map(get)
+      // A run that never reached a figure has none to average in.
+      if (values.some((value) => value === null)) throw new Error(`${key}: a seed has no value`)
       return [key, { ...across(values), values }]
     }),
   )
@@ -310,7 +312,6 @@ export const arrivals = () => {
         peakOccupancy: (r) => r.summary.peakOccupancy,
         peakDensity: (r) => r.summary.peakDensity,
         journey: (r) => r.summary.meanJourney,
-        wait: (r) => r.summary.meanWait,
         completed: (r) => r.summary.completed,
       },
     )
@@ -319,13 +320,12 @@ export const arrivals = () => {
       meanSpread(stats.peakOccupancy, 0),
       meanSpread(stats.peakDensity, 2),
       meanSpread(stats.journey),
-      meanSpread(stats.wait),
       fmt(stats.completed.mean, 0),
     ])
     console.log(`    ${p.label} done`)
   }
   results.arrivals = rows
-  return table(['arrival', 'peak inside', 'peak p/m2', 'journey s', 'wait s', 'out'], rows)
+  return table(['arrival', 'peak inside', 'peak p/m2', 'journey s', 'out'], rows)
 }
 
 // ---------------------------------------------------------------------------

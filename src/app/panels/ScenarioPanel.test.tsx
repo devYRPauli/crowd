@@ -172,6 +172,37 @@ describe('groups of people', () => {
     expect(second.itinerary.map((step) => step.kind)).toEqual(['exit'])
   })
 
+  it('makes a new group of the profiles the file has', () => {
+    const base = createDocument('Test venue')
+    const adult = base.scenario.profiles.find((profile) => profile.id === 'adult')!
+    const senior = base.scenario.profiles.find((profile) => profile.id === 'senior')!
+    const own = (profiles: CrowdDocument['scenario']['profiles']) =>
+      useEditor.getState().replaceDocument({
+        ...base,
+        scenario: {
+          ...base.scenario,
+          profiles,
+          populations: [{ ...base.scenario.populations[0], profileMix: [] }],
+        },
+      })
+
+    // The default mix is made of the starter profiles, and a group made of
+    // ones the file does not have is a group the engine refuses to run.
+    own([adult, senior])
+    const { unmount } = render(<ScenarioPanel />)
+    fireEvent.click(screen.getByText('Add another group'))
+    expect(group(1).profileMix).toEqual([
+      { profileId: 'adult', weight: 62 },
+      { profileId: 'senior', weight: 12 },
+    ])
+    unmount()
+
+    own([{ ...adult, id: 'visitor', name: 'Visitor' }])
+    render(<ScenarioPanel />)
+    fireEvent.click(screen.getByText('Add another group'))
+    expect(group(1).profileMix).toEqual([{ profileId: 'visitor', weight: 1 }])
+  })
+
   it('records which doors a group comes in through', () => {
     openWith({ zones: [entry, exit] })
     render(<ScenarioPanel />)

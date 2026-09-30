@@ -15,7 +15,7 @@ import { deriveFindings } from '../../sim/metrics/findings'
 import {
   computeCompliance,
   OCCUPANT_LOAD_FACTORS,
-  type OccupancyId,
+  type CodeCheckSettings,
 } from '../../core/analysis/compliance'
 import { LOS_TABLES, type FacilityType } from '../../sim/metrics/los'
 import { formatArea, formatDuration, formatNumber, formatPercent } from '../../core/model/units'
@@ -32,11 +32,17 @@ import {
 import type { RunSummary } from '../../sim/types'
 
 const compare = (
-  current: number,
-  previous: number,
+  current: number | null,
+  previous: number | null,
   lowerIsBetter = true,
 ): { text: string; tone: 'better' | 'worse' | 'same' } => {
-  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) {
+  if (
+    current === null ||
+    previous === null ||
+    !Number.isFinite(current) ||
+    !Number.isFinite(previous) ||
+    previous === 0
+  ) {
     return { text: '—', tone: 'same' }
   }
   const delta = current - previous
@@ -77,7 +83,7 @@ const SummaryStats = ({ summary, baseline }: { summary: RunSummary; baseline?: R
       delta={baseline ? compare(summary.peakDensity, baseline.peakDensity) : undefined}
     />
     <Stat
-      value={formatDuration(summary.clearanceTime)}
+      value={summary.clearanceTime === null ? 'not reached' : formatDuration(summary.clearanceTime)}
       label="95% cleared by"
       delta={baseline ? compare(summary.clearanceTime, baseline.clearanceTime) : undefined}
     />
@@ -101,24 +107,21 @@ const LosLegend = ({ facility }: { facility: FacilityType }) => (
   </div>
 )
 
-const CompliancePanel = () => {
+const CompliancePanel = ({
+  settings,
+  onChange,
+}: {
+  settings: CodeCheckSettings
+  onChange: (settings: CodeCheckSettings) => void
+}) => {
   const plan = useEditor((state) => state.document.plan)
   const scenario = useEditor((state) => state.document.scenario)
-  const [occupancy, setOccupancy] = useState<OccupancyId>('assembly-tables')
-  const [sprinklered, setSprinklered] = useState(false)
-  const [minutes, setMinutes] = useState(8)
+  const { occupancy, sprinklered, targetEgressMinutes: minutes } = settings
 
   const attendance = scenario.populations.reduce((sum, p) => sum + p.count, 0)
   const result = useMemo(
-    () =>
-      computeCompliance({
-        plan,
-        occupancy,
-        sprinklered,
-        plannedAttendance: attendance,
-        targetEgressMinutes: minutes,
-      }),
-    [plan, occupancy, sprinklered, attendance, minutes],
+    () => computeCompliance({ ...settings, plan, plannedAttendance: attendance }),
+    [plan, settings, attendance],
   )
 
   return (
@@ -127,7 +130,7 @@ const CompliancePanel = () => {
       <Field label="Use of the space">
         <Select
           value={occupancy}
-          onChange={setOccupancy}
+          onChange={(value) => onChange({ ...settings, occupancy: value })}
           options={OCCUPANT_LOAD_FACTORS.map((entry) => ({
             value: entry.id,
             label: `${entry.label} — ${entry.sqft} sq ft ${entry.basis}`,
@@ -136,10 +139,20 @@ const CompliancePanel = () => {
       </Field>
       <div className="row">
         <Field label="Egress target">
-          <NumberInput value={minutes} min={1} max={30} onCommit={setMinutes} suffix="min" />
+          <NumberInput
+            value={minutes}
+            min={1}
+            max={30}
+            onCommit={(value) => onChange({ ...settings, targetEgressMinutes: value })}
+            suffix="min"
+          />
         </Field>
         <div style={{ paddingBottom: 4 }}>
-          <Checkbox label="Sprinklered" checked={sprinklered} onChange={setSprinklered} />
+          <Checkbox
+            label="Sprinklered"
+            checked={sprinklered}
+            onChange={(value) => onChange({ ...settings, sprinklered: value })}
+          />
         </div>
       </div>
 
@@ -209,7 +222,13 @@ const CompliancePanel = () => {
   )
 }
 
-const ExportSection = ({ onExportImage }: { onExportImage: () => void }) => {
+const ExportSection = ({
+  codeCheck,
+  onExportImage,
+}: {
+  codeCheck: CodeCheckSettings
+  onExportImage: () => void
+}) => {
   const document = useEditor((state) => state.document)
   const toast = useEditor((state) => state.toast)
   const summary = useSimulation((state) => state.summary)
@@ -222,7 +241,7 @@ const ExportSection = ({ onExportImage }: { onExportImage: () => void }) => {
   )
 
   if (!summary || !series) return null
-  const input = { document, summary, series, findings }
+  const input = { document, summary, series, findings, codeCheck }
 
   const save = (extension: string, text: string, mime: string, label: string) => {
     downloadText(reportFileName(document, extension), text, mime)
@@ -286,6 +305,14 @@ export const ResultsPanel = ({
   const runDocument = useSimulation((state) => state.runDocument)
 
   const baseline = savedRuns.find((run) => run.id === comparisonId)
+  // Held here, above both, because the brief has to check the code the way the
+  // panel is set. It used to assume unsprinklered tables and chairs whatever
+  // the panel said.
+  const [codeCheck, setCodeCheck] = useState<CodeCheckSettings>({
+    occupancy: 'assembly-tables',
+    sprinklered: false,
+    targetEgressMinutes: 8,
+  })
 
   // A run is kept across an edit on purpose — the whole point of the panel is
   // to read it while trying the change it suggests — but the code check below
@@ -533,8 +560,8 @@ export const ResultsPanel = ({
           </div>
         ) : null}
 
-        <ExportSection onExportImage={onExportImage} />
-        <CompliancePanel />
+        <ExportSection codeCheck={codeCheck} onExportImage={onExportImage} />
+        <CompliancePanel settings={codeCheck} onChange={setCodeCheck} />
       </div>
     </>
   )

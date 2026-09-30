@@ -29,11 +29,11 @@ import { hashString } from '../core/math/random'
 
 const PINNED: Record<string, number> = {
   'coffee-bar': 2539051883,
-  conference: 3596447635,
-  gallery: 4126874085,
-  'polling-station': 1397113152,
-  concourse: 3480398078,
-  banquet: 2090742699,
+  conference: 4080699032,
+  gallery: 396134853,
+  'polling-station': 3273206288,
+  concourse: 313785225,
+  banquet: 3943246737,
 }
 
 /** The summary with ids stripped: those are minted per build and differ by design. */
