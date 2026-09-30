@@ -416,7 +416,6 @@ describe('frames streaming back from the worker', () => {
     deliver(ready(first, { totalPeople: 999, warnings: ['the old venue'] }))
     deliver(frame(first, { time: 99, progress: 0.9 }))
     deliver(done(first, { completed: 1 }))
-    deliver({ type: 'progress', runId: first, progress: 0.8 })
 
     expect(sim().phase).toBe('preparing')
     expect(sim().frame).toBeNull()
@@ -432,13 +431,6 @@ describe('frames streaming back from the worker', () => {
     expect(sim().phase).toBe('running')
     expect(shown?.time).toBeCloseTo(3, 6)
     expect(sim().progress).toBeCloseTo(0.05, 6)
-
-    deliver({ type: 'progress', runId: second, progress: 0.31 })
-
-    // Progress can arrive between frames; the bar moves, and the crowd on
-    // screen must be the same object so nothing is re-uploaded to draw it.
-    expect(sim().progress).toBeCloseTo(0.31, 6)
-    expect(sim().frame).toBe(shown)
   })
 })
 

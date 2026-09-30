@@ -34,18 +34,7 @@ export interface SpeedRequest {
   speed: number
 }
 
-/** Run to the end without streaming frames; used for background comparisons. */
-export interface BatchRequest {
-  type: 'batch'
-  runId: string
-  plan: Plan
-  scenario: Scenario
-  options?: Partial<SimOptions>
-  /** Simulated seconds between recorded frames. */
-  frameIntervalS: number
-}
-
-export type WorkerRequest = StartRequest | ControlRequest | SpeedRequest | BatchRequest
+export type WorkerRequest = StartRequest | ControlRequest | SpeedRequest
 
 export interface ReadyMessage {
   type: 'ready'
@@ -91,14 +80,7 @@ export interface ErrorMessage {
   message: string
 }
 
-export interface ProgressMessage {
-  type: 'progress'
-  runId: string
-  progress: number
-}
-
-export type WorkerResponse =
-  ReadyMessage | FrameMessage | DoneMessage | ErrorMessage | ProgressMessage
+export type WorkerResponse = ReadyMessage | FrameMessage | DoneMessage | ErrorMessage
 
 /** Density is streamed as bytes; this is the value one byte represents. */
 export const DENSITY_SCALE = 6 / 255

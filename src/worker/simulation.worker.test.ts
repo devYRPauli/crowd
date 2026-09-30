@@ -23,7 +23,6 @@ import { WALKWAY_LOS } from '../sim/metrics/los'
 import type * as SimEngine from '../sim/engine'
 import type { Plan, Scenario } from '../core/model/types'
 import type {
-  BatchRequest,
   DoneMessage,
   ErrorMessage,
   FrameMessage,
@@ -178,16 +177,6 @@ const watchedRun = (runId = 'run-1'): StartRequest => ({
   speed: 1,
 })
 
-/** The same crowd again, run to the end off screen for a comparison. */
-const backgroundRun = (frameIntervalS = 1, runId = 'compared'): BatchRequest => ({
-  type: 'batch',
-  runId,
-  plan: hall(),
-  scenario: crossing(),
-  options: { cellSize: 0.25 },
-  frameIntervalS,
-})
-
 beforeAll(async () => {
   vi.stubGlobal('self', workerSelf)
   await import('./simulation.worker')
@@ -245,27 +234,6 @@ describe('stopping a run', () => {
 
     // And the worker is still good for the next run.
     expect(kindsOf(deliver(wholeRun('run-2')))[0]).toBe('ready')
-  })
-
-  it('abandons a background comparison instead of running it to the end', () => {
-    // The chunk loop measures its own 30 ms budget with Date.now, so a clock
-    // that moves six milliseconds a reading gives every machine the same
-    // number of steps per chunk.
-    let elapsed = 0
-    vi.spyOn(Date, 'now').mockImplementation(() => (elapsed += 6))
-
-    const first = deliver(backgroundRun())
-    // Still mid-run when the stop arrives: a comparison that had already
-    // finished would prove nothing about cancelling one.
-    expect(kindsOf(first)).toEqual(['ready', 'progress'])
-
-    send({ type: 'stop', runId: 'compared' })
-    // A comparison is the one run the user cannot see, so nothing but this
-    // stops it. Left going it would burn a core for the rest of the session
-    // and then post a `done` for a comparison the user had cancelled.
-    const from = posted.length
-    for (let i = 0; i < 5; i++) vi.advanceTimersToNextTimer()
-    expect(posted.slice(from)).toEqual([])
   })
 })
 
@@ -587,54 +555,5 @@ describe('what a finished run hands back', () => {
     const early = framesOf(deliver(wholeRun('early')))
     expect(early[early.length - 1].time).not.toBe(early[early.length - 2].time)
     expect(early[early.length - 1].stats.active).toBe(0)
-  })
-
-  it('draws a background comparison on the same curve the screen was shown', () => {
-    const watched = deliver(wholeRun('watched'))
-    const watchedDone = lastMessage(watched) as DoneMessage
-    const compared = deliver(backgroundRun())
-    const comparedDone = lastMessage(compared) as DoneMessage
-
-    expect(kindsOf(compared)).toEqual(['ready', 'done'])
-    expect(comparedDone.summary).toEqual(watchedDone.summary)
-
-    // The whole product of a run nobody watched is its summary and its series,
-    // and the series is only worth anything plotted against the run it is
-    // being compared with — so the two are sampled on one grid: the crowd
-    // before the first step, then every interval, then the instant the run
-    // ended. The chunk loop used to start at the first step and stop at the
-    // last whole interval, which left the two curves a step out of step at one
-    // end, and left the comparison ending on seven people out against its own
-    // summary of eight at the other. Nothing sends `batch` yet — the store
-    // compares saved runs — so it cost nothing until the first comparison was
-    // run off screen, and then it cost the whole shape of the curve.
-    expect(Array.from(comparedDone.series.time)).toEqual(Array.from(watchedDone.series.time))
-    expect(Array.from(comparedDone.series.completed)).toEqual(
-      Array.from(watchedDone.series.completed),
-    )
-    expect(comparedDone.series.time[0]).toBe(0)
-    const completed = comparedDone.series.completed
-    expect(completed[completed.length - 1]).toBe(8)
-    expect(comparedDone.summary.completed).toBe(8)
-  })
-
-  it('records a background comparison no finer than a quarter of a second', () => {
-    const done = lastMessage(deliver(backgroundRun(0))) as DoneMessage
-    const times = Array.from(done.series.time)
-    const gaps = times.slice(1).map((time, i) => time - times[i])
-
-    // The floor is five times the one a watched run gets, because the series
-    // is the whole product of a run nobody is looking at: asked for zero it
-    // would record every physics step, and a saved comparison of a long run
-    // would carry tens of thousands of points into the project file.
-    expect(times.length).toBeGreaterThan(50)
-    expect(times.length).toBeLessThan(times[times.length - 1] / 0.2)
-    // Samples land on the 0.1 s step grid, so a quarter-second floor spaces
-    // them two or three steps apart and never one. The instant a run ends on
-    // is sampled whatever the floor says — it is the end of the curve, not a
-    // point on the grid — and this crowd empties on one of the grid's own
-    // instants, so every gap here is a spacing the floor chose.
-    expect(Math.min(...gaps)).toBeGreaterThan(0.19)
-    expect(Math.max(...gaps)).toBeLessThan(0.31)
   })
 })

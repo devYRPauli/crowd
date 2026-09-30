@@ -149,9 +149,6 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         set({ phase: 'done', summary: done.summary, series: done.series, progress: 1 })
         break
       }
-      case 'progress':
-        if (message.runId === get().runId) set({ progress: message.progress })
-        break
       case 'error':
         // A start that threw is stamped with its own run's id, and building the
         // nav grid is slow enough that it can land long after the user moved

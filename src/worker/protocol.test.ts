@@ -1,12 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DENSITY_SCALE, decodeDensity, encodeDensity } from './protocol'
 import type {
-  BatchRequest,
   ControlRequest,
   DoneMessage,
   ErrorMessage,
   FrameMessage,
-  ProgressMessage,
   ReadyMessage,
   SpeedRequest,
   StartRequest,
@@ -156,17 +154,10 @@ describe('requests crossing to the worker', () => {
       { type: 'resume', runId: 'run-1' } satisfies ControlRequest,
       { type: 'stop', runId: 'run-1' } satisfies ControlRequest,
       { type: 'speed', runId: 'run-1', speed: 16 } satisfies SpeedRequest,
-      {
-        type: 'batch',
-        runId: 'run-2',
-        plan: furnishedPlan(),
-        scenario: createScenario(),
-        frameIntervalS: 1,
-      } satisfies BatchRequest,
     ]
 
     const kinds = requests.map((request) => structuredClone(request).type)
-    expect(kinds).toEqual(['start', 'pause', 'resume', 'stop', 'speed', 'batch'])
+    expect(kinds).toEqual(['start', 'pause', 'resume', 'stop', 'speed'])
     // The worker reads `runId` back off whatever arrived — to guard a control
     // message against a run that has moved on, and to name the run in an error.
     for (const request of requests) expect(structuredClone(request).runId).toMatch(/^run-\d$/)
@@ -694,60 +685,6 @@ describe('what the worker sends', () => {
     expect(done.summary.completed).toBe(0)
     expect(done.series.active[done.series.active.length - 1]).toBe(6)
     expect(done.summary.warnings.some((warning) => /had not left/.test(warning))).toBe(true)
-  })
-
-  it('reaches the same numbers in the background as it did on screen', () => {
-    const watched = deliver(watchedRun())
-    const watchedDone = lastMessage(watched) as DoneMessage
-
-    const compared = deliver({
-      type: 'batch',
-      runId: 'compared',
-      plan: corridorPlan(),
-      scenario: corridorScenario(),
-      options: { cellSize: 0.25 },
-      frameIntervalS: 1,
-    })
-    const comparedDone = lastMessage(compared) as DoneMessage
-
-    // A comparison run is only worth anything if streaming frames to the screen
-    // does not change the result, so the two paths must agree exactly.
-    expect(comparedDone.summary).toEqual(watchedDone.summary)
-    expect(framesOf(compared)).toEqual([])
-    expect(compared[0].arrived.type).toBe('ready')
-    expect(comparedDone.series.time.length).toBeGreaterThan(0)
-  })
-
-  it('reports how far a background run has got while it is still running', () => {
-    // The chunk loop measures its own 30 ms budget with Date.now, so a clock
-    // that moves six milliseconds a reading gives every machine the same number
-    // of steps per chunk and the same messages.
-    let elapsed = 0
-    vi.spyOn(Date, 'now').mockImplementation(() => (elapsed += 6))
-
-    deliver({
-      type: 'batch',
-      runId: 'compared',
-      plan: corridorPlan(),
-      scenario: corridorScenario(),
-      options: { cellSize: 0.25 },
-      frameIntervalS: 1,
-    })
-    vi.runAllTimers()
-    const reported = posted
-      .filter((entry) => entry.arrived.type === 'progress')
-      .map((entry) => (entry.arrived as ProgressMessage).progress)
-
-    // Nothing else tells the user a comparison is alive: without these the
-    // background run is an unmoving bar until it finishes.
-    expect(reported.length).toBeGreaterThan(5)
-    expect(reported).toEqual([...reported].sort((a, b) => a - b))
-    expect(Math.min(...reported)).toBeGreaterThan(0)
-    expect(Math.max(...reported)).toBeLessThanOrEqual(1)
-    expect(lastMessage(posted).type).toBe('done')
-    expect(
-      posted.every((entry) => 'runId' in entry.arrived && entry.arrived.runId === 'compared'),
-    ).toBe(true)
   })
 
   it('plays a run back at the speed it was asked for', () => {

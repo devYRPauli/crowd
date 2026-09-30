@@ -10,7 +10,6 @@
 import { Simulation } from '../sim/engine'
 import { encodeDensity } from './protocol'
 import type {
-  BatchRequest,
   DoneMessage,
   FrameMessage,
   ReadyMessage,
@@ -185,65 +184,6 @@ const start = (request: StartRequest): void => {
   tick(run)
 }
 
-/** Run to completion without pacing; used to produce a comparison in the background. */
-const batch = (request: BatchRequest): void => {
-  stop()
-  const sim = new Simulation(request.plan, request.scenario, request.options)
-  const cells = sim.world.grid.cols * sim.world.grid.rows
-  const run: RunState = {
-    id: request.runId,
-    sim,
-    frameIntervalS: Math.max(0.25, request.frameIntervalS),
-    speed: Infinity,
-    running: true,
-    nextFrameAt: 0,
-    durationS: request.scenario.durationS,
-    timer: null,
-    series: emptySeries(),
-    densityBytes: new Uint8Array(cells),
-  }
-  current = run
-  sendReady(
-    run,
-    sim.summary().warnings,
-    request.scenario.populations.reduce((s, p) => s + p.count, 0),
-  )
-  // A comparison is plotted against a watched run's curve, so it is sampled on
-  // the same grid: the state before the first step, then every interval, then
-  // the instant the run ended. Starting at the first step instead left the two
-  // curves offset, and stopping at the last whole interval left the background
-  // curve short of the total its own summary reported.
-  recordSeries(run, sim.stats())
-  run.nextFrameAt = run.frameIntervalS
-
-  const chunk = () => {
-    if (current !== run || !run.running) return
-    const started = Date.now()
-    let sampledAt = Number.NaN
-    while (!sim.isFinished && Date.now() - started < 30) {
-      sim.step(sim.options.timeStep)
-      if (sim.currentTime >= run.nextFrameAt) {
-        recordSeries(run, sim.stats())
-        sampledAt = sim.currentTime
-        run.nextFrameAt += run.frameIntervalS
-      }
-    }
-    if (sim.isFinished) {
-      if (sampledAt !== sim.currentTime) recordSeries(run, sim.stats())
-      sendDone(run)
-      run.running = false
-      return
-    }
-    post({
-      type: 'progress',
-      runId: run.id,
-      progress: Math.min(1, sim.currentTime / run.durationS),
-    })
-    setTimeout(chunk, 0)
-  }
-  chunk()
-}
-
 const stop = (): void => {
   if (current?.timer) clearTimeout(current.timer)
   if (current) current.running = false
@@ -263,9 +203,6 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     switch (request.type) {
       case 'start':
         start(request)
-        break
-      case 'batch':
-        batch(request)
         break
       case 'pause':
         if (current && current.id === request.runId) {
