@@ -334,11 +334,19 @@ export const Modal = ({
   footer?: ReactNode
 }) => {
   const ref = useRef<HTMLDivElement>(null)
+  // The focus effect runs once, for as long as the dialog is open, and reads
+  // the latest close through a ref. It depended on `onClose`, which the shell
+  // makes afresh every render, so an autosave behind an open dialog moved focus
+  // off the control somebody was on and back to the dialog frame.
+  const close = useRef(onClose)
+  useEffect(() => {
+    close.current = onClose
+  })
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose()
+        close.current()
         return
       }
       // Keep Tab inside the dialog. Without this, tabbing walks out into the
@@ -365,7 +373,7 @@ export const Modal = ({
       window.removeEventListener('keydown', onKey)
       previous?.focus?.()
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div

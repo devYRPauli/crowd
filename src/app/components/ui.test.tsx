@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { Field, LengthInput, NumberInput, Select } from './ui'
+import { Field, LengthInput, Modal, NumberInput, Select } from './ui'
 
 describe('Field', () => {
   it('shows its label and its hint beside the control', () => {
@@ -140,5 +140,44 @@ describe('Escape in a figure box', () => {
 
     expect(onCommit).not.toHaveBeenCalled()
     expect(input.value).toBe('3.00 m')
+  })
+})
+
+describe('Modal', () => {
+  it('keeps focus where it is when the editor behind it redraws', () => {
+    const dialog = (onClose: () => void) => (
+      <Modal title="Projects" onClose={onClose}>
+        <button type="button">Open</button>
+      </Modal>
+    )
+    const { rerender } = render(dialog(() => {}))
+    const open = screen.getByRole('button', { name: 'Open' })
+    open.focus()
+
+    // The shell hands every dialog a fresh close callback each time it
+    // renders, which an autosave does two seconds after an edit. Each one
+    // re-ran the focus effect, and focus jumped from the control somebody was
+    // on to the dialog frame.
+    rerender(dialog(() => {}))
+    expect(document.activeElement).toBe(open)
+  })
+
+  it('closes through the callback it was last given', () => {
+    const first = vi.fn()
+    const latest = vi.fn()
+    const { rerender } = render(
+      <Modal title="Projects" onClose={first}>
+        No venues yet.
+      </Modal>,
+    )
+    rerender(
+      <Modal title="Projects" onClose={latest}>
+        No venues yet.
+      </Modal>,
+    )
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(first).not.toHaveBeenCalled()
+    expect(latest).toHaveBeenCalledTimes(1)
   })
 })
