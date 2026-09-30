@@ -173,8 +173,11 @@ export const App = () => {
         try {
           const restored = await loadProject(lastId)
           if (restored && !cancelled) {
-            replaceDocument(restored, 'Reopen project')
-            viewportRef.current.viewport?.frame(planBounds(restored.plan, 3))
+            replaceDocument(restored.document, 'Reopen project')
+            viewportRef.current.viewport?.frame(planBounds(restored.document.plan, 3))
+            // The next autosave writes the repaired plan over the row, so this
+            // is the one moment anybody can learn a wall or a door went.
+            for (const warning of restored.warnings) useEditor.getState().toast(warning, 'warn')
             return
           }
         } catch {

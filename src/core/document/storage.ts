@@ -79,20 +79,26 @@ export const saveProject = async (doc: CrowdDocument): Promise<void> => {
   await tx('readwrite', (store) => store.put(row) as IDBRequest<IDBValidKey>)
 }
 
-export const loadProject = async (id: string): Promise<CrowdDocument | null> => {
+/** A stored venue, with whatever the reader had to drop to open it. */
+export interface LoadedProject {
+  document: CrowdDocument
+  warnings: string[]
+}
+
+export const loadProject = async (id: string): Promise<LoadedProject | null> => {
   const row = await tx<Row | undefined>(
     'readonly',
     (store) => store.get(id) as IDBRequest<Row | undefined>,
   )
   if (!row) return null
   try {
-    const document = parseDocument(JSON.parse(row.payload)).document
+    const { document, warnings } = parseDocument(JSON.parse(row.payload))
     // A row is keyed on the document's own id. `parseDocument` never fails: fed
     // something that is not a venue it mints a fresh id and hands back an empty
     // one, which would open as the project the user asked for and be autosaved
     // under that new id, leaving the unreadable row behind untouched. A
     // document that does not know it is this project is a row we cannot read.
-    return document.id === row.id ? document : null
+    return document.id === row.id ? { document, warnings } : null
   } catch {
     return null
   }

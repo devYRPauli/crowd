@@ -293,16 +293,16 @@ describe('keeping a venue on this machine', () => {
     await storage.saveProject(original)
 
     const restored = await storage.loadProject(original.id)
-    expect(restored?.id).toBe(original.id)
-    expect(restored?.name).toBe('Atrium')
-    expect(restored?.plan).toEqual(original.plan)
-    expect(restored?.scenario).toEqual(original.scenario)
-    expect(restored?.settings).toEqual(original.settings)
+    expect(restored?.document.id).toBe(original.id)
+    expect(restored?.document.name).toBe('Atrium')
+    expect(restored?.document.plan).toEqual(original.plan)
+    expect(restored?.document.scenario).toEqual(original.scenario)
+    expect(restored?.document.settings).toEqual(original.settings)
     // The only durable record of when somebody started this venue.
-    expect(restored?.createdAt).toBe('2023-11-02T08:00:00.000Z')
+    expect(restored?.document.createdAt).toBe('2023-11-02T08:00:00.000Z')
     // Opening restamps the document, the way opening a file does; the time the
     // project list shows is the row's, written when the venue was last saved.
-    expect(Date.parse(restored?.updatedAt ?? '')).toBeGreaterThan(
+    expect(Date.parse(restored?.document.updatedAt ?? '')).toBeGreaterThan(
       Date.parse('2024-05-01T10:00:00.000Z'),
     )
     expect((await storage.listProjects())[0].updatedAt).toBe('2024-05-01T10:00:00.000Z')
@@ -359,7 +359,7 @@ describe('keeping a venue on this machine', () => {
     // the payload would leave the old name on the card for good.
     expect(listed[0].name).toBe('Foyer — north end')
     expect(listed[0].updatedAt).toBe('2024-06-12T09:00:00.000Z')
-    expect((await storage.loadProject(doc.id))?.name).toBe('Foyer — north end')
+    expect((await storage.loadProject(doc.id))?.document.name).toBe('Foyer — north end')
   })
 
   it('deletes the one venue it was asked for and nothing beside it', async () => {
@@ -375,7 +375,7 @@ describe('keeping a venue on this machine', () => {
       warehouse.id,
     ])
     expect(await storage.loadProject(foyer.id)).toBeNull()
-    expect((await storage.loadProject(warehouse.id))?.name).toBe('Warehouse')
+    expect((await storage.loadProject(warehouse.id))?.document.name).toBe('Warehouse')
   })
 
   it('shrugs off deleting or opening a venue that was never there', async () => {
@@ -420,7 +420,7 @@ describe('a stored venue that cannot be read back', () => {
     })
 
     expect(await storage.loadProject('doc_truncated')).toBeNull()
-    expect((await storage.loadProject(hall.id))?.name).toBe('Main hall')
+    expect((await storage.loadProject(hall.id))?.document.name).toBe('Main hall')
 
     // The damaged entry still has to appear in the list: a project the user
     // cannot see is a project they cannot delete, and it keeps its bytes.
@@ -452,7 +452,7 @@ describe('a stored venue that cannot be read back', () => {
 
     // Refusing it does not lose it: the row is still listed, so it can still be
     // deleted. It cannot be downloaded — the panel's download button is
-    // `loadProject` then `if (!full) return` (ProjectsModal.tsx:166) — so
+    // `loadProject` then `if (!full) return` in ProjectsModal.tsx — so
     // refusing a row is also the end of the only way to get at what is in it.
     const listed = await storage.listProjects()
     expect(listed.map((project) => project.name)).toEqual(['Shopping list'])
@@ -462,7 +462,7 @@ describe('a stored venue that cannot be read back', () => {
     // A venue this store actually wrote comes back as itself.
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
     await storage.saveProject(hall)
-    expect((await storage.loadProject(hall.id))?.id).toBe(hall.id)
+    expect((await storage.loadProject(hall.id))?.document.id).toBe(hall.id)
   })
 
   it('will not open a readable venue that is filed under another project’s key', async () => {
@@ -491,7 +491,7 @@ describe('a stored venue that cannot be read back', () => {
     expect(await storage.loadProject(foyer.id)).toBeNull()
   })
 
-  it('loads a venue with its only door missing without saying so', async () => {
+  it('loads a venue with its only door missing and says what went', async () => {
     const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
     const doorWall = hall.plan.openings[0].wallId
     const damaged = {
@@ -506,25 +506,18 @@ describe('a stored venue that cannot be read back', () => {
 
     const restored = await storage.loadProject(hall.id)
 
-    // Recorded decision: a partly damaged row is repaired and opened, and the
-    // repairs are not reported. `parseDocument` counts everything it dropped,
-    // but `loadProject` answers `CrowdDocument | null` and keeps only the
-    // document, so this venue comes back sealed shut — the wall went and the
-    // only way in or out went with it — and looks intact. Opening it beats
-    // refusing it: the plan is otherwise whole, and a row this app wrote itself
-    // is the user's own work. The cost is that the next run reports an
-    // evacuation failure with no stated cause, and the next autosave writes the
-    // sealed plan over the copy that still had the door. Telling them means
-    // widening the return to carry warnings, which is a change in App.tsx and
-    // ProjectsModal.tsx — the file-import path in TopBar already toasts exactly
-    // these strings, so the wording is ready if it is ever worth it.
-    expect(parseDocument(JSON.parse(payload)).warnings).toEqual([
+    // A partly damaged row is repaired and opened: the plan is otherwise whole,
+    // and a row this app wrote itself is the user's own work. It used to come
+    // back without the repairs, sealed shut and looking intact, so the next
+    // run reported an evacuation failure with no stated cause and the next
+    // autosave wrote the sealed plan over the copy that still had the door.
+    expect(restored?.warnings).toEqual([
       '1 wall(s) had no length or could not be read and were dropped.',
       '1 opening(s) referenced a missing wall or could not be read and were dropped.',
     ])
-    expect(restored?.plan.walls).toHaveLength(3)
-    expect(restored?.plan.openings).toEqual([])
-    expect(restored?.name).toBe('Main hall')
+    expect(restored?.document.plan.walls).toHaveLength(3)
+    expect(restored?.document.plan.openings).toEqual([])
+    expect(restored?.document.name).toBe('Main hall')
   })
 })
 
@@ -544,14 +537,14 @@ describe('when the browser will not store anything', () => {
     // The editor clears its dirty flag only when this promise resolves, so a
     // failure that resolved quietly would tell somebody their venue was safe
     // while the only copy on disk was still the old one.
-    expect((await storage.loadProject(hall.id))?.name).toBe('Main hall')
+    expect((await storage.loadProject(hall.id))?.document.name).toBe('Main hall')
     expect(await storage.listProjects()).toHaveLength(1)
 
     // One refused write must not cost the connection: the editor stays dirty
     // and tries again a couple of seconds later, and that attempt has to land.
     db.faults.write = null
     await expect(storage.saveProject(expanded)).resolves.toBeUndefined()
-    expect((await storage.loadProject(hall.id))?.name).toBe('Main hall + mezzanine')
+    expect((await storage.loadProject(hall.id))?.document.name).toBe('Main hall + mezzanine')
     expect(db.opens()).toBe(1)
   })
 
@@ -605,7 +598,7 @@ describe('when the browser will not store anything', () => {
     // succeed.
     db.faults.open = null
     await expect(storage.saveProject(hall)).resolves.toBeUndefined()
-    expect((await storage.loadProject(hall.id))?.name).toBe('Main hall')
+    expect((await storage.loadProject(hall.id))?.document.name).toBe('Main hall')
     expect(db.opens()).toBe(2)
 
     // The connection that did open is the one that is kept.

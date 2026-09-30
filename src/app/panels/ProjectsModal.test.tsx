@@ -28,7 +28,10 @@ vi.mock('../../core/document/storage', () => ({
     if (disk.listThrows) throw new Error('Storage is blocked')
     return disk.rows
   },
-  loadProject: async (id: string) => disk.documents.get(id) ?? null,
+  loadProject: async (id: string) => {
+    const document = disk.documents.get(id)
+    return document ? { document, warnings: [] } : null
+  },
   saveProject: async (doc: CrowdDocument) => {
     if (disk.saveThrows) throw new Error('Storage is blocked')
     disk.saved.push(doc)

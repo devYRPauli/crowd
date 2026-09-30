@@ -80,9 +80,10 @@ export const ProjectsModal = ({
       return
     }
     stop()
-    replaceDocument(restored, 'Open project')
-    rememberLastProject(restored.id)
-    viewportRef.current.viewport?.frame(planBounds(restored.plan, 3))
+    replaceDocument(restored.document, 'Open project')
+    rememberLastProject(restored.document.id)
+    viewportRef.current.viewport?.frame(planBounds(restored.document.plan, 3))
+    for (const warning of restored.warnings) toast(warning, 'warn')
     onClose()
   }
 
@@ -171,7 +172,8 @@ export const ProjectsModal = ({
                     toast('That project could not be read.', 'error')
                     return
                   }
-                  downloadText(documentFileName(full), serializeDocument(full))
+                  for (const warning of full.warnings) toast(warning, 'warn')
+                  downloadText(documentFileName(full.document), serializeDocument(full.document))
                 }}
               >
                 <SaveIcon width={14} height={14} />

@@ -119,6 +119,23 @@ describe('saving and reloading a document', () => {
     expect(document.plan.furniture[0].blocking).toBe(false)
   })
 
+  it('drops a reference image it cannot place rather than guessing its size', () => {
+    // It came back 20 m by 14 m at the origin, no longer under the walls that
+    // had been traced over it.
+    const backdrop = loadedVenue().plan.backdrop!
+    const withBackdrop = (patch: Record<string, unknown>) =>
+      parseDocument({
+        plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }], backdrop: { ...backdrop, ...patch } },
+      })
+
+    for (const patch of [{ width: undefined }, { depth: 0 }, { position: { x: 6 } }]) {
+      const result = withBackdrop(patch)
+      expect(result.document.plan.backdrop).toBeUndefined()
+      expect(result.warnings).toEqual(['The reference image could not be placed and was dropped.'])
+    }
+    expect(withBackdrop({}).document.plan.backdrop).toEqual(backdrop)
+  })
+
   it('keeps when the venue was made and restamps when it was saved', () => {
     const made = '2021-03-04T09:00:00.000Z'
     const { document } = reload({ ...loadedVenue(), createdAt: made, updatedAt: made })
@@ -255,7 +272,11 @@ describe('the crowd a damaged file comes back with', () => {
     const result = parseDocument({
       plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
       scenario: {
-        populations: [{ id: 'p1', name: 'Guests', count: 40 }, null, 'rubbish'],
+        populations: [
+          { id: 'p1', name: 'Guests', count: 40, profileMix: [{ profileId: 'adult', weight: 1 }] },
+          null,
+          'rubbish',
+        ],
       },
     })
 
@@ -269,9 +290,14 @@ describe('the crowd a damaged file comes back with', () => {
       plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
       scenario: {
         populations: [
-          { id: 'p1', name: 'Guests', count: 40 },
-          { id: 'p2', name: 'Staff' },
-          { id: 'p3', name: 'Press', count: 'a few' },
+          { id: 'p1', name: 'Guests', count: 40, profileMix: [{ profileId: 'adult', weight: 1 }] },
+          { id: 'p2', name: 'Staff', profileMix: [{ profileId: 'adult', weight: 1 }] },
+          {
+            id: 'p3',
+            name: 'Press',
+            count: 'a few',
+            profileMix: [{ profileId: 'adult', weight: 1 }],
+          },
         ],
       },
     })
@@ -475,6 +501,59 @@ describe('repairs the parser reports', () => {
     expect(said).toContain('2 service point(s)')
   })
 
+  it('loses a group whose make-up it cannot read rather than giving it the starter one', () => {
+    // A missing mix came back as the starter crowd and an unreadable share as
+    // an adult of weight 1, so a group of staff reopened with children in it.
+    const result = parseDocument({
+      plan: { walls: [{ id: 'w1', a: [0, 0], b: [5, 0] }] },
+      scenario: {
+        populations: [
+          { id: 'p1', name: 'Guests', count: 40, profileMix: [{ profileId: 'adult', weight: 1 }] },
+          { id: 'p2', name: 'Staff', count: 6 },
+          { id: 'p3', name: 'Press', count: 4, profileMix: [] },
+          {
+            id: 'p4',
+            name: 'Crew',
+            count: 8,
+            profileMix: [{ profileId: 'adult', weight: 3 }, { weight: 1 }],
+          },
+          {
+            id: 'p5',
+            name: 'Band',
+            count: 5,
+            profileMix: [{ profileId: 'adult', weight: 'most' }],
+          },
+          {
+            id: 'p6',
+            name: 'Ushers',
+            count: 3,
+            profileMix: [
+              { profileId: 'child', weight: 1 },
+              { profileId: 'adult', weight: -5 },
+            ],
+          },
+          { id: 'p7', name: 'Nobody', count: 3, profileMix: [{ profileId: 'adult', weight: 0 }] },
+          {
+            id: 'p8',
+            name: 'Mostly adults',
+            count: 10,
+            profileMix: [
+              { profileId: 'adult', weight: 9 },
+              { profileId: 'child', weight: 0 },
+            ],
+          },
+        ],
+      },
+    })
+
+    // A share of none is a share, so long as somebody has one.
+    expect(result.document.scenario.populations.map((p) => p.name)).toEqual([
+      'Guests',
+      'Mostly adults',
+    ])
+    expect(result.warnings).toEqual(['6 group(s) of people could not be read and were dropped.'])
+  })
+
   it('drops a group made of a kind of person the file does not describe', () => {
     // It walked at the first profile's speed, whoever that was.
     const result = parseDocument({
@@ -556,6 +635,7 @@ describe('repairs the parser reports', () => {
             id: 'p1',
             name: 'Crowd',
             count: 10,
+            profileMix: [{ profileId: 'adult', weight: 1 }],
             arrival: { kind: 'peak', startS: 0, windowS: 600, peakAt: Number.NaN, waves: Infinity },
             itinerary: [{ id: 'st1', kind: 'goto', targetId: 'z1', probability: Number.NaN }],
           },

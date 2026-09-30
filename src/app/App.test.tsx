@@ -170,7 +170,7 @@ describe('the first thing anybody sees', () => {
   it('reopens the project you were last in, and does not greet you again', async () => {
     const saved = savedVenue()
     vi.mocked(recallLastProject).mockReturnValue(saved.id)
-    vi.mocked(loadProject).mockResolvedValue(saved)
+    vi.mocked(loadProject).mockResolvedValue({ document: saved, warnings: [] })
 
     render(<App />)
 
@@ -182,6 +182,18 @@ describe('the first thing anybody sees', () => {
     // And it opens as a project, not as an edit to whatever was there.
     expect(editor().canUndo()).toBe(false)
     expect(editor().dirty).toBe(false)
+  })
+
+  it('says what a reopened project lost before autosave writes over it', async () => {
+    const saved = savedVenue()
+    const lost = '1 opening(s) referenced a missing wall or could not be read and were dropped.'
+    vi.mocked(recallLastProject).mockReturnValue(saved.id)
+    vi.mocked(loadProject).mockResolvedValue({ document: saved, warnings: [lost] })
+
+    render(<App />)
+
+    await waitFor(() => expect(editor().document).toBe(saved))
+    expect(editor().toasts.map((toast) => [toast.message, toast.tone])).toEqual([[lost, 'warn']])
   })
 
   it('falls back to the starter venue when the last project cannot be read', async () => {

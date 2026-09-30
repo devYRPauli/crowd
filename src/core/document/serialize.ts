@@ -26,7 +26,6 @@ import type {
 import { SCHEMA_VERSION } from '../model/types'
 import {
   AGENT_PROFILES,
-  DEFAULT_PROFILE_MIX,
   DEFAULT_SERVICE_POINT,
   DEFAULT_SETTINGS,
   createScenario,
@@ -74,14 +73,6 @@ const str = (value: unknown, fallback: string): string =>
 
 const bool = (value: unknown, fallback: boolean): boolean =>
   typeof value === 'boolean' ? value : fallback
-
-const point = (value: unknown, fallback: Vec2 = { x: 0, y: 0 }): Vec2 => {
-  if (Array.isArray(value) && value.length >= 2) {
-    return { x: num(value[0], fallback.x), y: num(value[1], fallback.y) }
-  }
-  if (isObject(value)) return { x: num(value.x, fallback.x), y: num(value.y, fallback.y) }
-  return { ...fallback }
-}
 
 /**
  * A position that says where something is, or null. Read leniently, a wall
@@ -319,12 +310,23 @@ const parsePopulation = (raw: unknown, index: number): Population | null => {
   // A group whose size is unreadable is lost rather than given one: a count
   // made up here is a crowd of people nobody put in the file.
   if (typeof raw.count !== 'number' || !Number.isFinite(raw.count)) return null
-  const mix = array(raw.profileMix)
-    .filter(isObject)
-    .map((entry) => ({
-      profileId: str(entry.profileId, 'adult'),
-      weight: Math.max(0, num(entry.weight, 1)),
-    }))
+  // Nor is it given a make-up. An unreadable share came back as an adult of
+  // weight 1 and a missing mix as the starter one, so a group of forty staff
+  // reopened with wheelchair users and children in it and nothing said so. A
+  // negative share was read as none, and a mix of nothing but none made the
+  // whole group its first profile.
+  const entries = array(raw.profileMix)
+  const mix = entries.flatMap((entry) =>
+    isObject(entry) &&
+    typeof entry.profileId === 'string' &&
+    entry.profileId.length > 0 &&
+    typeof entry.weight === 'number' &&
+    Number.isFinite(entry.weight) &&
+    entry.weight >= 0
+      ? [{ profileId: entry.profileId, weight: entry.weight }]
+      : [],
+  )
+  if (mix.length < entries.length || !mix.some((entry) => entry.weight > 0)) return null
   return {
     id: str(raw.id, newId('pop')),
     name: str(raw.name, `Group ${index + 1}`),
@@ -332,7 +334,7 @@ const parsePopulation = (raw: unknown, index: number): Population | null => {
     color: str(raw.color, '#4c7dd4'),
     entryIds: array(raw.entryIds).filter((v): v is string => typeof v === 'string'),
     arrival: parseArrival(raw.arrival),
-    profileMix: mix.length ? mix : DEFAULT_PROFILE_MIX.map((m) => ({ ...m })),
+    profileMix: mix,
     itinerary: array(raw.itinerary)
       .map(parseItineraryStep)
       .filter((s): s is ItineraryStep => s !== null),
@@ -544,16 +546,29 @@ export const parseDocument = (input: unknown): ParseResult => {
     zones: zones.items,
     servicePoints: servicePoints.items,
   }
-  if (isObject(planRaw.backdrop) && typeof planRaw.backdrop.src === 'string') {
-    plan.backdrop = {
-      src: planRaw.backdrop.src,
-      position: point(planRaw.backdrop.position),
-      rotation: num(planRaw.backdrop.rotation, 0),
-      width: Math.max(0.1, num(planRaw.backdrop.width, 20)),
-      depth: Math.max(0.1, num(planRaw.backdrop.depth, 14)),
-      opacity: Math.min(1, Math.max(0, num(planRaw.backdrop.opacity, 0.6))),
-      visible: bool(planRaw.backdrop.visible, true),
-      ...(planRaw.backdrop.locked === true ? { locked: true } : {}),
+  const backdrop = planRaw.backdrop
+  if (isObject(backdrop) && typeof backdrop.src === 'string') {
+    // The image is what somebody traced the walls over, and scaled or moved by
+    // a default it no longer lines up with them. Read leniently, one with no
+    // readable size came back 20 m by 14 m, whatever the drawing measured.
+    const position = place(backdrop.position)
+    const size = (value: unknown) =>
+      typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+    const width = size(backdrop.width)
+    const depth = size(backdrop.depth)
+    if (position && width !== null && depth !== null) {
+      plan.backdrop = {
+        src: backdrop.src,
+        position,
+        rotation: num(backdrop.rotation, 0),
+        width: Math.max(0.1, width),
+        depth: Math.max(0.1, depth),
+        opacity: Math.min(1, Math.max(0, num(backdrop.opacity, 0.6))),
+        visible: bool(backdrop.visible, true),
+        ...(backdrop.locked === true ? { locked: true } : {}),
+      }
+    } else {
+      warnings.push('The reference image could not be placed and was dropped.')
     }
   }
 
