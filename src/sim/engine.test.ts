@@ -119,6 +119,27 @@ describe('Simulation', () => {
     expect(summary.clearanceTime).toBeNull()
   })
 
+  it('counts those still to arrive in the crowd a clearance time is for', () => {
+    // Cut short before most of the crowd came in, the run counted only those
+    // it had let in, and three people out of twenty reported 95% gone.
+    const entry = zone('entry', 36, 0.5, 37.5, 1.5)
+    const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
+    const base = scenarioFor(entry.id, 20, 1.0)
+    const scenario: Scenario = {
+      ...base,
+      durationS: 30,
+      populations: [
+        { ...base.populations[0], arrival: { kind: 'uniform', startS: 0, windowS: 200 } },
+      ],
+    }
+    const summary = runToCompletion(new Simulation(corridorPlan(entry, exit), scenario), 40)
+
+    expect(summary.totalPeople).toBe(20)
+    expect(summary.completed).toBeLessThan(19)
+    expect(summary.clearanceTime).toBeNull()
+    expect(summary.warnings.join(' ')).toMatch(/\d+ people had not come in when the run ended/)
+  })
+
   it('never lets anyone end up inside a wall', () => {
     const entry = zone('entry', 0.4, 0.5, 1.4, 1.5)
     const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
@@ -217,6 +238,55 @@ describe('Simulation', () => {
     // Twelve people, one server, two seconds each: the last waits about 22 s.
     expect(summary.services[0].maxWait).toBeGreaterThan(10)
     expect(summary.completed).toBe(12)
+  })
+
+  it('averages a wait over everybody who began service, not those who finished', () => {
+    // The second person's wait is known once they reach the counter, and it
+    // was divided by the one person done with it, so a run that ended with
+    // somebody still being served reported a mean wait longer than any wait.
+    const entry = zone('entry', 2, 0.4, 8, 1.6)
+    const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
+    const plan: Plan = {
+      ...corridorPlan(entry, exit),
+      servicePoints: [
+        {
+          id: 'svc1',
+          name: 'Desk',
+          position: { x: 30, y: 1.9 },
+          rotation: 0,
+          width: 1.2,
+          depth: 0.4,
+          servers: 1,
+          serviceTime: { kind: 'constant', mean: 100 },
+          queue: [
+            { x: 30, y: 1.0 },
+            { x: 24, y: 1.0 },
+          ],
+          queueSpacing: 0.6,
+        },
+      ],
+    }
+    const base = scenarioFor(entry.id, 2, 1.34)
+    const scenario: Scenario = {
+      ...base,
+      durationS: 180,
+      populations: [
+        {
+          ...base.populations[0],
+          itinerary: [
+            { id: 'step-svc', kind: 'service', targetId: 'svc1' },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    const summary = runToCompletion(new Simulation(plan, scenario), 200)
+    const [desk] = summary.services
+
+    expect(desk.served).toBe(1)
+    expect(desk.maxWait).toBeGreaterThan(90)
+    expect(desk.meanWait).toBeLessThan(desk.maxWait * 0.6)
+    expect(summary.meanWait).toBeLessThan(desk.maxWait * 0.6)
   })
 
   it('walks a gap narrower than a body between keep-clear bands at walking pace', () => {
@@ -1182,6 +1252,101 @@ describe('Simulation', () => {
     expect(runToCompletion(sim, 900).warnings).toContain(
       '1 person found no free seat they could take and went on without sitting.',
     )
+  }, 60_000)
+
+  it('brings a wheelchair in by the end of the row its seat is at', () => {
+    // Priced like anybody else, it came in by the far end whenever that was
+    // the shorter walk, and rolled the length of the row to its seat.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 8, 6)
+    b.door(room.south, 6.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(4, 3, 1, 3.3)
+    const seating = b.zone('seating', 2.2, 2.45, 2.9, 3.55, 'West end seat')
+    const entry = b.zone('entry', 5.8, 0.3, 7.5, 1.3, 'In')
+    const scenario: Scenario = {
+      ...createScenario(),
+      durationS: 300,
+      populations: [
+        {
+          ...createPopulation(0),
+          count: 1,
+          entryIds: [entry.id],
+          arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
+          profileMix: [{ profileId: 'wheelchair', weight: 1 }],
+          itinerary: [
+            {
+              id: 'step-seat',
+              kind: 'seat',
+              targetId: seating.id,
+              duration: { kind: 'constant', mean: 30 },
+            },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    const sim = new Simulation(b.build(), scenario)
+    sim.step(0.1)
+    sim.step(0.1)
+    // The row runs from x 2.35 to 5.65 and its ends reach 0.3 m past that.
+    expect(sim.inspect(0)?.exactTarget?.x).toBeLessThan(2.35)
+    const summary = runToCompletion(sim, 300)
+    expect(summary.completed).toBe(1)
+    expect(summary.warnings.join(' ')).not.toMatch(/no free seat/)
+  }, 60_000)
+
+  it('takes a wheelchair caught in a row at the alarm out by the nearer end', () => {
+    // Held to the end of whichever seat named the row, one a step into the
+    // west end was sent the length of the row to the east end.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 8, 6)
+    b.door(room.south, 6.5, DEFAULT_DOUBLE_DOOR_WIDTH, 'door', 'both')
+    b.seatingBlock(4, 3, 1, 3.3)
+    const seating = b.zone('seating', 2.2, 2.45, 2.9, 3.55, 'West end seat')
+    const entry = b.zone('entry', 5.8, 0.3, 7.5, 1.3, 'In')
+    const plan = b.build()
+    const scenario = (evacuationAtS: number | null): Scenario => ({
+      ...createScenario(),
+      durationS: 300,
+      evacuationAtS,
+      populations: [
+        {
+          ...createPopulation(0),
+          count: 1,
+          entryIds: [entry.id],
+          arrival: { kind: 'all-at-once', startS: 0, windowS: 0 },
+          profileMix: [{ profileId: 'wheelchair', weight: 1 }],
+          itinerary: [
+            {
+              id: 'step-seat',
+              kind: 'seat',
+              targetId: seating.id,
+              duration: { kind: 'constant', mean: 30 },
+            },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    })
+    // The passage runs along y 2.65 from the west end at x 2.05 to the seat's
+    // front at 2.625.
+    const inPassage = (at: { x: number; y: number }, from: number, to: number) =>
+      Math.abs(at.y - 2.65) < 0.2 && at.x > from && at.x < to
+    const scout = new Simulation(plan, scenario(null))
+    let steps = 0
+    for (; steps < 1500; steps++) {
+      scout.step(0.1)
+      const at = scout.inspect(0)
+      if (at?.state === 'walking' && inPassage(at, 2.15, 2.5)) break
+    }
+    expect(steps).toBeLessThan(1500)
+    const sim = new Simulation(plan, scenario((steps + 1.5) * 0.1))
+    for (let i = 0; i <= steps + 60; i++) {
+      sim.step(0.1)
+      const at = sim.inspect(0)
+      if (i > steps && at) expect(inPassage(at, 3.2, 6.2)).toBe(false)
+    }
+    expect(runToCompletion(sim, 300).completed).toBe(1)
   }, 60_000)
 
   it('seats a wheelchair in a row of one seat with a wall at one side', () => {

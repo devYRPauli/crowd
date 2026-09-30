@@ -112,7 +112,7 @@ const SIDLING_DEPTH = 0.6
  * the gap sees clear floor ahead — the pace model looks `PACE_LOOKAHEAD` in
  * front — and walks out at full speed. Measured, that put a 3'0" leaf at 2.98
  * persons/m/s against the 1.2–1.4 the literature reports, and this engine's own
- * corridors peak at 1.19.
+ * corridors peak at 1.21.
  *
  * So they keep their body for a metre after the threshold, which is enough to
  * hold the back pressure that makes a door a bottleneck. They are counted as
@@ -307,6 +307,12 @@ interface QueueState {
   servers: number[]
   serverFreeAt: number[]
   served: number
+  /**
+   * Service begun, finished or not. A wait is known when service begins, and
+   * divided by those who were done with it, anybody still at the counter when
+   * the run ended counted twice over in the mean.
+   */
+  started: number
   totalWait: number
   maxWait: number
   totalService: number
@@ -414,6 +420,7 @@ export class Simulation {
         servers: new Array(queue.serverCount).fill(-1),
         serverFreeAt: new Array(queue.serverCount).fill(0),
         served: 0,
+        started: 0,
         totalWait: 0,
         maxWait: 0,
         totalService: 0,
@@ -1008,7 +1015,7 @@ export class Simulation {
       }
     } else if (record.row) {
       const here = { x: agent.x, y: agent.y }
-      const end = this.rowEnd(agent, agent.seatIndex, here, record.row.front)
+      const end = this.rowEnd(agent, agent.seatIndex, here, record.row.front, true)
       const fieldId = end ? `row:${record.id}:${end.index}` : ''
       if (end && this.ensurePointField(fieldId, end.point)) {
         agent.rowEntry = end.point
@@ -1045,7 +1052,7 @@ export class Simulation {
     const row = this.world.seats[seatIndex]?.row
     if (!row) return null
     const start = seated ? row.front : { x: agent.x, y: agent.y }
-    const end = this.rowEnd(agent, seatIndex, start, start)
+    const end = this.rowEnd(agent, seatIndex, start, start, seated)
     if (!end) return null
     return { row, points: seated ? [row.front, end.point] : [end.point] }
   }
@@ -1073,12 +1080,16 @@ export class Simulation {
    * will walk round to the far end rather than squeeze past half a row. Nobody
    * gets past a wheelchair, which fills the passage in front of its seat: sent
    * that way anyway, people stood at it until they gave up.
+   *
+   * `toSeat` is for the way to or from the seat itself. Without it the seat
+   * only says which row, as it does for somebody caught in a passage.
    */
   private rowEnd(
     agent: Agent,
     seatIndex: number,
     from: Vec2,
     start: Vec2,
+    toSeat: boolean,
   ): { point: Vec2; index: number } | null {
     const seat = this.world.seats[seatIndex]
     const row = seat.row
@@ -1090,6 +1101,13 @@ export class Simulation {
     let best: { point: Vec2; index: number } | null = null
     let bestCost = Infinity
     row.ends.forEach((end, index) => {
+      // Somebody who cannot go along a row comes in by the end their seat is
+      // at. Priced like anybody else, a wheelchair user came in by the other
+      // end whenever it was the shorter walk, and stuck behind the first person
+      // sitting between. Caught in a passage, they go out by the nearer end;
+      // held to the ends of whichever seat named the row, one was sent the
+      // length of the row at the alarm.
+      if (toSeat && !agent.sidles && !row.ownEnds.some((own) => own === index)) return
       // A row whose end is against a wall is only reached from the other one.
       if (sampleField(this.world.grid, this.world.clearance, end.x, end.y, 10) < agent.radius) {
         return
@@ -1175,7 +1193,8 @@ export class Simulation {
       if (score >= bestScore) continue
       // Checked last because it is the costly test: a seat in a row with no end
       // this person can get in by is not a seat they can take.
-      if (seat.row && !this.rowEnd(agent, i, { x: agent.x, y: agent.y }, seat.row.front)) continue
+      if (seat.row && !this.rowEnd(agent, i, { x: agent.x, y: agent.y }, seat.row.front, true))
+        continue
       bestScore = score
       best = i
     }
@@ -1653,6 +1672,7 @@ export class Simulation {
         queue.servers[s] = head.id
         queue.serverFreeAt[s] = this.time + duration
         const wait = this.time - head.joinedQueueAt
+        queue.started++
         queue.totalWait += wait
         queue.maxWait = Math.max(queue.maxWait, wait)
         queue.totalService += duration
@@ -2080,7 +2100,7 @@ export class Simulation {
    * Walk somebody out of the doorway they have just reached.
    *
    * They are pointed straight on, well past the tail, so that the last stride
-   * easing in `desiredVelocity` never slows them inside the gap, and taken off
+   * easing in `preferredVelocity` never slows them inside the gap, and taken off
    * the flow field, which would otherwise keep steering them at the threshold
    * they are standing in.
    */
@@ -2911,7 +2931,7 @@ export class Simulation {
         name: queue.record.name,
         waiting: queue.waiting.length,
         served: queue.served,
-        meanWait: queue.served > 0 ? queue.totalWait / queue.served : 0,
+        meanWait: queue.started > 0 ? queue.totalWait / queue.started : 0,
       })),
       worstLos: worst.level,
     }
@@ -2945,9 +2965,9 @@ export class Simulation {
       name: queue.record.name,
       servers: queue.servers.length,
       served: queue.served,
-      meanWait: queue.served > 0 ? queue.totalWait / queue.served : null,
+      meanWait: queue.started > 0 ? queue.totalWait / queue.started : null,
       maxWait: queue.maxWait,
-      meanService: queue.served > 0 ? queue.totalService / queue.served : null,
+      meanService: queue.started > 0 ? queue.totalService / queue.started : null,
       utilisation: this.time > 0 ? Math.min(1, queue.busyTime / this.time) : 0,
       maxQueue: queue.maxQueue,
       unserved: queue.waiting.length,
@@ -2972,11 +2992,19 @@ export class Simulation {
 
     // Counted against everybody in the run, not against those who got out: it
     // was the 95th percentile of the finishers, so a run that stranded half its
-    // crowd still reported a time by which 95% of people had left.
-    const need = Math.ceil(this.agents.length * 0.95)
+    // crowd still reported a time by which 95% of people had left. Everybody
+    // includes those still to arrive, or a run cut short before half the crowd
+    // came in reported 95% of them gone.
+    const crowd = this.pending.length
+    const need = Math.ceil(crowd * 0.95)
     const leftAt = finished.map((j) => j.finishedAt as number).sort((a, b) => a - b)
     const clearance = need > 0 && leftAt.length >= need ? leftAt[need - 1] : null
-    const served = services.reduce((s, v) => s + v.served, 0)
+    let waited = 0
+    let began = 0
+    for (const queue of this.queues.values()) {
+      waited += queue.totalWait
+      began += queue.started
+    }
 
     const warnings = [...this.warnings]
     if (this.abandoned > 0) {
@@ -2997,6 +3025,12 @@ export class Simulation {
         `${this.live.length} people had not left when the run ended; extend the duration for a complete picture.`,
       )
     }
+    const outside = crowd - this.pendingCursor
+    if (outside > 0 && this.time >= this.scenario.durationS) {
+      warnings.push(
+        `${outside} people had not come in when the run ended; extend the duration for a complete picture.`,
+      )
+    }
     for (const service of services) {
       if (service.unserved > 0) {
         warnings.push(`${service.name} still had ${service.unserved} people waiting at the end.`)
@@ -3006,12 +3040,11 @@ export class Simulation {
     return {
       durationS: this.time,
       seed: this.scenario.seed,
-      totalPeople: this.agents.length,
+      totalPeople: crowd,
       completed: this.completed,
       meanJourney: mean,
       p95Journey: p95,
-      meanWait:
-        served > 0 ? services.reduce((s, v) => s + (v.meanWait ?? 0) * v.served, 0) / served : null,
+      meanWait: began > 0 ? waited / began : null,
       maxWait: services.reduce((s, v) => Math.max(s, v.maxWait), 0),
       meanQueueTime: queueTimes.length
         ? queueTimes.reduce((s, t) => s + t, 0) / queueTimes.length

@@ -86,9 +86,13 @@ export interface ServiceSummary {
   name: string
   servers: number
   served: number
-  /** Null when nobody was served. */
+  /**
+   * Over everybody whose service began, finished or not; null when nobody's
+   * did. So a run can end with a mean wait and nobody served yet.
+   */
   meanWait: number | null
   maxWait: number
+  /** Over the same people as `meanWait`, as their service was drawn. */
   meanService: number | null
   /** Share of run time the counters were busy. */
   utilisation: number
@@ -130,7 +134,7 @@ export interface RunSummary {
   /** Mean time from arrival to leaving. Null when nobody has left. */
   meanJourney: number | null
   p95Journey: number | null
-  /** Null when no counter served anybody. */
+  /** Over everybody whose service began at any counter; null when nobody's did. */
   meanWait: number | null
   maxWait: number
   meanQueueTime: number | null
