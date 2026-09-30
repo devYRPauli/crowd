@@ -4,7 +4,10 @@
  * Numeric fields deserve special mention: they accept a typed expression in
  * either unit system ("3.4", "340cm", "11'2\"") and only commit on blur or
  * Enter, so a half-typed value never reaches the document and never lands in
- * the undo history.
+ * the undo history. Escape throws the draft away through a flag rather than
+ * by clearing it: the blur it ends in runs the commit from the render that
+ * still holds the draft, and clearing it first committed what Escape was
+ * meant to discard.
  */
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
@@ -63,11 +66,15 @@ export const NumberInput = ({
 }) => {
   const [draft, setDraft] = useState<string | null>(null)
   const [invalid, setInvalid] = useState(false)
+  const cancelled = useRef(false)
   const display = draft ?? (Number.isFinite(value) ? String(Math.round(value * 1000) / 1000) : '')
 
   const commit = () => {
+    const discard = cancelled.current
+    cancelled.current = false
     if (draft === null) return
     setDraft(null)
+    if (discard) return
     // An emptied box is not a request for zero, and `Number('')` is 0: selecting
     // the headcount, hitting Delete and clicking away used to set the crowd to
     // nobody and run an empty venue. The field springs back to what the
@@ -100,7 +107,7 @@ export const NumberInput = ({
           if (event.key === 'Enter') {
             event.currentTarget.blur()
           } else if (event.key === 'Escape') {
-            setDraft(null)
+            cancelled.current = true
             event.currentTarget.blur()
           } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
             event.preventDefault()
@@ -150,11 +157,15 @@ export const LengthInput = ({
 }) => {
   const [draft, setDraft] = useState<string | null>(null)
   const [invalid, setInvalid] = useState(false)
+  const cancelled = useRef(false)
 
   const commit = () => {
+    const discard = cancelled.current
+    cancelled.current = false
     if (draft === null) return
-    const parsed = parseLength(draft, units)
     setDraft(null)
+    if (discard) return
+    const parsed = parseLength(draft, units)
     if (parsed === null) {
       setInvalid(true)
       setTimeout(() => setInvalid(false), 900)
@@ -175,7 +186,7 @@ export const LengthInput = ({
       onKeyDown={(event) => {
         if (event.key === 'Enter') event.currentTarget.blur()
         if (event.key === 'Escape') {
-          setDraft(null)
+          cancelled.current = true
           event.currentTarget.blur()
         }
       }}

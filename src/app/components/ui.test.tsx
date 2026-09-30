@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { Field, NumberInput, Select } from './ui'
+import { Field, LengthInput, NumberInput, Select } from './ui'
 
 describe('Field', () => {
   it('shows its label and its hint beside the control', () => {
@@ -100,5 +100,45 @@ describe('NumberInput', () => {
       expect(input.value).toBe('8')
       expect(input.className).toContain('is-invalid')
     }
+  })
+})
+
+describe('Escape in a figure box', () => {
+  const escape = (input: HTMLInputElement, text: string) => {
+    input.focus()
+    fireEvent.change(input, { target: { value: text } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+  }
+
+  it('throws a half-typed headcount away', () => {
+    const onCommit = vi.fn()
+    render(<NumberInput value={120} onCommit={onCommit} />)
+    const input = screen.getByRole('textbox') as HTMLInputElement
+
+    escape(input, '45')
+
+    // The blur Escape ends in ran the commit from the render that still held
+    // the draft, so the value it was meant to discard went into the document.
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input.value).toBe('120')
+
+    // And the next value typed is taken, not discarded in its place.
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    input.focus()
+    fireEvent.change(input, { target: { value: '80' } })
+    fireEvent.blur(input)
+    expect(onCommit).toHaveBeenCalledWith(80)
+  })
+
+  it('throws a half-typed length away', () => {
+    const onCommit = vi.fn()
+    render(<LengthInput value={3} units="metric" onCommit={onCommit} />)
+    const input = screen.getByRole('textbox') as HTMLInputElement
+
+    escape(input, '5 m')
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input.value).toBe('3.00 m')
   })
 })
