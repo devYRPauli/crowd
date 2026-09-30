@@ -28,6 +28,22 @@ export const Field = ({
   </div>
 )
 
+/**
+ * A figure as people write one: "1,200" pasted from a spreadsheet, or "600 s"
+ * with the unit printed beside the box. Anything else is refused. Stripping
+ * everything but digits read "1,5" as fifteen, "2 hours" as two minutes and
+ * "1e3" as thirteen.
+ */
+const readFigure = (text: string, unit: string | undefined): number | null => {
+  const match = /^\s*([+-]?[\d.,]+(?:e[+-]?\d+)?)\s*(.*?)\s*$/i.exec(text)
+  if (!match) return null
+  const [, figure, written] = match
+  if (written !== '' && written.toLowerCase() !== unit?.toLowerCase()) return null
+  if (figure.includes(',') && !/^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(figure)) return null
+  const parsed = Number(figure.replaceAll(',', ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export const NumberInput = ({
   value,
   onCommit,
@@ -46,20 +62,23 @@ export const NumberInput = ({
   disabled?: boolean
 }) => {
   const [draft, setDraft] = useState<string | null>(null)
+  const [invalid, setInvalid] = useState(false)
   const display = draft ?? (Number.isFinite(value) ? String(Math.round(value * 1000) / 1000) : '')
 
   const commit = () => {
     if (draft === null) return
-    const cleaned = draft.replace(/[^\d.\-+]/g, '')
     setDraft(null)
     // An emptied box is not a request for zero, and `Number('')` is 0: selecting
     // the headcount, hitting Delete and clicking away used to set the crowd to
-    // nobody and run an empty venue. A draft with no number left in it is
-    // discarded like any other unreadable one, and the field springs back to
-    // what the document holds.
-    if (cleaned === '') return
-    const parsed = Number(cleaned)
-    if (!Number.isFinite(parsed)) return
+    // nobody and run an empty venue. The field springs back to what the
+    // document holds.
+    if (draft.trim() === '') return
+    const parsed = readFigure(draft, suffix)
+    if (parsed === null) {
+      setInvalid(true)
+      setTimeout(() => setInvalid(false), 900)
+      return
+    }
     let next = parsed
     if (min !== undefined) next = Math.max(min, next)
     if (max !== undefined) next = Math.min(max, next)
@@ -69,7 +88,7 @@ export const NumberInput = ({
   return (
     <div style={{ position: 'relative' }}>
       <input
-        className="input is-mono"
+        className={`input is-mono${invalid ? ' is-invalid' : ''}`}
         type="text"
         inputMode="decimal"
         value={display}
@@ -217,16 +236,25 @@ export const Slider = ({
   max,
   step = 1,
   onChange,
+  onRelease,
   label,
   format,
+  disabled,
 }: {
   value: number
   min: number
   max: number
   step?: number
   onChange: (value: number) => void
+  /**
+   * The drag or key press is over. A slider reports every tick, so an edit it
+   * makes is one undo step only if it coalesces while it runs and is sealed
+   * here.
+   */
+  onRelease?: () => void
   label: string
   format?: (value: number) => string
+  disabled?: boolean
 }) => {
   const id = useId()
   return (
@@ -249,7 +277,11 @@ export const Slider = ({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
+        onPointerUp={onRelease}
+        onKeyUp={onRelease}
+        onBlur={onRelease}
       />
     </div>
   )

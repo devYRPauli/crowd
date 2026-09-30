@@ -228,4 +228,14 @@ describe('a traced floor plan', () => {
     // Deleting a scan somebody scaled by hand has to be recoverable.
     expect(doc().plan.backdrop?.src).toBe(backdrop.src)
   })
+
+  it('will not remove a locked image', () => {
+    openWith({ ...plan, backdrop: { ...backdrop, locked: true } })
+    render(<LayersPanel />)
+
+    // Delete refused it and the inspector would not scale it, and this button
+    // threw it away.
+    fireEvent.click(screen.getByText('Remove the image'))
+    expect(doc().plan.backdrop?.src).toBe(backdrop.src)
+  })
 })

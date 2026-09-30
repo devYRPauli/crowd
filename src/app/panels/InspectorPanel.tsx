@@ -8,6 +8,7 @@
 
 import { useEditor } from '../../state/editorStore'
 import {
+  isLocked,
   updateFurniture,
   updateOpening,
   updateServicePoint,
@@ -101,15 +102,25 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
     if (!wall) return null
     const length = wallLength(wall)
     const angle = angleOf({ x: wall.b.x - wall.a.x, y: wall.b.y - wall.a.y })
+    // Locked itself, or holding a locked door that moving it would carry along.
+    const held = isLocked(document, ref)
     return (
       <>
         {header('Wall', formatLength(length, units))}
         <div className="panel-body">
-          <Field label="Length" hint="Changing this moves the far end.">
+          <Field
+            label="Length"
+            hint={
+              held && !wall.locked
+                ? 'A locked door is in this wall.'
+                : 'Changing this moves the far end.'
+            }
+          >
             <LengthInput
               value={length}
               units={units}
               min={0.05}
+              disabled={held}
               onCommit={(next) =>
                 apply(
                   (doc) => updateWall(doc, wall.id, { b: add(wall.a, fromAngle(angle, next)) }),
@@ -123,6 +134,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               value={Math.round(angle * DEGREES * 10) / 10}
               step={1}
               suffix="°"
+              disabled={held}
               onCommit={(degrees) =>
                 apply(
                   (doc) =>
@@ -178,7 +190,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             checked={Boolean(wall.locked)}
             onChange={(locked) => apply((doc) => updateWall(doc, wall.id, { locked }), 'Lock wall')}
           />
-          <button className="btn is-danger" onClick={deleteSelection}>
+          <button className="btn is-danger" disabled={held} onClick={deleteSelection}>
             Delete wall
           </button>
         </div>
@@ -223,6 +235,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               units={units}
               min={0.3}
               max={maxWidth}
+              disabled={Boolean(opening.locked)}
               onCommit={(width) =>
                 apply((doc) => updateOpening(doc, opening.id, { width }), 'Set width')
               }
@@ -236,6 +249,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                   opening.width,
                 )?.imperial ?? ''
               }
+              disabled={Boolean(opening.locked)}
               onChange={(imperial) => {
                 const sizes = opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS
                 const chosen = sizes.find((size) => size.imperial === imperial)
@@ -258,9 +272,15 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             step={0.05}
             value={Math.min(Math.max(opening.offset, minOffset), maxOffset)}
             format={(v) => formatLength(v, units)}
+            disabled={Boolean(opening.locked)}
             onChange={(offset) =>
-              apply((doc) => updateOpening(doc, opening.id, { offset }), 'Move opening')
+              apply(
+                (doc) => updateOpening(doc, opening.id, { offset }),
+                'Move opening',
+                `slider:${opening.id}:offset`,
+              )
             }
+            onRelease={sealHistory}
           />
           <div className="row">
             <Field label="Height">
@@ -326,7 +346,18 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               />
             </Field>
           )}
-          <button className="btn is-danger" onClick={deleteSelection}>
+          <Checkbox
+            label="Locked"
+            checked={Boolean(opening.locked)}
+            onChange={(locked) =>
+              apply((doc) => updateOpening(doc, opening.id, { locked }), 'Lock')
+            }
+          />
+          <button
+            className="btn is-danger"
+            disabled={Boolean(opening.locked)}
+            onClick={deleteSelection}
+          >
             Delete opening
           </button>
         </div>
@@ -350,6 +381,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={item.position.x}
                 units={units}
                 min={-10000}
+                disabled={Boolean(item.locked)}
                 onCommit={(x) =>
                   apply(
                     (doc) => updateFurniture(doc, item.id, { position: { ...item.position, x } }),
@@ -363,6 +395,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={item.position.y}
                 units={units}
                 min={-10000}
+                disabled={Boolean(item.locked)}
                 onCommit={(y) =>
                   apply(
                     (doc) => updateFurniture(doc, item.id, { position: { ...item.position, y } }),
@@ -377,6 +410,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               value={Math.round(item.rotation * DEGREES)}
               step={15}
               suffix="°"
+              disabled={Boolean(item.locked)}
               onCommit={(degrees) =>
                 apply(
                   (doc) => updateFurniture(doc, item.id, { rotation: degrees / DEGREES }),
@@ -392,6 +426,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                   value={size.width}
                   units={units}
                   min={0.1}
+                  disabled={Boolean(item.locked)}
                   onCommit={(width) =>
                     apply(
                       (doc) =>
@@ -415,7 +450,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                   value={size.depth}
                   units={units}
                   min={0.1}
-                  disabled={entry.resize === 'uniform'}
+                  disabled={entry.resize === 'uniform' || Boolean(item.locked)}
                   onCommit={(depth) =>
                     apply(
                       (doc) => updateFurniture(doc, item.id, { size: { ...size, depth } }),
@@ -438,7 +473,11 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             checked={Boolean(item.locked)}
             onChange={(locked) => apply((doc) => updateFurniture(doc, item.id, { locked }), 'Lock')}
           />
-          <button className="btn is-danger" onClick={deleteSelection}>
+          <button
+            className="btn is-danger"
+            disabled={Boolean(item.locked)}
+            onClick={deleteSelection}
+          >
             Delete
           </button>
         </div>
@@ -488,7 +527,14 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               max={10}
               step={0.5}
               value={zone.cost ?? 4}
-              onChange={(cost) => apply((doc) => updateZone(doc, zone.id, { cost }), 'Change cost')}
+              onChange={(cost) =>
+                apply(
+                  (doc) => updateZone(doc, zone.id, { cost }),
+                  'Change cost',
+                  `slider:${zone.id}:cost`,
+                )
+              }
+              onRelease={sealHistory}
             />
           ) : null}
           {zone.kind === 'waypoint' || zone.kind === 'seating' ? (
@@ -514,7 +560,16 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             {zone.polygon.length} corners. Double-click an edge in the plan to add another, or drag
             a corner to reshape it.
           </p>
-          <button className="btn is-danger" onClick={deleteSelection}>
+          <Checkbox
+            label="Locked"
+            checked={Boolean(zone.locked)}
+            onChange={(locked) => apply((doc) => updateZone(doc, zone.id, { locked }), 'Lock')}
+          />
+          <button
+            className="btn is-danger"
+            disabled={Boolean(zone.locked)}
+            onClick={deleteSelection}
+          >
             Delete area
           </button>
         </div>
@@ -549,8 +604,13 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             max={12}
             value={point.servers}
             onChange={(servers) =>
-              apply((doc) => updateServicePoint(doc, point.id, { servers }), 'Change staffing')
+              apply(
+                (doc) => updateServicePoint(doc, point.id, { servers }),
+                'Change staffing',
+                `slider:${point.id}:servers`,
+              )
             }
+            onRelease={sealHistory}
           />
           <Field label="Service time" hint="Average seconds per person.">
             <NumberInput
@@ -595,6 +655,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={point.width}
                 units={units}
                 min={0.3}
+                disabled={Boolean(point.locked)}
                 onCommit={(width) =>
                   apply((doc) => updateServicePoint(doc, point.id, { width }), 'Resize')
                 }
@@ -622,7 +683,18 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             <b>{((3600 * point.servers) / Math.max(1, point.serviceTime.mean)).toFixed(0)}</b>{' '}
             people an hour.
           </p>
-          <button className="btn is-danger" onClick={deleteSelection}>
+          <Checkbox
+            label="Locked"
+            checked={Boolean(point.locked)}
+            onChange={(locked) =>
+              apply((doc) => updateServicePoint(doc, point.id, { locked }), 'Lock')
+            }
+          />
+          <button
+            className="btn is-danger"
+            disabled={Boolean(point.locked)}
+            onClick={deleteSelection}
+          >
             Delete service point
           </button>
         </div>
@@ -646,6 +718,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={backdrop.width}
                 units={units}
                 min={0.5}
+                disabled={Boolean(backdrop.locked)}
                 onCommit={(width) =>
                   apply(
                     (doc) =>
@@ -663,6 +736,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
                 value={backdrop.depth}
                 units={units}
                 min={0.5}
+                disabled={Boolean(backdrop.locked)}
                 onCommit={(depth) => apply((doc) => updateBackdrop(doc, { depth }), 'Scale image')}
               />
             </Field>
@@ -675,19 +749,30 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
             value={backdrop.opacity}
             format={(v) => `${(v * 100).toFixed(0)}%`}
             onChange={(opacity) =>
-              apply((doc) => updateBackdrop(doc, { opacity }), 'Change opacity')
+              apply(
+                (doc) => updateBackdrop(doc, { opacity }),
+                'Change opacity',
+                'slider:backdrop:opacity',
+              )
             }
+            onRelease={sealHistory}
           />
           <Field label="Rotation">
             <NumberInput
               value={Math.round(backdrop.rotation * DEGREES)}
               step={1}
               suffix="°"
+              disabled={Boolean(backdrop.locked)}
               onCommit={(degrees) =>
                 apply((doc) => updateBackdrop(doc, { rotation: degrees / DEGREES }), 'Rotate image')
               }
             />
           </Field>
+          <Checkbox
+            label="Locked"
+            checked={Boolean(backdrop.locked)}
+            onChange={(locked) => apply((doc) => updateBackdrop(doc, { locked }), 'Lock')}
+          />
         </div>
       </>
     )

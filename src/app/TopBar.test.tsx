@@ -180,7 +180,7 @@ describe('the project name', () => {
     fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'Hall B' } })
     expect(screen.queryByText('Unsaved')).not.toBeNull()
 
-    act(() => editor().markSaved())
+    act(() => editor().markSaved(editor().document))
     expect(screen.queryByText('Unsaved')).toBeNull()
   })
 })
@@ -286,8 +286,8 @@ describe('getting a project in and out', () => {
     // Downloading also banks it locally, so the copy on disk and the copy in
     // the browser are the same version — and the Unsaved badge goes with it.
     expect(vi.mocked(saveProject)).toHaveBeenCalledWith(current)
-    expect(editor().toasts.at(-1)?.message).toBe('Project downloaded.')
     await waitFor(() => expect(editor().dirty).toBe(false))
+    expect(editor().toasts.at(-1)?.message).toBe('Project downloaded and saved.')
     expect(screen.queryByText('Unsaved')).toBeNull()
   })
 
@@ -316,40 +316,26 @@ describe('getting a project in and out', () => {
     expect(editor().canUndo()).toBe(false)
   })
 
-  it('throws the open venue away when the file turns out not to be one', async () => {
+  it.each([
+    ['notes.txt', 'this is not a venue'],
+    ['package.json', '{"name":"pkg","version":"1.0.0"}'],
+  ])('leaves the venue alone when %s turns out not to be one', async (name, text) => {
     const { container } = mount()
     act(() => useSimulation.setState({ phase: 'running', runId: 'run-live', frame: liveFrame() }))
+    const before = editor().document
 
-    const file = new File(['this is not a venue'], 'notes.txt', { type: 'text/plain' })
+    const file = new File([text], name, { type: 'text/plain' })
     const input = container.querySelector('input[type="file"]') as HTMLInputElement
     fireEvent.change(input, { target: { files: [file] } })
 
-    await waitFor(() => expect(editor().toasts.at(-1)?.message).toBe('Opened Untitled venue.'))
-
-    // Decision: the open is lenient by design and the loss is reported, not
-    // silent. `parseDocumentJson` never throws — a file it cannot read at all
-    // comes back as an empty venue carrying the warnings that say why — and
-    // the bar toasts every one of them, so the user is told the file was not
-    // JSON and that nothing in it was a CROWD document. What it costs is the
-    // venue that was on screen: the open resets the history, so a misclick in
-    // the file chooser is not undoable, and that is the price of the leniency
-    // that lets a damaged but real project through with its walls intact.
-    //
-    // Refusing the total-failure case before `replaceDocument` needs the bar
-    // to tell "not a CROWD document at all" from "a CROWD document that lost
-    // two walls", and the only signal for that today is the wording of the
-    // warnings. Matching on those strings from here couples the bar to
-    // sentences written for people to read; the honest fix is a flag on
-    // `ParseResult` in src/core/document/serialize.ts, which is not this
-    // file's to change. Recorded rather than papered over.
-    const messages = editor().toasts.map((toast) => toast.message)
-    expect(messages).toContain('That file is not valid JSON.')
-    expect(messages).toContain('The file did not contain a CROWD document; started empty.')
-    expect(messages).not.toContain('That file could not be opened.')
-    expect(editor().document.name).toBe('Untitled venue')
-    expect(editor().document.plan.walls).toHaveLength(0)
-    expect(editor().canUndo()).toBe(false)
-    expect(useSimulation.getState().phase).toBe('idle')
+    // Opened, either one replaced the venue on screen with an empty one full
+    // of the starter crowd, and the open resets history, so a misclick in the
+    // file chooser could not be undone.
+    await waitFor(() =>
+      expect(editor().toasts.at(-1)?.message).toBe(`${name} is not a CROWD project.`),
+    )
+    expect(editor().document).toBe(before)
+    expect(useSimulation.getState().phase).toBe('running')
   })
 
   it('leaves the venue alone when the file cannot be read at all', async () => {

@@ -10,8 +10,8 @@ import { useEffect } from 'react'
 import { useEditor, type ToolId } from '../state/editorStore'
 import { useSimulation } from '../state/simulationStore'
 import { planBounds } from '../core/model/planGeometry'
-import { documentFileName, serializeDocument } from '../core/document/serialize'
-import { downloadText, saveProject } from '../core/document/storage'
+import { isLocked } from '../core/document/mutations'
+import { downloadProject } from './downloadProject'
 import type { ViewportHandle } from './ViewportHost'
 import type { PlanObjectRef } from '../core/model/types'
 import {
@@ -124,11 +124,7 @@ export const useKeyboard = ({
           }
           case 's':
             event.preventDefault()
-            downloadText(documentFileName(editor.document), serializeDocument(editor.document))
-            void saveProject(editor.document)
-              .then(editor.markSaved)
-              .catch(() => undefined)
-            editor.toast('Project saved.', 'success')
+            void downloadProject()
             return
           case 'c': {
             if (editor.selection.length === 0) return
@@ -144,8 +140,14 @@ export const useKeyboard = ({
           case 'x': {
             if (editor.selection.length === 0) return
             event.preventDefault()
-            clipboard = copySelection(editor.document, editor.selection)
-            pasteCount = 0
+            // Only what the cut removes goes on the clipboard. A locked object,
+            // or a wall a locked door is hung in, stays where it is, and copying
+            // it too made the paste that follows a second one of it.
+            const removable = editor.selection.filter((ref) => !isLocked(editor.document, ref))
+            if (removable.length > 0) {
+              clipboard = copySelection(editor.document, removable)
+              pasteCount = 0
+            }
             editor.deleteSelection()
             return
           }

@@ -68,6 +68,18 @@ describe('clipboard', () => {
     expect(pasted.plan.furniture[pasted.plan.furniture.length - 1].locked).toBe(false)
   })
 
+  it('keeps every array it pastes nothing into', () => {
+    const document = doc()
+    const refs: PlanObjectRef[] = [{ kind: 'furniture', id: document.plan.furniture[0].id }]
+    const { document: pasted } = paste(document, copySelection(document, refs), { x: 1, y: 0 })
+    // The renderer diffs by identity, and pasting one chair rebuilt every wall.
+    expect(pasted.plan.walls).toBe(document.plan.walls)
+    expect(pasted.plan.openings).toBe(document.plan.openings)
+    expect(pasted.plan.zones).toBe(document.plan.zones)
+    expect(pasted.plan.servicePoints).toBe(document.plan.servicePoints)
+    expect(pasted.plan.furniture).toHaveLength(document.plan.furniture.length + 1)
+  })
+
   it('does nothing when the clipboard is empty', () => {
     const document = doc()
     const result = paste(document, copySelection(document, []), { x: 1, y: 1 })

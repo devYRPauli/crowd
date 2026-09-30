@@ -165,6 +165,18 @@ export const readFileAsText = (file: File): Promise<string> =>
     reader.readAsText(file)
   })
 
+/** The pixel size of an image, which is also how it is known to be one. */
+export const readImageSize = (src: string): Promise<{ width: number; height: number }> =>
+  new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () =>
+      image.naturalWidth > 0 && image.naturalHeight > 0
+        ? resolve({ width: image.naturalWidth, height: image.naturalHeight })
+        : reject(new Error('That image has no size.'))
+    image.onerror = () => reject(new Error('Could not read that image.'))
+    image.src = src
+  })
+
 export const readFileAsDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader()

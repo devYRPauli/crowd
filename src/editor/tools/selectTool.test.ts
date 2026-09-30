@@ -924,6 +924,22 @@ describe('alt-drag duplicates', () => {
     expect(copy?.b).toEqual({ x: 4, y: 3 })
   })
 
+  it('copies the doors in a wall along with it, as paste does', () => {
+    const h = harness({
+      walls: [wall('w', { x: 0, y: 0 }, { x: 6, y: 0 })],
+      openings: [door('d', 'w', 3)],
+    })
+    const tool = new SelectTool()
+
+    drag(tool, h, pick('wall', 'w', 1, 0), { x: 1, y: 4 }, { press: { altKey: true } })
+
+    // The copy was a blank wall: a doorway duplicated off a corridor came out
+    // with no door in it, and the plan quietly lost a way through.
+    const copy = h.doc().plan.walls.find((w) => w.id !== 'w')
+    expect(copy?.a).toEqual({ x: 0, y: 4 })
+    expect(h.doc().plan.openings.map((o) => o.wallId)).toEqual(['w', copy?.id])
+  })
+
   it('is one undo step, copy and move together', () => {
     const h = harness({ furniture: [item('a', 2, 2)] })
     const tool = new SelectTool()
@@ -1370,6 +1386,26 @@ describe('locked objects', () => {
     expect(wallById(h, 'w').b).toEqual({ x: 4, y: 0 })
   })
 
+  it('will not move a wall that a locked door is hung in', () => {
+    const h = harness({
+      walls: [wall('w', { x: 0, y: 0 }, { x: 4, y: 0 })],
+      openings: [door('d', 'w', 2, { locked: true })],
+    })
+    const tool = new SelectTool()
+
+    // The door is placed along its wall, so the wall carried a locked door
+    // with it wherever it was dragged, nudged or turned.
+    drag(tool, h, pick('wall', 'w', 1, 0), { x: 1, y: 3 })
+    tool.onKeyDown(press('ArrowRight'), h.ctx)
+    expect(tool.onKeyDown(press(']'), h.ctx)).toBe(false)
+
+    expect(h.selection()).toEqual([ref('wall', 'w')])
+    expect(h.draft()).toEqual([])
+    expect(h.edits).toEqual([])
+    expect(wallById(h, 'w').a).toEqual({ x: 0, y: 0 })
+    expect(wallById(h, 'w').b).toEqual({ x: 4, y: 0 })
+  })
+
   it('moves the rest of a mixed selection and leaves the locked one behind', () => {
     const h = harness({
       furniture: [item('free', 1, 1), item('pinned', 5, 5, { locked: true })],
@@ -1462,6 +1498,25 @@ describe('keyboard editing', () => {
 
     h.undo()
     expect(h.doc()).toBe(original)
+  })
+
+  it('starts a fresh undo step when the keys move something else', () => {
+    const h = harness({ furniture: [item('a', 2, 2), item('b', 6, 2)] })
+    const tool = new SelectTool()
+    h.ctx.setSelection([{ kind: 'furniture', id: 'a' }])
+    tool.onKeyDown(press('ArrowRight'), h.ctx)
+    tool.onKeyDown(press(']'), h.ctx)
+    // Picked from the layers list, which seals nothing: the second object's
+    // turn merged into the first's, and one undo took back both.
+    h.ctx.setSelection([{ kind: 'furniture', id: 'b' }])
+    tool.onKeyDown(press(']'), h.ctx)
+    tool.onKeyDown(press('ArrowRight'), h.ctx)
+
+    expect(h.undoSteps()).toBe(4)
+    h.undo()
+    h.undo()
+    expect(furnitureById(h, 'b').rotation).toBe(0)
+    expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 12, 9)
   })
 
   it('nudges a whole metre with Shift, whatever the grid is set to', () => {

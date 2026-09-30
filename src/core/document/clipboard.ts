@@ -144,16 +144,19 @@ export const paste = (
     }
   })
 
+  // An array the paste adds nothing to is kept as it was: the renderer diffs by
+  // identity, and pasting a chair should not redraw every wall.
+  const append = <T>(items: T[], added: T[]): T[] => (added.length ? [...items, ...added] : items)
   return {
     document: {
       ...doc,
       plan: {
         ...doc.plan,
-        walls: [...doc.plan.walls, ...walls],
-        openings: [...doc.plan.openings, ...openings],
-        furniture: [...doc.plan.furniture, ...furniture],
-        zones: [...doc.plan.zones, ...zones],
-        servicePoints: [...doc.plan.servicePoints, ...servicePoints],
+        walls: append(doc.plan.walls, walls),
+        openings: append(doc.plan.openings, openings),
+        furniture: append(doc.plan.furniture, furniture),
+        zones: append(doc.plan.zones, zones),
+        servicePoints: append(doc.plan.servicePoints, servicePoints),
       },
       updatedAt: new Date().toISOString(),
     },

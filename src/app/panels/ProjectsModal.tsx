@@ -110,7 +110,7 @@ export const ProjectsModal = ({
               try {
                 await saveProject(document)
                 rememberLastProject(document.id)
-                markSaved()
+                markSaved(document)
                 toast(`Saved “${document.name}”.`, 'success')
                 void refresh()
               } catch {

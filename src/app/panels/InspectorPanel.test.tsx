@@ -379,3 +379,114 @@ describe('the inspector with an area or a counter selected', () => {
     expect(screen.getByText('120').tagName).toBe('B')
   })
 })
+
+describe('the inspector with a locked object selected', () => {
+  it('will not move a locked door along its wall or delete it, and is where it gets unlocked', () => {
+    openWith({ walls: [makeWall()], openings: [makeDoor({ locked: true })] })
+    select({ kind: 'opening', id: 'door-1' })
+    show()
+
+    // A lock the plan honoured and the inspector did not was a lock you could
+    // walk round: the position slider and the width box moved a locked door.
+    expect(control(/^position along the wall$/i).disabled).toBe(true)
+    expect(control(/^width$/i).disabled).toBe(true)
+    expect((screen.getByText('Delete opening') as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByLabelText(/^locked$/i))
+    expect(firstOpening().locked).toBe(false)
+    expect(control(/^position along the wall$/i).disabled).toBe(false)
+  })
+
+  it('will not move or turn a locked wall from its length and angle', () => {
+    openWith({ walls: [makeWall({ locked: true })] })
+    select({ kind: 'wall', id: 'wall-1' })
+    show()
+
+    expect(control(/^length$/i).disabled).toBe(true)
+    expect(control(/^angle$/i).disabled).toBe(true)
+    // Its height and finish are not where it is, so they stay editable.
+    expect(control(/^height$/i).disabled).toBe(false)
+  })
+
+  it('will not move or turn a wall that a locked door is hung in', () => {
+    openWith({ walls: [makeWall()], openings: [makeDoor({ locked: true })] })
+    select({ kind: 'wall', id: 'wall-1' })
+    show()
+
+    // Turning the wall turned the door in it, lock or no lock.
+    expect(control(/^length$/i).disabled).toBe(true)
+    expect(control(/^angle$/i).disabled).toBe(true)
+    expect(screen.getByText('A locked door is in this wall.')).toBeTruthy()
+    expect((screen.getByText('Delete wall') as HTMLButtonElement).disabled).toBe(true)
+    // The wall is not locked itself; the door is where that gets undone.
+    expect((screen.getByLabelText(/^locked$/i) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('offers the lock on an area and a counter too', () => {
+    const zone: Zone = {
+      id: 'zone-1',
+      kind: 'keep-clear',
+      name: 'Stage apron',
+      polygon: [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 2, y: 2 },
+      ],
+    }
+    openWith({ zones: [zone] })
+    select({ kind: 'zone', id: 'zone-1' })
+    const { unmount } = show()
+    fireEvent.click(screen.getByLabelText(/^locked$/i))
+    expect(doc().plan.zones[0].locked).toBe(true)
+    expect((screen.getByText('Delete area') as HTMLButtonElement).disabled).toBe(true)
+    unmount()
+
+    openWith({
+      servicePoints: [
+        {
+          id: 'svc-1',
+          name: 'Bar',
+          position: { x: 0, y: 0 },
+          rotation: 0,
+          width: 2,
+          depth: 0.7,
+          servers: 3,
+          serviceTime: { kind: 'lognormal', mean: 45, sd: 15 },
+          queueSpacing: 0.6,
+        },
+      ],
+    })
+    select({ kind: 'service', id: 'svc-1' })
+    show()
+    fireEvent.click(screen.getByLabelText(/^locked$/i))
+    expect(doc().plan.servicePoints[0].locked).toBe(true)
+    expect((screen.getByText('Delete service point') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('the inspector sliders', () => {
+  it('makes one drag one undo step, not one per tick', () => {
+    openWith({ walls: [makeWall({ b: { x: 6, y: 0 } })], openings: [makeDoor()] })
+    select({ kind: 'opening', id: 'door-1' })
+    show()
+
+    const slider = control(/^position along the wall$/i)
+    for (const offset of ['2', '2.5', '3', '3.5']) {
+      fireEvent.change(slider, { target: { value: offset } })
+    }
+    fireEvent.pointerUp(slider)
+    expect(firstOpening().offset).toBeCloseTo(3.5, 6)
+
+    // Every tick used to be its own step, and taking back one drag of a door
+    // along a wall took one Ctrl+Z per notch it passed.
+    useEditor.getState().undo()
+    expect(firstOpening().offset).toBeCloseTo(1.5, 6)
+
+    // And the drag after it is a step of its own.
+    useEditor.getState().redo()
+    fireEvent.change(slider, { target: { value: '4' } })
+    fireEvent.pointerUp(slider)
+    useEditor.getState().undo()
+    expect(firstOpening().offset).toBeCloseTo(3.5, 6)
+  })
+})

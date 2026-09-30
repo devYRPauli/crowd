@@ -330,15 +330,13 @@ describe('removing objects', () => {
     expect(next.plan.openings.map((o) => o.id)).toContain(f.glazing.id)
   })
 
-  it('rebuilds every plan array even when only one kind was removed', () => {
+  it('rebuilds only the plan array it took something from', () => {
     const f = scene()
     const next = removeObjects(f.doc, [{ kind: 'zone', id: f.entry.id }])
 
-    // Asserted as-is: removeObjects filters all five arrays unconditionally, so
-    // nothing survives by reference. The objects inside still do.
-    expect(rebuiltArrays(f.doc, next)).toEqual(PLAN_ARRAYS)
-    expect(next.plan.walls).toEqual(f.doc.plan.walls)
-    expect(next.plan.walls[0]).toBe(f.doc.plan.walls[0])
+    // It used to filter all five arrays unconditionally, so nothing survived by
+    // reference and the renderer, which diffs by identity, redrew the lot.
+    expect(rebuiltArrays(f.doc, next)).toEqual(['zones'])
     expect(next.plan.zones).toEqual([])
   })
 
@@ -423,15 +421,12 @@ describe('removing objects', () => {
     expect(removeObjects(f.doc, [])).toBe(f.doc)
   })
 
-  it('still makes a new document when the thing was already gone', () => {
+  it('hands back the same document when the thing was already gone', () => {
     const f = scene()
-    const next = removeObjects(f.doc, [{ kind: 'wall', id: 'wall_gone' }])
-
     // `apply` only skips history when the document comes back identical, so a
-    // delete that matched nothing costs a real undo step and marks the file
-    // dirty. Asserted as-is.
-    expect(next).not.toBe(f.doc)
-    expect(next.plan.walls).toEqual(f.doc.plan.walls)
+    // delete that matched nothing cost a real undo step and marked the file
+    // dirty.
+    expect(removeObjects(f.doc, [{ kind: 'wall', id: 'wall_gone' }])).toBe(f.doc)
   })
 })
 
@@ -442,26 +437,17 @@ describe('edits that hit nothing', () => {
     expect(updateBackdrop(f.doc, { opacity: 0.2 })).toBe(f.doc)
   })
 
-  it('returns a new wrapper for every other miss, sharing all the arrays', () => {
+  it('returns the very same document for every other miss', () => {
     const f = scene()
-    // updateWall and updateOpening short-circuit, the rest do not. Harmless for
-    // the data, but it is the difference between a no-op and an undo step.
-    // Asserted as-is for the ones that still rebuild.
+    // Only updateWall and updateOpening used to short-circuit. The rest handed
+    // back a new wrapper, and a stale edit from an inspector left open on an
+    // object that had gone cost an undo step and marked the file dirty.
     expect(updateOpening(f.doc, 'open_gone', { width: 1 })).toBe(f.doc)
-    for (const next of [
-      updateFurniture(f.doc, 'item_gone', { rotation: 1 }),
-      updateZone(f.doc, 'zone_gone', { name: 'Nowhere' }),
-      updateServicePoint(f.doc, 'svc_gone', { servers: 3 }),
-    ]) {
-      expect(next).not.toBe(f.doc)
-      expect(rebuiltArrays(f.doc, next)).toEqual([])
-    }
-    expect(updatePopulation(f.doc, 'pop_gone', { count: 5 }).scenario.populations).toBe(
-      f.doc.scenario.populations,
-    )
-    expect(removePopulation(f.doc, 'pop_gone').scenario.populations).toEqual(
-      f.doc.scenario.populations,
-    )
+    expect(updateFurniture(f.doc, 'item_gone', { rotation: 1 })).toBe(f.doc)
+    expect(updateZone(f.doc, 'zone_gone', { name: 'Nowhere' })).toBe(f.doc)
+    expect(updateServicePoint(f.doc, 'svc_gone', { servers: 3 })).toBe(f.doc)
+    expect(updatePopulation(f.doc, 'pop_gone', { count: 5 })).toBe(f.doc)
+    expect(removePopulation(f.doc, 'pop_gone')).toBe(f.doc)
   })
 
   it('adds nothing for an empty batch', () => {

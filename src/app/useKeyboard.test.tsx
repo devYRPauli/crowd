@@ -14,18 +14,23 @@
 
 import { useRef } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useKeyboard } from './useKeyboard'
 import type { ViewportHandle } from './ViewportHost'
 import { useEditor, type ToolId } from '../state/editorStore'
 import { useSimulation } from '../state/simulationStore'
 import { createHistory } from '../core/document/history'
 import { createDocument } from '../core/model/defaults'
-import { renameDocument } from '../core/document/mutations'
+import { renameDocument, updateOpening } from '../core/document/mutations'
 import { PlanBuilder } from '../library/planBuilder'
 import { planBounds } from '../core/model/planGeometry'
 import { documentFileName, serializeDocument } from '../core/document/serialize'
-import { downloadText, saveProject } from '../core/document/storage'
+import {
+  downloadText,
+  recallLastProject,
+  rememberLastProject,
+  saveProject,
+} from '../core/document/storage'
 import type * as Storage from '../core/document/storage'
 import type { CrowdDocument, PlanObjectRef } from '../core/model/types'
 
@@ -395,6 +400,21 @@ describe('the clipboard', () => {
     expect(pasted?.servers).toBe(hall.bar.servers)
   })
 
+  it('cuts only what it removes, so a wall a locked door is hung in is not pasted twice', () => {
+    mount()
+    const locked = updateOpening(hall.document, hall.door.id, { locked: true })
+    useEditor.setState({ document: locked, history: createHistory(locked) })
+    editor().setSelection([refTo('wall', hall.room.south.id), refTo('furniture', hall.table.id)])
+
+    press('x', { metaKey: true })
+    expect(editor().document.plan.walls).toHaveLength(4)
+    expect(editor().document.plan.furniture).toHaveLength(0)
+
+    press('v', { metaKey: true })
+    expect(editor().document.plan.walls).toHaveLength(4)
+    expect(editor().document.plan.furniture).toHaveLength(1)
+  })
+
   it('duplicates without clobbering what was copied', () => {
     mount()
     editor().setSelection([refTo('furniture', hall.table.id)])
@@ -571,8 +591,13 @@ describe('the view and the run', () => {
 })
 
 describe('saving', () => {
-  it('downloads and stores the project, and says so', () => {
+  it('downloads and stores the project, and says so once it has', async () => {
     mount()
+    rememberLastProject('the-venue-open-before')
+    let finish = (): void => undefined
+    vi.mocked(saveProject).mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finish = resolve)),
+    )
     press('s', { metaKey: true })
 
     const doc = editor().document
@@ -581,9 +606,29 @@ describe('saving', () => {
       serializeDocument(doc),
     )
     expect(vi.mocked(saveProject)).toHaveBeenCalledWith(doc)
-    expect(editor().toasts.at(-1)?.message).toBe('Project saved.')
+    // Said before the write had settled, "saved" was a guess.
+    expect(editor().toasts).toHaveLength(0)
+    finish()
+    await waitFor(() =>
+      expect(editor().toasts.at(-1)?.message).toBe('Project downloaded and saved.'),
+    )
+    // Saved, it is the venue a reload opens, not the one open before it.
+    expect(recallLastProject()).toBe(doc.id)
     // "s" on its own is the service-point tool; with the modifier held it must
     // not also change tool underneath the save.
     expect(editor().tool).toBe('select')
+  })
+
+  it('says so when the browser would not keep a copy', async () => {
+    mount()
+    editor().apply((doc) => renameDocument(doc, 'Hall B'), 'Rename')
+    vi.mocked(saveProject).mockRejectedValueOnce(new Error('QuotaExceededError'))
+    press('s', { metaKey: true })
+
+    await waitFor(() => expect(editor().toasts.at(-1)?.tone).toBe('warn'))
+    expect(editor().toasts.at(-1)?.message).toBe(
+      'Project downloaded, but this browser would not keep a copy.',
+    )
+    expect(editor().dirty).toBe(true)
   })
 })

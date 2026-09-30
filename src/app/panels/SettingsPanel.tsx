@@ -6,7 +6,7 @@ import { useEditor } from '../../state/editorStore'
 import { updateSettings } from '../../core/document/mutations'
 import { Checkbox, Field, LengthInput, Segmented, Slider } from '../components/ui'
 import type { UnitSystem } from '../../core/model/types'
-import { readFileAsDataUrl } from '../../core/document/storage'
+import { readFileAsDataUrl, readImageSize } from '../../core/document/storage'
 import { setBackdrop } from '../../core/document/mutations'
 
 export const SettingsPanel = () => {
@@ -15,10 +15,15 @@ export const SettingsPanel = () => {
   const view = useEditor((state) => state.view)
   const setView = useEditor((state) => state.setView)
   const toast = useEditor((state) => state.toast)
+  const sealHistory = useEditor((state) => state.sealHistory)
+  const backdropLocked = Boolean(document.plan.backdrop?.locked)
   const settings = document.settings
 
-  const patch = (changes: Parameters<typeof updateSettings>[1], label: string) =>
-    apply((doc) => updateSettings(doc, changes), label)
+  const patch = (
+    changes: Parameters<typeof updateSettings>[1],
+    label: string,
+    coalesceKey?: string,
+  ) => apply((doc) => updateSettings(doc, changes), label, coalesceKey)
 
   return (
     <>
@@ -81,7 +86,10 @@ export const SettingsPanel = () => {
             step={5}
             value={settings.angleSnapDeg}
             format={(v) => (v === 0 ? 'off' : `${v}°`)}
-            onChange={(angleSnapDeg) => patch({ angleSnapDeg }, 'Change angle snap')}
+            onChange={(angleSnapDeg) =>
+              patch({ angleSnapDeg }, 'Change angle snap', 'slider:angleSnapDeg')
+            }
+            onRelease={sealHistory}
           />
           <p className="hint">
             Hold <span className="kbd">Alt</span> while drawing to ignore snapping for one move.
@@ -120,25 +128,41 @@ export const SettingsPanel = () => {
             Drop in a scan or a screenshot of an existing plan, scale it against a known dimension,
             and draw over it. The image is stored inside the project.
           </p>
-          <label className="btn" style={{ cursor: 'pointer' }}>
+          {/* Choosing another image replaces the one there, with its scale and
+              turn. The lock that kept Remove the image off did not keep this. */}
+          {backdropLocked ? (
+            <p className="hint">The reference image is locked. Unlock it to replace it.</p>
+          ) : null}
+          <label
+            className="btn"
+            aria-disabled={backdropLocked}
+            style={{ cursor: backdropLocked ? 'default' : 'pointer' }}
+          >
             Choose an image…
             <input
               type="file"
               accept="image/*"
               className="visually-hidden"
+              disabled={backdropLocked}
               onChange={async (event) => {
                 const file = event.target.files?.[0]
                 if (!file) return
                 try {
                   const src = await readFileAsDataUrl(file)
+                  // Twenty metres across is only a starting scale; the planner
+                  // sets the real one against a known dimension, and that keeps
+                  // the shape. So the shape has to be right from the start: at
+                  // a fixed 20 m by 14 m a portrait scan was squashed flat.
+                  const pixels = await readImageSize(src)
+                  const width = 20
                   apply(
                     (doc) =>
                       setBackdrop(doc, {
                         src,
                         position: { x: 0, y: 0 },
                         rotation: 0,
-                        width: 20,
-                        depth: 14,
+                        width,
+                        depth: (width * pixels.height) / pixels.width,
                         opacity: 0.55,
                         visible: true,
                       }),

@@ -2,11 +2,12 @@
  * @vitest-environment jsdom
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
 import { useEditor } from '../../state/editorStore'
 import { createDocument } from '../../core/model/defaults'
+import { setBackdrop } from '../../core/document/mutations'
 import { DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS } from '../../core/model/standards'
 import type { CrowdDocument, Wall } from '../../core/model/types'
 
@@ -158,6 +159,61 @@ describe('new wall defaults', () => {
 })
 
 describe('tracing a floor plan', () => {
+  // jsdom decodes no images, so this one reports the size a real decode of a
+  // portrait survey would.
+  class PortraitImage {
+    naturalWidth = 1000
+    naturalHeight = 2000
+    onload: (() => void) | null = null
+    onerror: (() => void) | null = null
+    set src(_: string) {
+      queueMicrotask(() => this.onload?.())
+    }
+  }
+  beforeEach(() => vi.stubGlobal('Image', PortraitImage))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('keeps the shape of the image it was given', async () => {
+    openWith()
+    const { container } = render(<SettingsPanel />)
+    const picker = container.querySelector('input[type="file"]')
+    if (!picker) throw new Error('No file input')
+    fireEvent.change(picker, {
+      target: { files: [new File(['fake-png-bytes'], 'survey.png', { type: 'image/png' })] },
+    })
+
+    await waitFor(() => expect(doc().plan.backdrop).toBeDefined())
+    // Every image used to land 20 m by 14 m, so a portrait scan was squashed
+    // to under half its height and every length traced off it was wrong.
+    const backdrop = doc().plan.backdrop
+    expect(backdrop?.depth).toBeCloseTo((backdrop?.width ?? 0) * 2, 9)
+  })
+
+  it('will not replace a reference image that is locked', () => {
+    openWith()
+    useEditor.getState().apply(
+      (doc) =>
+        setBackdrop(doc, {
+          src: 'data:image/png;base64,AAAA',
+          position: { x: 3, y: 4 },
+          rotation: 0.2,
+          width: 37.4,
+          depth: 20,
+          opacity: 0.55,
+          visible: true,
+          locked: true,
+        }),
+      'Set reference image',
+    )
+    const { container } = render(<SettingsPanel />)
+
+    // Remove the image was refused and this, which replaces the image along
+    // with its scale and turn, was not.
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(picker?.disabled).toBe(true)
+    expect(screen.getByText(/reference image is locked/i)).toBeTruthy()
+  })
+
   it('stores a chosen image inside the project and says what to do with it next', async () => {
     openWith()
     const { container } = render(<SettingsPanel />)

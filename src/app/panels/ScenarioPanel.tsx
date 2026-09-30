@@ -42,6 +42,7 @@ const STEP_LABELS: Record<ItineraryStep['kind'], string> = {
 const ItineraryEditor = ({ population }: { population: Population }) => {
   const document = useEditor((state) => state.document)
   const apply = useEditor((state) => state.apply)
+  const sealHistory = useEditor((state) => state.sealHistory)
 
   const zones = document.plan.zones
   const services = document.plan.servicePoints
@@ -64,7 +65,7 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
   /** Several counters are offered as a tick list; one is offered as a select. */
   const isMulti = (kind: ItineraryStep['kind']) => kind === 'service' && services.length > 1
 
-  const patchStep = (stepId: string, patch: Partial<ItineraryStep>) => {
+  const patchStep = (stepId: string, patch: Partial<ItineraryStep>, coalesceKey?: string) => {
     apply(
       (doc) =>
         updatePopulation(doc, population.id, {
@@ -73,6 +74,7 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
           ),
         }),
       'Edit itinerary',
+      coalesceKey,
     )
   }
 
@@ -224,7 +226,10 @@ const ItineraryEditor = ({ population }: { population: Population }) => {
                 step={0.05}
                 value={step.probability ?? 1}
                 format={(v) => `${(v * 100).toFixed(0)}%`}
-                onChange={(probability) => patchStep(step.id, { probability })}
+                onChange={(probability) =>
+                  patchStep(step.id, { probability }, `slider:${step.id}:probability`)
+                }
+                onRelease={sealHistory}
               />
             ) : null}
           </div>
@@ -347,8 +352,13 @@ const PopulationEditor = ({ population, index }: { population: Population; index
           max={12}
           value={population.arrival.waves ?? 4}
           onChange={(waves) =>
-            patch({ arrival: { ...population.arrival, waves } }, 'Change arrivals')
+            patch(
+              { arrival: { ...population.arrival, waves } },
+              'Change arrivals',
+              `slider:${population.id}:waves`,
+            )
           }
+          onRelease={sealHistory}
         />
       ) : null}
 
@@ -361,8 +371,13 @@ const PopulationEditor = ({ population, index }: { population: Population; index
           value={population.arrival.peakAt ?? 0.5}
           format={(v) => formatDuration(v * population.arrival.windowS)}
           onChange={(peakAt) =>
-            patch({ arrival: { ...population.arrival, peakAt } }, 'Change arrivals')
+            patch(
+              { arrival: { ...population.arrival, peakAt } },
+              'Change arrivals',
+              `slider:${population.id}:peakAt`,
+            )
           }
+          onRelease={sealHistory}
         />
       ) : null}
 
@@ -402,6 +417,7 @@ const PopulationEditor = ({ population, index }: { population: Population; index
 export const ScenarioPanel = () => {
   const document = useEditor((state) => state.document)
   const apply = useEditor((state) => state.apply)
+  const sealHistory = useEditor((state) => state.sealHistory)
   const scenario = document.scenario
 
   const total = useMemo(
@@ -495,8 +511,10 @@ export const ScenarioPanel = () => {
                     (doc) =>
                       updateScenario(doc, { routing: { ...scenario.routing, congestionWeight } }),
                     'Change routing',
+                    'slider:congestionWeight',
                   )
                 }
+                onRelease={sealHistory}
               />
               <Slider
                 label="Variety between people"
@@ -510,8 +528,10 @@ export const ScenarioPanel = () => {
                     (doc) =>
                       updateScenario(doc, { routing: { ...scenario.routing, routeVariety } }),
                     'Change routing',
+                    'slider:routeVariety',
                   )
                 }
+                onRelease={sealHistory}
               />
             </>
           ) : null}
@@ -523,8 +543,13 @@ export const ScenarioPanel = () => {
             value={scenario.speedFactor}
             format={(v) => `${(v * 100).toFixed(0)}% of normal`}
             onChange={(speedFactor) =>
-              apply((doc) => updateScenario(doc, { speedFactor }), 'Change walking speed')
+              apply(
+                (doc) => updateScenario(doc, { speedFactor }),
+                'Change walking speed',
+                'slider:speedFactor',
+              )
             }
+            onRelease={sealHistory}
           />
         </div>
 

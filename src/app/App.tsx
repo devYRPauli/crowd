@@ -217,7 +217,7 @@ export const App = () => {
       void saveProject(document)
         .then(() => {
           rememberLastProject(document.id)
-          markSaved()
+          markSaved(document)
           autosaveFailed.current = false
         })
         .catch(() => {

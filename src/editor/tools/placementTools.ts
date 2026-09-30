@@ -11,6 +11,7 @@
 import type { Tool, ToolContext } from '../types'
 import type { PointerInfo } from '../../render/Viewport'
 import type { Vec2 } from '../../core/math/vec2'
+import type { Plan, ServicePoint } from '../../core/model/types'
 import { angleOf, distance, fromAngle, sub, add, scale, normalize } from '../../core/math/vec2'
 import { distanceToSegment, rectPolygon } from '../../core/math/geometry'
 import {
@@ -23,7 +24,7 @@ import { makeFurniture, nearestWall, wallAlignedPlacement } from '../geometryHel
 import { resolveCatalogItem } from '../../library/catalog'
 import { newId } from '../../core/model/ids'
 import { formatLength } from '../../core/model/units'
-import { wallLength } from '../../core/model/planGeometry'
+import { servicePolygon, serviceQueue, wallLength } from '../../core/model/planGeometry'
 import { DOUBLE_DOOR_FROM, OPENING_JAMB } from '../../core/model/standards'
 import { DEFAULT_SERVICE_POINT } from '../../core/model/defaults'
 
@@ -42,6 +43,11 @@ export class FurnitureTool implements Tool {
 
   onActivate(): void {
     this.rotation = 0
+  }
+
+  /** Redraw the preview; placing an item must not undo the turn it was given. */
+  onRefresh(ctx: ToolContext): void {
+    this.refresh(ctx)
   }
 
   onDeactivate(ctx: ToolContext): void {
@@ -364,20 +370,38 @@ export class ServiceTool implements Tool {
     this.refresh(ctx)
   }
 
+  /**
+   * The counter a click would place. The preview draws this same object through
+   * `servicePolygon` and `serviceQueue`, so what is shown on the cursor is the
+   * counter and queue the engine will be handed, not a copy of their geometry.
+   */
+  private counterAt(placement: { position: Vec2; rotation: number }, plan: Plan): ServicePoint {
+    // Numbered past the highest one there is, not by count: with one of two
+    // deleted, the next counter took the name of the one still standing.
+    const index =
+      Math.max(
+        0,
+        ...plan.servicePoints.map((s) => Number(/^Service point (\d+)$/.exec(s.name)?.[1] ?? 0)),
+      ) + 1
+    return {
+      id: newId('svc'),
+      name: `Service point ${index}`,
+      position: placement.position,
+      rotation: placement.rotation,
+      ...DEFAULT_SERVICE_POINT,
+      serviceTime: { ...DEFAULT_SERVICE_POINT.serviceTime },
+      servers: 2,
+    }
+  }
+
   private refresh(ctx: ToolContext): void {
     if (!this.preview) return
-    const { width, depth } = DEFAULT_SERVICE_POINT
-    const outward = fromAngle(this.preview.rotation - Math.PI / 2)
-    const head = add(this.preview.position, scale(outward, depth / 2 + 1))
-    const tail = add(head, scale(outward, 6))
+    const counter = this.counterAt(this.preview, ctx.document.plan)
+    const queue = serviceQueue(counter)
+    const tail = queue[queue.length - 1]
     ctx.setDraft([
-      {
-        kind: 'rect',
-        points: rectPolygon(this.preview.position, width, depth, this.preview.rotation),
-        color: '#3f9ab0',
-        filled: true,
-      },
-      { kind: 'polyline', points: [head, tail], color: '#3f9ab0' },
+      { kind: 'rect', points: servicePolygon(counter), color: '#3f9ab0', filled: true },
+      { kind: 'polyline', points: queue, color: '#3f9ab0' },
     ])
     ctx.setLabels([
       {
@@ -394,16 +418,7 @@ export class ServiceTool implements Tool {
   onPointerDown(info: PointerInfo, ctx: ToolContext): void {
     const resolved = this.resolve(info, ctx)
     if (!resolved) return
-    const index = ctx.document.plan.servicePoints.length + 1
-    const point = {
-      id: newId('svc'),
-      name: `Service point ${index}`,
-      position: resolved.position,
-      rotation: resolved.rotation,
-      ...DEFAULT_SERVICE_POINT,
-      serviceTime: { ...DEFAULT_SERVICE_POINT.serviceTime },
-      servers: 2,
-    }
+    const point = this.counterAt(resolved, ctx.document.plan)
     ctx.apply((doc) => addServicePoint(doc, point), 'Add service point')
     ctx.seal()
     ctx.setSelection([{ kind: 'service', id: point.id }])
@@ -443,13 +458,11 @@ export class QueueTool implements Tool {
     return ctx.document.plan.servicePoints.find((s) => s.id === id) ?? null
   }
 
+  /** The queue this tool may edit. A locked counter's queue is not one. */
   private queueOf(ctx: ToolContext): { id: string; points: Vec2[] } | null {
     const service = this.activeService(ctx)
-    if (!service) return null
-    if (service.queue && service.queue.length >= 2) return { id: service.id, points: service.queue }
-    const outward = fromAngle(service.rotation - Math.PI / 2)
-    const head = add(service.position, scale(outward, service.depth / 2 + 1))
-    return { id: service.id, points: [head, add(head, scale(outward, 6))] }
+    if (!service || service.locked) return null
+    return { id: service.id, points: serviceQueue(service) }
   }
 
   onActivate(ctx: ToolContext): void {
@@ -465,8 +478,22 @@ export class QueueTool implements Tool {
   private refresh(ctx: ToolContext): void {
     const queue = this.queueOf(ctx)
     if (!queue) {
+      const locked = this.activeService(ctx)
       ctx.setDraft([])
-      ctx.setLabels([])
+      ctx.setLabels(
+        locked
+          ? [
+              {
+                id: 'queue-locked',
+                text: `${locked.name} is locked\nunlock it to edit its queue`,
+                x: locked.position.x,
+                y: 0.7,
+                z: locked.position.y,
+                variant: 'name',
+              },
+            ]
+          : [],
+      )
       return
     }
     const handleSize = 6 * ctx.scale

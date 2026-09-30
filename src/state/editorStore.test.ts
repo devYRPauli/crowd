@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useEditor } from './editorStore'
 import { createHistory } from '../core/document/history'
-import { addWall, renameDocument, updateFurniture } from '../core/document/mutations'
+import { addWall, renameDocument, updateFurniture, updateOpening } from '../core/document/mutations'
 import { createDocument, createPopulation } from '../core/model/defaults'
 import { PlanBuilder, step } from '../library/planBuilder'
 import {
@@ -152,7 +152,7 @@ describe('editing the venue', () => {
     editor().apply((doc) => renameDocument(doc, 'Riverside Hall — evening'), 'Rename')
     expect(editor().dirty).toBe(true)
 
-    editor().markSaved()
+    editor().markSaved(editor().document)
     expect(editor().dirty).toBe(false)
 
     // Undoing past the saved state is itself an unsaved change.
@@ -165,6 +165,17 @@ describe('editing the venue', () => {
     // redundant save; missing one loses the venue.
     editor().redo()
     expect(editor().document.name).toBe('Riverside Hall — evening')
+    expect(editor().dirty).toBe(true)
+  })
+
+  it('keeps an edit made while the save was writing unsaved', () => {
+    editor().apply((doc) => renameDocument(doc, 'Hall A'), 'Rename')
+    const writing = editor().document
+    editor().apply((doc) => renameDocument(doc, 'Hall B'), 'Rename')
+
+    // The write finishes after the second edit. Clearing the flag then said
+    // Hall B was saved, and autosave, which waits on the flag, never wrote it.
+    editor().markSaved(writing)
     expect(editor().dirty).toBe(true)
   })
 })
@@ -359,6 +370,25 @@ describe('deleting the selection', () => {
     // selection follows the document, so nothing is left pointing at it.
     expect(editor().document.plan.openings).toEqual([])
     expect(editor().selection).toEqual([])
+  })
+
+  it('keeps a wall that has a locked door in it', () => {
+    editor().apply((doc) => updateOpening(doc, hall.door.id, { locked: true }), 'Lock')
+    editor().setSelection([ref('wall', hall.room.south.id), ref('furniture', hall.table.id)])
+    editor().deleteSelection()
+
+    // A door goes with its wall, so deleting the wall deleted a door the lock
+    // said could not be deleted.
+    expect(editor().document.plan.openings.map((o) => o.id)).toEqual([hall.door.id])
+    expect(editor().document.plan.walls.map((w) => w.id)).toContain(hall.room.south.id)
+    expect(editor().document.plan.furniture.map((f) => f.id)).not.toContain(hall.table.id)
+    expect(editor().selection).toEqual([ref('wall', hall.room.south.id)])
+    expect(editor().toasts.at(-1)?.message).toBe('A locked door is in that wall.')
+
+    const kept = { document: editor().document, history: editor().history }
+    editor().deleteSelection()
+    expect(editor().document).toBe(kept.document)
+    expect(editor().history).toBe(kept.history)
   })
 })
 

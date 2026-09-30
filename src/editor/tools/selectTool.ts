@@ -31,7 +31,7 @@ import {
   updateZone,
   updateBackdrop,
 } from '../../core/document/mutations'
-import { newId } from '../../core/model/ids'
+import { copySelection, paste } from '../../core/document/clipboard'
 import { formatLength } from '../../core/model/units'
 import { wallLength } from '../../core/model/planGeometry'
 
@@ -235,53 +235,6 @@ const rotateObject = (
   }
 }
 
-/** Copy the selected objects, returning the document and the new references. */
-const duplicateSelection = (
-  doc: CrowdDocument,
-  refs: readonly PlanObjectRef[],
-): { doc: CrowdDocument; refs: PlanObjectRef[] } => {
-  let next = doc
-  const created: PlanObjectRef[] = []
-  for (const ref of refs) {
-    if (ref.kind === 'furniture') {
-      const item = next.plan.furniture.find((f) => f.id === ref.id)
-      if (!item) continue
-      const copy = { ...item, id: newId('item'), locked: false }
-      next = { ...next, plan: { ...next.plan, furniture: [...next.plan.furniture, copy] } }
-      created.push({ kind: 'furniture', id: copy.id })
-    } else if (ref.kind === 'wall') {
-      const wall = next.plan.walls.find((w) => w.id === ref.id)
-      if (!wall) continue
-      const copy = { ...wall, id: newId('wall'), locked: false }
-      next = { ...next, plan: { ...next.plan, walls: [...next.plan.walls, copy] } }
-      created.push({ kind: 'wall', id: copy.id })
-    } else if (ref.kind === 'zone') {
-      const zone = next.plan.zones.find((z) => z.id === ref.id)
-      if (!zone) continue
-      const copy = {
-        ...zone,
-        id: newId('zone'),
-        polygon: zone.polygon.map((p) => ({ ...p })),
-        locked: false,
-      }
-      next = { ...next, plan: { ...next.plan, zones: [...next.plan.zones, copy] } }
-      created.push({ kind: 'zone', id: copy.id })
-    } else if (ref.kind === 'service') {
-      const point = next.plan.servicePoints.find((s) => s.id === ref.id)
-      if (!point) continue
-      const copy = {
-        ...point,
-        id: newId('svc'),
-        locked: false,
-        ...(point.queue ? { queue: point.queue.map((p) => ({ ...p })) } : {}),
-      }
-      next = { ...next, plan: { ...next.plan, servicePoints: [...next.plan.servicePoints, copy] } }
-      created.push({ kind: 'service', id: copy.id })
-    }
-  }
-  return { doc: next, refs: created }
-}
-
 export class SelectTool implements Tool {
   readonly id = 'select' as const
   readonly hint =
@@ -300,7 +253,7 @@ export class SelectTool implements Tool {
       const ref = refs[0]
       if (ref.kind === 'wall') {
         const wall = doc.plan.walls.find((w) => w.id === ref.id)
-        if (wall && !wall.locked) {
+        if (wall && !isLocked(doc, ref)) {
           out.push({ id: 'wall-a', position: wall.a, kind: 'endpoint' })
           out.push({ id: 'wall-b', position: wall.b, kind: 'endpoint' })
         }
@@ -449,8 +402,10 @@ export class SelectTool implements Tool {
         let doc = ctx.document
         let working = refs
         if (this.mode.duplicate) {
-          const copy = duplicateSelection(doc, refs)
-          doc = copy.doc
+          // Duplicating is pasting in place. Its own copy of paste left the
+          // doors out of a duplicated wall.
+          const copy = paste(doc, copySelection(doc, refs), { x: 0, y: 0 })
+          doc = copy.document
           working = copy.refs
           ctx.apply(() => doc, 'Duplicate', 'duplicate')
           ctx.setSelection(working)
@@ -721,6 +676,11 @@ export class SelectTool implements Tool {
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
     const step = event.shiftKey ? 1 : ctx.document.settings.gridSize
+    // A run of presses on one selection is one step. Keyed by the selection,
+    // because nothing seals between presses: picking another object from the
+    // layers list and pressing on merged its edit into the last one's.
+    const burst = (kind: string, refs: PlanObjectRef[]) =>
+      `${kind}:${refs.map((ref) => `${ref.kind}:${ref.id}`).join(',')}`
     const nudge = (dx: number, dy: number) => {
       const refs = this.movable(ctx)
       if (refs.length === 0) return
@@ -735,7 +695,7 @@ export class SelectTool implements Tool {
           return next
         },
         'Nudge',
-        'nudge',
+        burst('nudge', refs),
       )
     }
     switch (event.key) {
@@ -769,7 +729,7 @@ export class SelectTool implements Tool {
             return next
           },
           'Rotate',
-          'rotate-key',
+          burst('rotate-key', refs),
         )
         return true
       }

@@ -135,15 +135,20 @@ export const updateFurniture = (
   doc: CrowdDocument,
   id: string,
   patch: Partial<FurnitureItem>,
-): CrowdDocument => withPlan(doc, { furniture: replaceById(doc.plan.furniture, id, patch) })
+): CrowdDocument => {
+  const furniture = replaceById(doc.plan.furniture, id, patch)
+  return furniture === doc.plan.furniture ? doc : withPlan(doc, { furniture })
+}
 
 // --- zones -------------------------------------------------------------------
 
 export const addZone = (doc: CrowdDocument, zone: Zone): CrowdDocument =>
   withPlan(doc, { zones: [...doc.plan.zones, zone] })
 
-export const updateZone = (doc: CrowdDocument, id: string, patch: Partial<Zone>): CrowdDocument =>
-  withPlan(doc, { zones: replaceById(doc.plan.zones, id, patch) })
+export const updateZone = (doc: CrowdDocument, id: string, patch: Partial<Zone>): CrowdDocument => {
+  const zones = replaceById(doc.plan.zones, id, patch)
+  return zones === doc.plan.zones ? doc : withPlan(doc, { zones })
+}
 
 // --- service points ----------------------------------------------------------
 
@@ -154,7 +159,10 @@ export const updateServicePoint = (
   doc: CrowdDocument,
   id: string,
   patch: Partial<ServicePoint>,
-): CrowdDocument => withPlan(doc, { servicePoints: replaceById(doc.plan.servicePoints, id, patch) })
+): CrowdDocument => {
+  const servicePoints = replaceById(doc.plan.servicePoints, id, patch)
+  return servicePoints === doc.plan.servicePoints ? doc : withPlan(doc, { servicePoints })
+}
 
 // --- backdrop ----------------------------------------------------------------
 
@@ -205,14 +213,29 @@ export const removeObjects = (
   const serviceIds = new Set(refs.filter((r) => r.kind === 'service').map((r) => r.id))
   const dropBackdrop = refs.some((r) => r.kind === 'backdrop')
 
+  // Arrays nothing was taken from are kept as they were: the renderer diffs by
+  // identity, and a delete that matched nothing must hand back the document
+  // itself or it costs an undo step and marks the file dirty.
+  const keep = <T>(items: T[], drop: (item: T) => boolean): T[] => {
+    const next = items.filter((item) => !drop(item))
+    return next.length === items.length ? items : next
+  }
   const plan: Plan = {
-    walls: doc.plan.walls.filter((w) => !wallIds.has(w.id)),
-    openings: doc.plan.openings.filter((o) => !openingIds.has(o.id) && !wallIds.has(o.wallId)),
-    furniture: doc.plan.furniture.filter((f) => !furnitureIds.has(f.id)),
-    zones: doc.plan.zones.filter((z) => !zoneIds.has(z.id)),
-    servicePoints: doc.plan.servicePoints.filter((s) => !serviceIds.has(s.id)),
+    walls: keep(doc.plan.walls, (w) => wallIds.has(w.id)),
+    openings: keep(doc.plan.openings, (o) => openingIds.has(o.id) || wallIds.has(o.wallId)),
+    furniture: keep(doc.plan.furniture, (f) => furnitureIds.has(f.id)),
+    zones: keep(doc.plan.zones, (z) => zoneIds.has(z.id)),
+    servicePoints: keep(doc.plan.servicePoints, (s) => serviceIds.has(s.id)),
   }
   if (doc.plan.backdrop && !dropBackdrop) plan.backdrop = doc.plan.backdrop
+  const untouched =
+    plan.walls === doc.plan.walls &&
+    plan.openings === doc.plan.openings &&
+    plan.furniture === doc.plan.furniture &&
+    plan.zones === doc.plan.zones &&
+    plan.servicePoints === doc.plan.servicePoints &&
+    plan.backdrop === doc.plan.backdrop
+  if (untouched) return doc
 
   // Itineraries and entry lists can reference deleted zones, counters — or
   // doors, since a door marked as a way in or out is a destination in its own
@@ -274,14 +297,20 @@ export const updatePopulation = (
   doc: CrowdDocument,
   id: string,
   patch: Partial<Population>,
-): CrowdDocument =>
-  updateScenario(doc, { populations: replaceById(doc.scenario.populations, id, patch) })
+): CrowdDocument => {
+  const populations = replaceById(doc.scenario.populations, id, patch)
+  return populations === doc.scenario.populations ? doc : updateScenario(doc, { populations })
+}
 
 export const addPopulation = (doc: CrowdDocument, population: Population): CrowdDocument =>
   updateScenario(doc, { populations: [...doc.scenario.populations, population] })
 
-export const removePopulation = (doc: CrowdDocument, id: string): CrowdDocument =>
-  updateScenario(doc, { populations: doc.scenario.populations.filter((p) => p.id !== id) })
+export const removePopulation = (doc: CrowdDocument, id: string): CrowdDocument => {
+  const populations = doc.scenario.populations.filter((p) => p.id !== id)
+  return populations.length === doc.scenario.populations.length
+    ? doc
+    : updateScenario(doc, { populations })
+}
 
 export const updateSettings = (
   doc: CrowdDocument,
@@ -317,7 +346,14 @@ export const findObject = (doc: CrowdDocument, ref: PlanObjectRef) => {
   }
 }
 
+/** Whether a locked door or window is hung in this wall. */
+export const holdsLockedOpening = (doc: CrowdDocument, wallId: string): boolean =>
+  doc.plan.openings.some((opening) => opening.wallId === wallId && opening.locked)
+
 export const isLocked = (doc: CrowdDocument, ref: PlanObjectRef): boolean => {
   const object = findObject(doc, ref)
-  return Boolean(object && 'locked' in object && object.locked)
+  if (object && 'locked' in object && object.locked) return true
+  // A door is placed along its wall, so moving or turning the wall moves and
+  // turns the door. A locked door in an unlocked wall only refused deletion.
+  return ref.kind === 'wall' && holdsLockedOpening(doc, ref.id)
 }

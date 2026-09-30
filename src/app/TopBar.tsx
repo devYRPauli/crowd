@@ -6,8 +6,9 @@ import { useRef } from 'react'
 import { useEditor, type PanelId } from '../state/editorStore'
 import { useSimulation } from '../state/simulationStore'
 import { renameDocument } from '../core/document/mutations'
-import { documentFileName, parseDocumentJson, serializeDocument } from '../core/document/serialize'
-import { downloadText, readFileAsText, saveProject } from '../core/document/storage'
+import { parseDocumentJson } from '../core/document/serialize'
+import { readFileAsText } from '../core/document/storage'
+import { downloadProject } from './downloadProject'
 import { planBounds } from '../core/model/planGeometry'
 import {
   CameraIcon,
@@ -64,7 +65,6 @@ export const TopBar = ({
   const sealHistory = useEditor((state) => state.sealHistory)
   const replaceDocument = useEditor((state) => state.replaceDocument)
   const toast = useEditor((state) => state.toast)
-  const markSaved = useEditor((state) => state.markSaved)
   const dirty = useEditor((state) => state.dirty)
   const stop = useSimulation((state) => state.stop)
 
@@ -73,6 +73,10 @@ export const TopBar = ({
   const onOpenFile = async (file: File) => {
     try {
       const result = parseDocumentJson(await readFileAsText(file))
+      if (!result.recognised) {
+        toast(`${file.name} is not a CROWD project.`, 'error')
+        return
+      }
       stop()
       replaceDocument(result.document, 'Open project')
       viewportRef.current.viewport?.frame(planBounds(result.document.plan, 3))
@@ -155,13 +159,7 @@ export const TopBar = ({
       <button
         className="btn is-ghost is-icon"
         title="Download this project"
-        onClick={() => {
-          downloadText(documentFileName(document), serializeDocument(document))
-          void saveProject(document)
-            .then(markSaved)
-            .catch(() => undefined)
-          toast('Project downloaded.', 'success')
-        }}
+        onClick={() => void downloadProject()}
       >
         <SaveIcon width={15} height={15} />
       </button>

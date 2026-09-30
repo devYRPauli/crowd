@@ -14,6 +14,7 @@ import { formatLength } from '../../core/model/units'
 import { wallLength } from '../../core/model/planGeometry'
 import type { PlanObjectRef } from '../../core/model/types'
 import { LockIcon, TrashIcon } from '../components/icons'
+import { setBackdrop, updateBackdrop } from '../../core/document/mutations'
 
 export const LayersPanel = () => {
   const document = useEditor((state) => state.document)
@@ -187,26 +188,13 @@ export const LayersPanel = () => {
               label="Show the reference image"
               checked={document.plan.backdrop.visible}
               onChange={(visible) =>
-                apply(
-                  (doc) => ({
-                    ...doc,
-                    plan: doc.plan.backdrop
-                      ? { ...doc.plan, backdrop: { ...doc.plan.backdrop, visible } }
-                      : doc.plan,
-                  }),
-                  'Toggle backdrop',
-                )
+                apply((doc) => updateBackdrop(doc, { visible }), 'Toggle backdrop')
               }
             />
             <button
               className="btn is-danger"
-              onClick={() =>
-                apply((doc) => {
-                  const plan = { ...doc.plan }
-                  delete plan.backdrop
-                  return { ...doc, plan }
-                }, 'Remove backdrop')
-              }
+              disabled={Boolean(document.plan.backdrop.locked)}
+              onClick={() => apply((doc) => setBackdrop(doc, undefined), 'Remove backdrop')}
             >
               <TrashIcon width={14} height={14} /> Remove the image
             </button>

@@ -72,18 +72,33 @@ describe('NumberInput', () => {
 
   it('still reads a figure written the way people write one', () => {
     const onCommit = vi.fn()
-    const input = box(onCommit)
+    render(<NumberInput value={120} min={0} max={6000} suffix="s" onCommit={onCommit} />)
+    const input = screen.getByRole('textbox') as HTMLInputElement
 
-    // The field strips everything but digits and signs before parsing, and that
-    // leniency is deliberate: a headcount pasted from a spreadsheet as "1,200"
-    // lands, and so does a duration typed with the unit printed beside the box.
-    // It is also why an emptied box ever read as zero, so the line is drawn at
-    // what survives the strip — it has to contain a number. Tightening it to
-    // bare digits would cost every figure written the way people write them.
+    // A headcount pasted from a spreadsheet as "1,200" lands, and so does a
+    // duration typed with the unit printed beside the box.
     typeAndLeave(input, '1,200')
     expect(onCommit).toHaveBeenLastCalledWith(1200)
 
     typeAndLeave(input, '600 s')
     expect(onCommit).toHaveBeenLastCalledWith(600)
+
+    typeAndLeave(input, '1e3')
+    expect(onCommit).toHaveBeenLastCalledWith(1000)
+  })
+
+  it('refuses a figure that reads as a different one once the noise is stripped', () => {
+    const onCommit = vi.fn()
+    render(<NumberInput value={8} min={1} max={30} suffix="min" onCommit={onCommit} />)
+    const input = screen.getByRole('textbox') as HTMLInputElement
+
+    // Stripping everything but digits read "1,5" as fifteen, "2 hours" as two
+    // minutes and "1e3" as thirteen, and committed each without a word.
+    for (const text of ['1,5', '2 hours', '12-15']) {
+      typeAndLeave(input, text)
+      expect(onCommit).not.toHaveBeenCalled()
+      expect(input.value).toBe('8')
+      expect(input.className).toContain('is-invalid')
+    }
   })
 })

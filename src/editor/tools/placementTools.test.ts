@@ -21,6 +21,7 @@ import {
   furnitureSize,
   furnitureVisualPolygon,
   openingTransform,
+  servicePolygon,
   serviceQueue,
   wallLength,
 } from '../../core/model/planGeometry'
@@ -581,6 +582,24 @@ describe('FurnitureTool placement', () => {
   const horizontal = wall(0, 0, 10, 0)
   const backOff = WALL_THICKNESS / 2 + CHAIR.size.depth / 2
 
+  it('keeps the turn it was given from one item to the next', () => {
+    const h = harness()
+    const tool = new FurnitureTool()
+    tool.onActivate()
+    tool.onKeyDown(key('r', { shiftKey: true }), h.ctx)
+    tool.onPointerDown(pointer({ x: 5, y: 5 }), h.ctx)
+    // Placing an item is a document change, and ToolController.refresh hands
+    // every one to the active tool. Through onActivate it reset the turn, and
+    // every chair after the first in a row came out facing the other way.
+    ;(tool.onRefresh ?? tool.onActivate).call(tool, h.ctx)
+    tool.onPointerDown(pointer({ x: 7, y: 5 }), h.ctx)
+
+    expect(h.document.plan.furniture.map((item) => item.rotation)).toEqual([
+      Math.PI / 2,
+      Math.PI / 2,
+    ])
+  })
+
   it('backs the item onto the wall face and turns its front to the room', () => {
     const h = harness({ walls: [horizontal] })
     new FurnitureTool().onPointerDown(pointer({ x: 5, y: 0.4 }), h.ctx)
@@ -1049,6 +1068,38 @@ describe('placement against the document it lands in', () => {
   })
 })
 
+describe('ServiceTool preview', () => {
+  it('shows the very counter and queue a click then places', () => {
+    const h = harness({})
+    const tool = new ServiceTool()
+    tool.onPointerMove(pointer({ x: 5, y: 4 }), h.ctx)
+    tool.onKeyDown(key('r'), h.ctx)
+    const [footprint, queue] = h.draft
+
+    tool.onPointerDown(pointer({ x: 5, y: 4 }), h.ctx)
+    const placed = h.document.plan.servicePoints[0]
+    expect(footprint.points).toEqual(servicePolygon(placed))
+    expect(queue.points).toEqual(serviceQueue(placed))
+  })
+})
+
+describe('ServiceTool naming', () => {
+  it('gives a new counter a name no other counter has', () => {
+    const h = harness({
+      servicePoints: [
+        counter({ name: 'Service point 3', position: { x: 20, y: 20 } }),
+        counter({ name: 'Bar', position: { x: 30, y: 20 } }),
+      ],
+    })
+    new ServiceTool().onPointerDown(pointer({ x: 5, y: 4 }), h.ctx)
+    expect(h.document.plan.servicePoints.map((s) => s.name)).toEqual([
+      'Service point 3',
+      'Bar',
+      'Service point 4',
+    ])
+  })
+})
+
 describe('QueueTool', () => {
   it('shows the queue of the selected counter, and of the first when none is', () => {
     const bar = counter()
@@ -1084,6 +1135,25 @@ describe('QueueTool', () => {
 
     expect(tool.onKeyDown(key('Escape'), h.ctx)).toBe(true)
     expect(h.toolsRequested).toEqual(['select'])
+  })
+
+  it('leaves the queue of a locked counter alone', () => {
+    const bar = counter({ locked: true })
+    const h = harness({ servicePoints: [bar] })
+    const tool = new QueueTool()
+
+    tool.onActivate(h.ctx)
+    tool.onPointerDown(pointer({ x: 0, y: -1.35 }), h.ctx)
+    tool.onPointerMove(pointer({ x: 1.4, y: -1.6 }), h.ctx)
+    tool.onPointerUp(pointer({ x: 1.4, y: -1.6 }), h.ctx)
+    tool.onPointerDown(pointer({ x: 0, y: -4.35 }), h.ctx)
+
+    // The select tool would not move a locked counter, and this dragged its
+    // queue about and added points to it.
+    expect(h.edits).toEqual([])
+    expect(h.labels.map((label) => label.text)).toEqual([
+      `${bar.name} is locked\nunlock it to edit its queue`,
+    ])
   })
 
   it('collapses a whole drag of one queue point into a single undo step', () => {

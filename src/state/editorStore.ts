@@ -33,7 +33,7 @@ import {
   DEFAULT_WINDOW_SILL,
   DEFAULT_WINDOW_WIDTH,
 } from '../core/model/standards'
-import { removeObjects } from '../core/document/mutations'
+import { holdsLockedOpening, isLocked, removeObjects } from '../core/document/mutations'
 import type { ThemeName } from '../render/theme'
 import type { ViewPreset } from '../render/CameraRig'
 
@@ -128,7 +128,8 @@ interface EditorState {
   setView: (patch: Partial<ViewOptions>) => void
   setPanel: (panel: PanelId) => void
   setHint: (hint: string | null) => void
-  markSaved: () => void
+  /** Clear the unsaved flag, if `saved` is still the document being edited. */
+  markSaved: (saved: CrowdDocument) => void
 
   toast: (message: string, tone?: Toast['tone']) => void
   dismissToast: (id: number) => void
@@ -235,11 +236,13 @@ export const useEditor = create<EditorState>()((set, get) => ({
   clearSelection: () => set({ selection: [] }),
 
   deleteSelection: () => {
-    const { selection, document, apply } = get()
-    const removable = selection.filter((ref) => {
-      const object = findRef(document, ref)
-      return object && !(object as { locked?: boolean }).locked
-    })
+    const { selection, document, apply, toast } = get()
+    if (selection.some((ref) => ref.kind === 'wall' && holdsLockedOpening(document, ref.id))) {
+      toast('A locked door is in that wall.')
+    }
+    const removable = selection.filter(
+      (ref) => Boolean(findRef(document, ref)) && !isLocked(document, ref),
+    )
     if (removable.length === 0) return
     apply(
       (doc) => removeObjects(doc, removable),
@@ -261,7 +264,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
   setView: (patch) => set((state) => ({ view: { ...state.view, ...patch } })),
   setPanel: (panel) => set({ panel }),
   setHint: (hint) => set({ hint }),
-  markSaved: () => set({ dirty: false }),
+  // An edit that lands while a save is writing is not in that save. Clearing
+  // the flag anyway said it was, and autosave, which waits on the flag, then
+  // never wrote it.
+  markSaved: (saved) => set((state) => (state.document === saved ? { dirty: false } : {})),
 
   toast: (message, tone = 'info') =>
     set((state) => ({ toasts: [...state.toasts, { id: ++toastId, message, tone }] })),
