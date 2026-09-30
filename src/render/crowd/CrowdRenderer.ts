@@ -20,11 +20,14 @@ import {
   InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
+  MeshDepthMaterial,
   MeshStandardMaterial,
   Quaternion,
+  RGBADepthPacking,
   Vector3,
   type BufferGeometry,
   type Camera,
+  type WebGLProgramParametersWithUniforms,
 } from 'three'
 import { AGENT_FIELD, AGENT_STRIDE } from '../../sim/types'
 import { HAIR_COLORS, LEG_COLORS, PIVOTS, SKIN_TONES, buildCharacterGeometry } from './character'
@@ -133,6 +136,20 @@ const FRAGMENT_BODY = /* glsl */ `
  */
 const toLinearArray = (colors: readonly string[]): Color[] => colors.map((hex) => new Color(hex))
 
+/** Poses the limbs in three's vertex shader, for the picture and for its shadow alike. */
+function injectPose(shader: WebGLProgramParametersWithUniforms): void {
+  shader.uniforms.uPivots = { value: PIVOTS.map((p) => new Vector3(...p)) }
+  shader.uniforms.uSkinTones = { value: toLinearArray(SKIN_TONES) }
+  shader.uniforms.uLegColors = { value: toLinearArray(LEG_COLORS) }
+  shader.uniforms.uHairColors = { value: toLinearArray(HAIR_COLORS) }
+  shader.vertexShader =
+    VERTEX_HEAD +
+    shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n' + VERTEX_BODY,
+    )
+}
+
 export interface CrowdFrameInput {
   agents: Float32Array
   count: number
@@ -148,6 +165,7 @@ export class CrowdRenderer {
 
   private mesh: InstancedMesh
   private material: MeshStandardMaterial
+  private depthMaterial: MeshDepthMaterial
   private phase: Float32Array
   private gait: Float32Array
   private pose: Float32Array
@@ -173,16 +191,7 @@ export class CrowdRenderer {
   constructor(geometry: BufferGeometry = buildCharacterGeometry('full')) {
     this.material = new MeshStandardMaterial({ roughness: 0.82, metalness: 0.02 })
     this.material.onBeforeCompile = (shader) => {
-      shader.uniforms.uPivots = { value: PIVOTS.map((p) => new Vector3(...p)) }
-      shader.uniforms.uSkinTones = { value: toLinearArray(SKIN_TONES) }
-      shader.uniforms.uLegColors = { value: toLinearArray(LEG_COLORS) }
-      shader.uniforms.uHairColors = { value: toLinearArray(HAIR_COLORS) }
-      shader.vertexShader =
-        VERTEX_HEAD +
-        shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          '#include <begin_vertex>\n' + VERTEX_BODY,
-        )
+      injectPose(shader)
       shader.fragmentShader =
         FRAGMENT_HEAD +
         shader.fragmentShader.replace(
@@ -192,6 +201,12 @@ export class CrowdRenderer {
     }
     // Any change to the injected code needs a distinct cache key.
     this.material.customProgramCacheKey = () => 'crowd-character-v1'
+    // The shadow pass draws with a material of its own, and three's default one
+    // knows nothing of the pose: everybody seated or walking cast the shadow of
+    // somebody standing at attention.
+    this.depthMaterial = new MeshDepthMaterial({ depthPacking: RGBADepthPacking })
+    this.depthMaterial.onBeforeCompile = injectPose
+    this.depthMaterial.customProgramCacheKey = () => 'crowd-character-depth-v1'
 
     this.phase = new Float32Array(MAX_INSTANCES)
     this.gait = new Float32Array(MAX_INSTANCES)
@@ -214,6 +229,7 @@ export class CrowdRenderer {
     this.mesh = new InstancedMesh(geometry, this.material, MAX_INSTANCES)
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage)
     this.mesh.castShadow = true
+    this.mesh.customDepthMaterial = this.depthMaterial
     this.mesh.receiveShadow = false
     this.mesh.frustumCulled = false
     this.mesh.count = 0
@@ -355,6 +371,7 @@ export class CrowdRenderer {
   dispose(): void {
     this.mesh.geometry.dispose()
     this.material.dispose()
+    this.depthMaterial.dispose()
     this.group.clear()
   }
 }

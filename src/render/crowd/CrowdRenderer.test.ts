@@ -464,6 +464,24 @@ describe('the character shader', () => {
     // crowd would be handed somebody else's shader, or hand out its own.
     expect(material.customProgramCacheKey()).toBe('crowd-character-v1')
   })
+
+  it('casts the shadow of the pose rather than of a person standing still', () => {
+    const mesh = meshOf(new CrowdRenderer())
+    const depth = mesh.customDepthMaterial!
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: ShaderLib.depth.vertexShader,
+      fragmentShader: ShaderLib.depth.fragmentShader,
+    }
+    depth.onBeforeCompile(shader as never, null as never)
+    // The shadow pass draws with this and not with the lit material, so a
+    // seated crowd with no pose here cast the shadows of people standing up.
+    expect(shader.vertexShader).toMatch(/#include <begin_vertex>\s+int limb = int\(aLimb/)
+    expect(shader.uniforms.uPivots.value).toHaveLength(PIVOTS.length)
+    expect(depth.customProgramCacheKey()).not.toBe(
+      (mesh.material as MeshStandardMaterial).customProgramCacheKey(),
+    )
+  })
 })
 
 describe('tearing down', () => {
@@ -476,9 +494,10 @@ describe('tearing down', () => {
     }
     mesh.geometry.addEventListener('dispose', count)
     ;(mesh.material as MeshStandardMaterial).addEventListener('dispose', count)
+    mesh.customDepthMaterial!.addEventListener('dispose', count)
 
     renderer.dispose()
-    expect(freed).toBe(2)
+    expect(freed).toBe(3)
     expect(renderer.group.children).toHaveLength(0)
   })
 
