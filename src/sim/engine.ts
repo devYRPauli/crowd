@@ -535,7 +535,7 @@ export class Simulation {
     arrivals.sort((a, b) => a.time - b.time)
     if (arrivals.length > this.options.maxAgents) {
       this.warnings.push(
-        `This scenario asks for ${arrivals.length} people; the run was capped at ${this.options.maxAgents}.`,
+        `This scenario asks for ${arrivals.length} people; the run was capped at ${this.options.maxAgents}. Reduce the population, or split the scenario, to see the whole crowd.`,
       )
       arrivals.length = this.options.maxAgents
     }
@@ -3020,28 +3020,17 @@ export class Simulation {
         `${standing} ${standing === 1 ? 'person' : 'people'} found no free seat they could take and went on without sitting.`,
       )
     }
-    if (this.live.length > 0 && this.time >= this.scenario.durationS) {
-      warnings.push(
-        `${this.live.length} people had not left when the run ended; extend the duration for a complete picture.`,
-      )
-    }
-    const outside = crowd - this.pendingCursor
-    if (outside > 0 && this.time >= this.scenario.durationS) {
-      warnings.push(
-        `${outside} people had not come in when the run ended; extend the duration for a complete picture.`,
-      )
-    }
-    for (const service of services) {
-      if (service.unserved > 0) {
-        warnings.push(`${service.name} still had ${service.unserved} people waiting at the end.`)
-      }
-    }
+    // Nothing the summary states is warned about as well: the findings read
+    // the summary, the list shows every warning beside them, and a run that
+    // stranded people or left a queue said so twice, once as "7 of 90 people
+    // had not left" and again as "7 people had not left".
 
     return {
       durationS: this.time,
       seed: this.scenario.seed,
       totalPeople: crowd,
       completed: this.completed,
+      stillInside: this.live.length,
       meanJourney: mean,
       p95Journey: p95,
       meanWait: began > 0 ? waited / began : null,

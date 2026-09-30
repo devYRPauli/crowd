@@ -7,6 +7,7 @@ import { createScenario, createPopulation } from '../core/model/defaults'
 import { PlanBuilder } from '../library/planBuilder'
 import { getTemplate } from '../library/templates'
 import { furnitureSize } from '../core/model/planGeometry'
+import { deriveFindings } from './metrics/findings'
 import { DEFAULT_DOOR_WIDTH, DEFAULT_DOUBLE_DOOR_WIDTH } from '../core/model/standards'
 
 let counter = 0
@@ -137,7 +138,8 @@ describe('Simulation', () => {
     expect(summary.totalPeople).toBe(20)
     expect(summary.completed).toBeLessThan(19)
     expect(summary.clearanceTime).toBeNull()
-    expect(summary.warnings.join(' ')).toMatch(/\d+ people had not come in when the run ended/)
+    // Uniform over 200 s, a 30 s run lets in three or four.
+    expect(summary.totalPeople - summary.completed - summary.stillInside).toBeGreaterThan(14)
   })
 
   it('never lets anyone end up inside a wall', () => {
@@ -287,6 +289,66 @@ describe('Simulation', () => {
     expect(desk.maxWait).toBeGreaterThan(90)
     expect(desk.meanWait).toBeLessThan(desk.maxWait * 0.6)
     expect(summary.meanWait).toBeLessThan(desk.maxWait * 0.6)
+  })
+
+  it('says each thing a run left undone once, between its warnings and its findings', () => {
+    // The findings read the summary and the panel lists every warning beside
+    // them, so a queue left standing and a crowd cut short each read twice.
+    const entry = zone('entry', 2, 0.4, 8, 1.6)
+    const exit = zone('exit', 38.6, 0.5, 39.6, 1.5)
+    const plan: Plan = {
+      ...corridorPlan(entry, exit),
+      servicePoints: [
+        {
+          id: 'svc1',
+          name: 'Desk',
+          position: { x: 30, y: 1.9 },
+          rotation: 0,
+          width: 1.2,
+          depth: 0.4,
+          servers: 1,
+          serviceTime: { kind: 'constant', mean: 100 },
+          queue: [
+            { x: 30, y: 1.0 },
+            { x: 24, y: 1.0 },
+          ],
+          queueSpacing: 0.6,
+        },
+      ],
+    }
+    const base = scenarioFor(entry.id, 4, 1.34)
+    const scenario: Scenario = {
+      ...base,
+      durationS: 180,
+      populations: [
+        {
+          ...base.populations[0],
+          itinerary: [
+            { id: 'step-svc', kind: 'service', targetId: 'svc1' },
+            { id: 'step-exit', kind: 'exit' },
+          ],
+        },
+      ],
+    }
+    const summary = runToCompletion(new Simulation(plan, scenario, { maxAgents: 3 }), 200)
+    const none = new Float32Array(1)
+    const series = {
+      time: none,
+      active: none,
+      completed: none,
+      meanSpeed: none,
+      peakDensity: none,
+      queueTotal: none,
+    }
+    const headlines = deriveFindings({ summary, series }).map((finding) => finding.headline)
+    const saying = (text: string) => headlines.filter((headline) => headline.includes(text))
+
+    expect(summary.services[0].unserved).toBe(1)
+    expect(summary.stillInside).toBe(3)
+    expect(saying('cleared its queue')).toEqual(['Desk never cleared its queue'])
+    expect(saying('waiting at the end')).toEqual([])
+    expect(saying('had not left')).toEqual(['3 of 3 people had not left when the run ended'])
+    expect(saying('capped')).toHaveLength(1)
   })
 
   it('walks a gap narrower than a body between keep-clear bands at walking pace', () => {

@@ -36,8 +36,6 @@ export interface FindingInput {
     peakDensity: Float32Array
     queueTotal: Float32Array
   }
-  /** Total people the scenario asked for. */
-  totalPeople: number
 }
 
 const SEVERITY_ORDER: Record<FindingSeverity, number> = { high: 0, medium: 1, low: 2, good: 3 }
@@ -81,7 +79,7 @@ const peakOf = (values: Float32Array): { value: number; index: number } => {
   return { value: Number.isFinite(value) ? value : 0, index }
 }
 
-export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): Finding[] => {
+export const deriveFindings = ({ summary, series }: FindingInput): Finding[] => {
   const findings: Finding[] = []
 
   // --- service points ------------------------------------------------------
@@ -200,20 +198,18 @@ export const deriveFindings = ({ summary, series, totalPeople }: FindingInput): 
 
   if (summary.completed < summary.totalPeople) {
     const stranded = summary.totalPeople - summary.completed
+    const outside = stranded - summary.stillInside
+    const where = [
+      ...(summary.stillInside > 0
+        ? [`${summary.stillInside} ${summary.stillInside === 1 ? 'was' : 'were'} still inside`]
+        : []),
+      ...(outside > 0 ? [`${outside} had not come in yet`] : []),
+    ].join(' and ')
     findings.push({
       id: 'incomplete',
       severity: stranded > summary.totalPeople * 0.1 ? 'high' : 'medium',
       headline: `${stranded} of ${summary.totalPeople} people had not left when the run ended`,
-      detail: `The run covered ${formatDuration(summary.durationS)}. Either the venue cannot clear this many people in that time, or the run is too short to show the whole picture.`,
-    })
-  }
-
-  if (summary.totalPeople < totalPeople) {
-    findings.push({
-      id: 'capped',
-      severity: 'medium',
-      headline: `The run was capped at ${summary.totalPeople} of ${totalPeople} people`,
-      detail: 'Reduce the population, or split the scenario, to see the whole crowd.',
+      detail: `${where} after ${formatDuration(summary.durationS)}. Either the venue cannot clear this many people in that time, or the run is too short to show the whole picture.`,
     })
   }
 

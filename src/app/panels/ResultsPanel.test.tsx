@@ -40,6 +40,7 @@ const summary = (patch: Partial<RunSummary> = {}): RunSummary => ({
   seed: 1,
   totalPeople: 200,
   completed: 195,
+  stillInside: 5,
   meanJourney: 240,
   p95Journey: 400,
   meanWait: 60,
@@ -158,7 +159,6 @@ const finished = (patch: Partial<RunSummary> = {}) =>
     phase: 'done',
     summary: summary(patch),
     series: series(),
-    totalPeople: 200,
     progress: 1,
     // `run` keeps the document it was handed, and the panel reads it to tell
     // whether the plan on screen is still the one these numbers came from.
@@ -177,7 +177,6 @@ beforeEach(() => {
     series: null,
     warnings: [],
     error: null,
-    totalPeople: 0,
     savedRuns: [],
     comparisonId: null,
     runDocument: null,

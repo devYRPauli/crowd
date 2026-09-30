@@ -63,7 +63,6 @@ interface SimulationState {
   warnings: string[]
   error: string | null
   speed: number
-  totalPeople: number
   savedRuns: SavedRun[]
   comparisonId: string | null
   /**
@@ -120,7 +119,6 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         set({
           grid: ready.grid,
           warnings: ready.warnings,
-          totalPeople: ready.totalPeople,
           phase: 'running',
         })
         break
@@ -172,7 +170,6 @@ export const useSimulation = create<SimulationState>()((set, get) => {
     warnings: [],
     error: null,
     speed: 4,
-    totalPeople: 0,
     savedRuns: [],
     comparisonId: null,
     runDocument: null,
@@ -243,7 +240,6 @@ export const useSimulation = create<SimulationState>()((set, get) => {
         summary: null,
         series: null,
         warnings: [],
-        totalPeople: 0,
         runDocument: null,
       })
     },

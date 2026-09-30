@@ -72,6 +72,7 @@ const summaryOf = (over: Partial<RunSummary> = {}): RunSummary => ({
   seed: 7,
   totalPeople: 100,
   completed: 100,
+  stillInside: 0,
   meanJourney: 180,
   p95Journey: 300,
   meanWait: 15,
@@ -114,8 +115,8 @@ const heldFor = (value: number, seconds: number): Float32Array => {
   return channel
 }
 
-const run = (summary: RunSummary, series: Series = seriesOf(), totalPeople?: number): Finding[] =>
-  deriveFindings({ summary, series, totalPeople: totalPeople ?? summary.totalPeople })
+const run = (summary: RunSummary, series: Series = seriesOf()): Finding[] =>
+  deriveFindings({ summary, series })
 
 const idsOf = (findings: Finding[]): string[] => findings.map((finding) => finding.id)
 
@@ -555,10 +556,14 @@ describe('queueing and completion', () => {
   })
 
   it('says how many people were still inside, and how long the run was', () => {
-    const findings = run(summaryOf({ completed: 90, totalPeople: 100, durationS: 600 }))
+    const findings = run(
+      summaryOf({ completed: 90, totalPeople: 100, stillInside: 6, durationS: 600 }),
+    )
     const finding = expectFinding(findings, 'incomplete')
     expect(finding.headline).toBe('10 of 100 people had not left when the run ended')
-    expect(finding.detail).toContain('10 min')
+    expect(finding.detail).toBe(
+      '6 were still inside and 4 had not come in yet after 10 min. Either the venue cannot clear this many people in that time, or the run is too short to show the whole picture.',
+    )
   })
 
   it('escalates once more than a tenth of the crowd is stranded', () => {
@@ -568,19 +573,6 @@ describe('queueing and completion', () => {
     expect(
       expectFinding(run(summaryOf({ completed: 88, totalPeople: 100 })), 'incomplete').severity,
     ).toBe('high')
-  })
-
-  it('says the run was capped, with both the simulated and the requested crowd', () => {
-    const findings = run(summaryOf({ totalPeople: 600, completed: 600 }), seriesOf(), 1500)
-    const finding = expectFinding(findings, 'capped')
-    expect(finding.severity).toBe('medium')
-    expect(finding.headline).toBe('The run was capped at 600 of 1500 people')
-  })
-
-  it('does not claim a cap when everybody the scenario asked for was simulated', () => {
-    expect(idsOf(run(summaryOf({ totalPeople: 100, completed: 100 }), seriesOf(), 100))).toEqual([
-      'all-clear',
-    ])
   })
 })
 
@@ -635,33 +627,25 @@ describe('engine warnings', () => {
     expect(findings.map((finding) => finding.headline)).toEqual(warnings)
   })
 
-  it('reads the same problem back twice when the engine warned about it too', () => {
-    // Deliberate, and the cheaper of two bad options: the engine's warnings are
-    // its own record of what it could not do and are passed through verbatim,
-    // while the detectors below are this module's reading of the summary. The
-    // duplicate costs a slot in the ten the panel shows. Suppressing it would
-    // mean matching engine prose here — coupling two modules by text that is
-    // free to change — or dropping a warning the engine chose to raise, so the
-    // place to fix it is src/sim/engine.ts, by not warning about what the
-    // summary already states. The strings below are what it emits verbatim.
+  it('passes a warning through once, beside the detector that reads the same run', () => {
+    // The engine does not warn about what the summary states, so a queue left
+    // standing and a crowd cut short come from the detectors alone, and the
+    // cap, which the summary cannot state, from the engine alone.
     const findings = run(
       summaryOf({
         totalPeople: 600,
         completed: 570,
+        stillInside: 30,
         services: [serviceOf({ id: 'svc-reg', name: 'Registration', unserved: 4 })],
         warnings: [
-          'Registration still had 4 people waiting at the end.',
-          '30 people had not left when the run ended; extend the duration for a complete picture.',
-          'This scenario asks for 1500 people; the run was capped at 600.',
+          'This scenario asks for 1500 people; the run was capped at 600. Reduce the population, or split the scenario, to see the whole crowd.',
         ],
       }),
-      seriesOf(),
-      1500,
     )
     const saying = (text: string): Finding[] => findings.filter((f) => f.headline.includes(text))
-    expect(saying('Registration')).toHaveLength(2)
-    expect(saying('had not left')).toHaveLength(2)
-    expect(saying('capped')).toHaveLength(2)
+    expect(saying('Registration')).toHaveLength(1)
+    expect(saying('had not left')).toHaveLength(1)
+    expect(saying('capped')).toHaveLength(1)
     expect(expectFinding(findings, 'unserved-svc-reg').severity).toBe('high')
     expect(expectFinding(findings, 'warning-0').severity).toBe('medium')
   })
@@ -693,7 +677,7 @@ describe('a clean run', () => {
       peakDensity: 0,
       losShare: {},
     })
-    expect(run(empty, seriesOf(), 0)).toEqual([])
+    expect(run(empty)).toEqual([])
   })
 
   it('will not call a run clean when nobody got out', () => {

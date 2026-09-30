@@ -43,7 +43,6 @@ export interface ReadyMessage {
   grid: { originX: number; originY: number; cellSize: number; cols: number; rows: number }
   walkableArea: number
   warnings: string[]
-  totalPeople: number
 }
 
 export interface FrameMessage {

@@ -389,9 +389,7 @@ describe('how far along a run says it is', () => {
     // as eight people who got out.
     const done = lastMessage(messages) as DoneMessage
     expect(done.summary.completed).toBe(0)
-    expect(done.summary.warnings).toContain(
-      '8 people had not left when the run ended; extend the duration for a complete picture.',
-    )
+    expect(done.summary.stillInside).toBe(8)
   })
 
   it('stops the bar short when everybody got out early', () => {

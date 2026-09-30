@@ -114,7 +114,6 @@ const workerIsReady = (): void => {
     grid: { originX: 0, originY: 0, cellSize: 0.2, cols: 2, rows: 2 },
     walkableArea: 96,
     warnings: [],
-    totalPeople: 125,
   }
   act(() => {
     StubWorker.current?.onmessage?.({ data: message } as MessageEvent<WorkerResponse>)
@@ -139,7 +138,6 @@ beforeEach(() => {
     warnings: [],
     error: null,
     speed: 4,
-    totalPeople: 0,
   })
 })
 

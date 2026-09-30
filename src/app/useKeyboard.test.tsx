@@ -97,7 +97,6 @@ beforeEach(() => {
     warnings: [],
     error: null,
     speed: 4,
-    totalPeople: 0,
   })
 })
 

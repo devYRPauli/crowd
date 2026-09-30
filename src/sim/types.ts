@@ -131,6 +131,11 @@ export interface RunSummary {
   seed: number
   totalPeople: number
   completed: number
+  /**
+   * In the venue when the run ended. The rest of those who did not complete
+   * had not come in yet.
+   */
+  stillInside: number
   /** Mean time from arrival to leaving. Null when nobody has left. */
   meanJourney: number | null
   p95Journey: number | null

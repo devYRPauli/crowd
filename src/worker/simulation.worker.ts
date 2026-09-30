@@ -99,7 +99,7 @@ const sendDone = (run: RunState): void => {
   post(message)
 }
 
-const sendReady = (run: RunState, warnings: string[], totalPeople: number): void => {
+const sendReady = (run: RunState, warnings: string[]): void => {
   const grid = run.sim.world.grid
   const message: ReadyMessage = {
     type: 'ready',
@@ -113,7 +113,6 @@ const sendReady = (run: RunState, warnings: string[], totalPeople: number): void
     },
     walkableArea: run.sim.world.stats.walkableArea,
     warnings,
-    totalPeople,
   }
   post(message)
 }
@@ -174,11 +173,7 @@ const start = (request: StartRequest): void => {
     densityBytes: new Uint8Array(cells),
   }
   current = run
-  sendReady(
-    run,
-    sim.summary().warnings,
-    request.scenario.populations.reduce((s, p) => s + p.count, 0),
-  )
+  sendReady(run, sim.summary().warnings)
   sendFrame(run)
   run.nextFrameAt = run.frameIntervalS
   tick(run)

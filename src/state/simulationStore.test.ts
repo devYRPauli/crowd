@@ -100,7 +100,6 @@ const ready = (runId: string, patch: Partial<ReadyMessage> = {}): ReadyMessage =
   grid: { originX: -1, originY: -1, cellSize: 0.25, cols: 2, rows: 2 },
   walkableArea: 96,
   warnings: [],
-  totalPeople: 240,
   ...patch,
 })
 
@@ -137,6 +136,7 @@ const summaryOf = (patch: Partial<RunSummary> = {}): RunSummary => ({
   seed: 7,
   totalPeople: 240,
   completed: 240,
+  stillInside: 0,
   meanJourney: 96,
   p95Journey: 180,
   meanWait: 12,
@@ -201,7 +201,6 @@ describe('starting a run', () => {
 
     expect(sim().phase).toBe('running')
     expect(sim().grid?.cols).toBe(2)
-    expect(sim().totalPeople).toBe(240)
     expect(sim().warnings).toEqual(['The north exit is only 0.8 m wide'])
     // The grid is not a crowd: nothing is drawn until the first frame lands.
     expect(sim().frame).toBeNull()
@@ -311,7 +310,7 @@ describe('the transport controls', () => {
     // Replies posted before the stop arrived are still on their way; replaying
     // one would put a crowd back on a plan the user is already editing, or —
     // for a late `ready` — announce a run that nobody can pause or stop.
-    deliver(ready(runId, { totalPeople: 999 }))
+    deliver(ready(runId, { warnings: ['a run that is over'] }))
     deliver(frame(runId, { time: 43, progress: 0.5 }))
     deliver(done(runId))
 
@@ -320,9 +319,9 @@ describe('the transport controls', () => {
     expect(sim().grid).toBeNull()
     expect(sim().summary).toBeNull()
     expect(sim().progress).toBe(0)
-    // The stop emptied the readout; the late `ready` must not refill it with a
-    // crowd size for a run that is over.
-    expect(sim().totalPeople).toBe(0)
+    // The stop emptied the readout; the late `ready` must not refill it with
+    // warnings for a run that is over.
+    expect(sim().warnings).toEqual([])
 
     // Clearing it is not the same as losing it: the next run describes its own
     // grid, and the overlay is sized from that rather than from whatever the
@@ -413,7 +412,7 @@ describe('frames streaming back from the worker', () => {
     sim().run(venue('Foyer with two doors'))
     const second = inFlight()
 
-    deliver(ready(first, { totalPeople: 999, warnings: ['the old venue'] }))
+    deliver(ready(first, { warnings: ['the old venue'] }))
     deliver(frame(first, { time: 99, progress: 0.9 }))
     deliver(done(first, { completed: 1 }))
 
@@ -422,7 +421,6 @@ describe('frames streaming back from the worker', () => {
     expect(sim().summary).toBeNull()
     expect(sim().progress).toBe(0)
     expect(sim().warnings).toEqual([])
-    expect(sim().totalPeople).toBe(240)
 
     deliver(ready(second))
     deliver(frame(second, { time: 3, progress: 0.05 }))
@@ -500,7 +498,6 @@ describe('reaching the end of the scenario', () => {
     expect(sim().summary).toBeNull()
     expect(sim().series).toBeNull()
     expect(sim().warnings).toEqual([])
-    expect(sim().totalPeople).toBe(0)
 
     // Stopping is the first half of opening a project or a template, so numbers
     // that outlived it would be read against whatever plan arrives next — and

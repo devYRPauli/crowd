@@ -227,6 +227,7 @@ describe('responses crossing to the main thread', () => {
         seed: 1,
         totalPeople: 2,
         completed: 2,
+        stillInside: 0,
         meanJourney: 31.5,
         p95Journey: 40,
         meanWait: 0,
@@ -522,7 +523,6 @@ describe('what the worker sends', () => {
     expect(ready.grid.originX + ready.grid.cols * ready.grid.cellSize).toBeGreaterThanOrEqual(12)
     expect(ready.grid.originY + ready.grid.rows * ready.grid.cellSize).toBeGreaterThanOrEqual(3)
     expect(ready.walkableArea).toBeGreaterThan(20)
-    expect(ready.totalPeople).toBe(6)
     // The store sizes its decode buffer from this message, so a frame arriving
     // first would be decoded into a buffer of the wrong length.
     expect(messages.findIndex((entry) => entry.arrived.type === 'frame')).toBe(1)
@@ -648,7 +648,7 @@ describe('what the worker sends', () => {
     for (const frame of frames) {
       expect(frame.progress).toBeGreaterThanOrEqual(0)
       expect(frame.progress).toBeLessThanOrEqual(1)
-      expect(frame.stats.completed + frame.stats.active).toBeLessThanOrEqual(ready.totalPeople)
+      expect(frame.stats.completed + frame.stats.active).toBeLessThanOrEqual(6)
     }
     expect(done.summary.clearanceTime).toBeLessThanOrEqual(frames[frames.length - 1].time)
   })
@@ -658,13 +658,10 @@ describe('what the worker sends', () => {
     const ready = messages[0].arrived as ReadyMessage
     const done = lastMessage(messages) as DoneMessage
 
-    // These two are deliberately different numbers. `ready.totalPeople` is the
-    // headcount the scenario asked for; the summary's is how many the engine
-    // would run. The findings panel subtracts one from the other to tell the
-    // user the run was capped, so making them agree would hide the cap.
-    expect(ready.totalPeople).toBe(6)
     expect(done.summary.totalPeople).toBe(2)
-    expect(ready.warnings).toEqual(['This scenario asks for 6 people; the run was capped at 2.'])
+    expect(ready.warnings).toEqual([
+      'This scenario asks for 6 people; the run was capped at 2. Reduce the population, or split the scenario, to see the whole crowd.',
+    ])
   })
 
   it('warns before the first frame that nobody can get out, and never claims they did', () => {
@@ -684,7 +681,7 @@ describe('what the worker sends', () => {
     expect(ready.warnings).toEqual(['No exit areas: people stay in the venue once they finish.'])
     expect(done.summary.completed).toBe(0)
     expect(done.series.active[done.series.active.length - 1]).toBe(6)
-    expect(done.summary.warnings.some((warning) => /had not left/.test(warning))).toBe(true)
+    expect(done.summary.stillInside).toBe(6)
   })
 
   it('plays a run back at the speed it was asked for', () => {

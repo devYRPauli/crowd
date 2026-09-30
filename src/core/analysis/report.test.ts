@@ -48,7 +48,7 @@ const runOnce = () => {
     document: { ...doc, scenario },
     summary,
     series,
-    findings: deriveFindings({ summary, series, totalPeople: 16 }),
+    findings: deriveFindings({ summary, series }),
     codeCheck: {
       occupancy: 'assembly-tables' as const,
       sprinklered: false,

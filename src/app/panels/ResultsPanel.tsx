@@ -233,11 +233,9 @@ const ExportSection = ({
   const toast = useEditor((state) => state.toast)
   const summary = useSimulation((state) => state.summary)
   const series = useSimulation((state) => state.series)
-  const totalPeople = useSimulation((state) => state.totalPeople)
-
   const findings = useMemo(
-    () => (summary && series ? deriveFindings({ summary, series, totalPeople }) : []),
-    [summary, series, totalPeople],
+    () => (summary && series ? deriveFindings({ summary, series }) : []),
+    [summary, series],
   )
 
   if (!summary || !series) return null
@@ -301,7 +299,6 @@ export const ResultsPanel = ({
   const removeRun = useSimulation((state) => state.removeRun)
   const saveCurrentRun = useSimulation((state) => state.saveCurrentRun)
   const phase = useSimulation((state) => state.phase)
-  const totalPeople = useSimulation((state) => state.totalPeople)
   const runDocument = useSimulation((state) => state.runDocument)
 
   const baseline = savedRuns.find((run) => run.id === comparisonId)
@@ -324,8 +321,8 @@ export const ResultsPanel = ({
     (document.plan !== runDocument.plan || document.scenario !== runDocument.scenario)
 
   const findings = useMemo(
-    () => (summary && series ? deriveFindings({ summary, series, totalPeople }) : []),
-    [summary, series, totalPeople],
+    () => (summary && series ? deriveFindings({ summary, series }) : []),
+    [summary, series],
   )
 
   const queueSeries = useMemo(
