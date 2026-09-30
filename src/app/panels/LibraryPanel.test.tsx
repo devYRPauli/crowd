@@ -41,8 +41,6 @@ beforeEach(() => {
       ...useEditor.getState().toolOptions,
       catalogId: 'table-round-6',
       doorWidth: DEFAULT_DOOR_WIDTH,
-      wallThickness: 0.165,
-      wallHeight: 2.743,
       zoneKind: 'entry',
       wallKind: 'wall',
     },
@@ -122,7 +120,9 @@ describe('the options of the tool in hand', () => {
     fireEvent.blur(thickness)
 
     // Two metres of wall is already a vault; beyond that it is a typing slip.
-    expect(options().wallThickness).toBe(2)
+    // And it is the venue's default, the one Settings shows, not a second copy
+    // of it that Settings could not reach.
+    expect(useEditor.getState().document.settings.defaultWallThickness).toBe(2)
 
     fireEvent.click(screen.getByText('Browse furniture'))
     expect(useEditor.getState().tool).toBe('furniture')

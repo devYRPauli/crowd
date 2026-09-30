@@ -25,6 +25,7 @@ import {
 import { useEditor } from '../../state/editorStore'
 import { formatLength } from '../../core/model/units'
 import { ZONE_LABELS } from '../../core/model/defaults'
+import { updateSettings } from '../../core/document/mutations'
 import { Field, LengthInput, Segmented, Select } from '../components/ui'
 import type { UnitSystem } from '../../core/model/types'
 
@@ -158,6 +159,12 @@ const ToolOptions = ({ units }: { units: UnitSystem }) => {
   const tool = useEditor((state) => state.tool)
   const options = useEditor((state) => state.toolOptions)
   const setToolOptions = useEditor((state) => state.setToolOptions)
+  // The size of a new wall is the venue's, and Settings shows the same two
+  // figures. They used to be two copies, and the one in Settings did nothing.
+  const settings = useEditor((state) => state.document.settings)
+  const apply = useEditor((state) => state.apply)
+  const setWallDefaults = (changes: Parameters<typeof updateSettings>[1]) =>
+    apply((doc) => updateSettings(doc, changes), 'Change defaults')
 
   if (tool === 'wall' || tool === 'room') {
     return (
@@ -179,20 +186,20 @@ const ToolOptions = ({ units }: { units: UnitSystem }) => {
         <div className="row">
           <Field label="Thickness">
             <LengthInput
-              value={options.wallThickness}
+              value={settings.defaultWallThickness}
               units={units}
               min={0.02}
               max={2}
-              onCommit={(wallThickness) => setToolOptions({ wallThickness })}
+              onCommit={(defaultWallThickness) => setWallDefaults({ defaultWallThickness })}
             />
           </Field>
           <Field label="Height">
             <LengthInput
-              value={options.wallHeight}
+              value={settings.defaultWallHeight}
               units={units}
-              min={0.1}
+              min={0.5}
               max={12}
-              onCommit={(wallHeight) => setToolOptions({ wallHeight })}
+              onCommit={(defaultWallHeight) => setWallDefaults({ defaultWallHeight })}
             />
           </Field>
         </div>

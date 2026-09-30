@@ -26,8 +26,6 @@ import {
 import {
   DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
-  DEFAULT_WALL_HEIGHT,
-  DEFAULT_WALL_THICKNESS,
   DEFAULT_WINDOW_HEIGHT,
   DEFAULT_WINDOW_SILL,
   DEFAULT_WINDOW_WIDTH,
@@ -47,8 +45,6 @@ const TOOL_OPTIONS: ToolOptions = {
   catalogId: 'table-round-6',
   zoneKind: 'entry',
   wallKind: 'wall',
-  wallThickness: DEFAULT_WALL_THICKNESS,
-  wallHeight: DEFAULT_WALL_HEIGHT,
   doorWidth: DEFAULT_DOOR_WIDTH,
   doorHeight: DEFAULT_DOOR_HEIGHT,
   windowWidth: DEFAULT_WINDOW_WIDTH,
@@ -662,19 +658,29 @@ describe('RoomTool turns one drag into a room', () => {
     expect(h.labels()).toEqual([])
   })
 
-  it('takes the wall spec from the tool options', () => {
-    const h = harness({ options: { wallKind: 'partition' } })
+  it('takes the kind from the tool and the size from the venue', () => {
+    // The size in Settings used to reach no tool: they read a second copy the
+    // library kept, and "New wall defaults" changed nothing that was drawn.
+    const settings = { defaultWallThickness: 0.3, defaultWallHeight: 4 }
+    const room = harness({ options: { wallKind: 'partition' }, settings })
     const tool = new RoomTool()
 
-    tool.onPointerDown(pointer(0, 0), h.ctx)
-    tool.onPointerMove(pointer(4, 4), h.ctx)
-    tool.onPointerUp(pointer(4, 4), h.ctx)
+    tool.onPointerDown(pointer(0, 0), room.ctx)
+    tool.onPointerMove(pointer(4, 4), room.ctx)
+    tool.onPointerUp(pointer(4, 4), room.ctx)
 
-    for (const wall of h.walls()) {
-      expect(wall.kind).toBe('partition')
-      expect(wall.thickness).toBe(DEFAULT_WALL_THICKNESS)
-      expect(wall.height).toBe(DEFAULT_WALL_HEIGHT)
-    }
+    expect(room.walls().map((wall) => [wall.kind, wall.thickness, wall.height])).toEqual([
+      ['partition', 0.3, 4],
+      ['partition', 0.3, 4],
+      ['partition', 0.3, 4],
+      ['partition', 0.3, 4],
+    ])
+
+    const chain = harness({ settings })
+    const wall = new WallTool()
+    wall.onPointerDown(pointer(0, 0), chain.ctx)
+    wall.onPointerDown(pointer(4, 0), chain.ctx)
+    expect(chain.walls().map((w) => [w.kind, w.thickness, w.height])).toEqual([['wall', 0.3, 4]])
   })
 
   it('hands back to the select tool once the room exists', () => {

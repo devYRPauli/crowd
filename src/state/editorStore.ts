@@ -27,8 +27,6 @@ import { OPENING_NOUNS, createDocument } from '../core/model/defaults'
 import {
   DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
-  DEFAULT_WALL_HEIGHT,
-  DEFAULT_WALL_THICKNESS,
   DEFAULT_WINDOW_HEIGHT,
   DEFAULT_WINDOW_SILL,
   DEFAULT_WINDOW_WIDTH,
@@ -58,8 +56,6 @@ export interface ToolOptions {
   catalogId: string
   zoneKind: ZoneToolKind
   wallKind: 'wall' | 'partition' | 'glass' | 'barrier' | 'rail'
-  wallThickness: number
-  wallHeight: number
   doorWidth: number
   doorHeight: number
   windowWidth: number
@@ -149,8 +145,6 @@ export const useEditor = create<EditorState>()((set, get) => ({
     catalogId: 'table-round-6',
     zoneKind: 'entry',
     wallKind: 'wall',
-    wallThickness: DEFAULT_WALL_THICKNESS,
-    wallHeight: DEFAULT_WALL_HEIGHT,
     doorWidth: DEFAULT_DOOR_WIDTH,
     doorHeight: DEFAULT_DOOR_HEIGHT,
     windowWidth: DEFAULT_WINDOW_WIDTH,

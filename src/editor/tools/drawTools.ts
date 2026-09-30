@@ -188,15 +188,13 @@ export class WallTool implements Tool {
   }
 
   private commitSegment(ctx: ToolContext, a: Vec2, b: Vec2): void {
-    const { wallThickness, wallHeight, wallKind } = ctx.options
-    ctx.apply(
-      (doc) =>
-        addWall(
-          doc,
-          makeWall(a, b, { thickness: wallThickness, height: wallHeight, kind: wallKind }),
-        ),
-      'Draw wall',
-    )
+    const { defaultWallThickness, defaultWallHeight } = ctx.document.settings
+    const spec = {
+      thickness: defaultWallThickness,
+      height: defaultWallHeight,
+      kind: ctx.options.wallKind,
+    }
+    ctx.apply((doc) => addWall(doc, makeWall(a, b, spec)), 'Draw wall')
     ctx.seal()
   }
 
@@ -323,11 +321,11 @@ export class RoomTool implements Tool {
     const width = Math.abs(this.current.x - this.start.x)
     const depth = Math.abs(this.current.y - this.start.y)
     if (width > 0.3 && depth > 0.3) {
-      const { wallThickness, wallHeight, wallKind } = ctx.options
+      const { defaultWallThickness, defaultWallHeight } = ctx.document.settings
       const walls = makeRoomWalls(this.start, this.current, {
-        thickness: wallThickness,
-        height: wallHeight,
-        kind: wallKind,
+        thickness: defaultWallThickness,
+        height: defaultWallHeight,
+        kind: ctx.options.wallKind,
       })
       ctx.apply((doc) => addWalls(doc, walls), 'Draw room')
       ctx.seal()

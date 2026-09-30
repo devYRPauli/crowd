@@ -28,8 +28,6 @@ import {
 import {
   DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
-  DEFAULT_WALL_HEIGHT,
-  DEFAULT_WALL_THICKNESS,
   DEFAULT_WINDOW_HEIGHT,
   DEFAULT_WINDOW_SILL,
   DEFAULT_WINDOW_WIDTH,
@@ -101,8 +99,6 @@ const BASE_OPTIONS: ToolOptions = {
   catalogId: CHAIR.id,
   zoneKind: 'entry',
   wallKind: 'wall',
-  wallThickness: DEFAULT_WALL_THICKNESS,
-  wallHeight: DEFAULT_WALL_HEIGHT,
   doorWidth: DEFAULT_DOOR_WIDTH,
   doorHeight: DEFAULT_DOOR_HEIGHT,
   windowWidth: DEFAULT_WINDOW_WIDTH,

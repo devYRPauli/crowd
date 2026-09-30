@@ -58,8 +58,6 @@ const TOOL_OPTIONS: ToolOptions = {
   catalogId: 'table-round-6',
   zoneKind: 'entry',
   wallKind: 'wall',
-  wallThickness: DEFAULT_WALL_THICKNESS,
-  wallHeight: DEFAULT_WALL_HEIGHT,
   doorWidth: DEFAULT_DOOR_WIDTH,
   doorHeight: DEFAULT_DOOR_HEIGHT,
   windowWidth: DEFAULT_WINDOW_WIDTH,

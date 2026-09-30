@@ -13,6 +13,7 @@ import { addWall, renameDocument, updateFurniture, updateOpening } from '../core
 import { createDocument, createPopulation } from '../core/model/defaults'
 import { PlanBuilder, step } from '../library/planBuilder'
 import {
+  DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
   DEFAULT_DOUBLE_DOOR_WIDTH,
   DEFAULT_WALL_HEIGHT,
@@ -463,7 +464,7 @@ describe('the editor around the document', () => {
     // A patch changes the keys it names and leaves the others where they were —
     // including when the new value is `false`, which a merge written with `??`
     // would quietly discard.
-    expect(editor().toolOptions.wallThickness).toBeCloseTo(DEFAULT_WALL_THICKNESS, 6)
+    expect(editor().toolOptions.doorHeight).toBeCloseTo(DEFAULT_DOOR_HEIGHT, 6)
     expect(editor().view.showGrid).toBe(false)
     expect(editor().view.theme).toBe(defaults.view.theme)
     expect(editor().panel).toBe('scenario')
