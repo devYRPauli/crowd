@@ -13,13 +13,15 @@ npx vite-node scripts/study.mjs exits crowd  # named experiments only
 ```
 
 **Measured on the engine committed with this document**, on an Apple M1 Pro
-with 8 cores. The previous edition was measured at 15e844e, and the commits
-since changed how people route round seating, how they reach a seat in a row,
-how a queue keeps its order, how an overflowing queue is routed and how density
-is counted. Several of its findings did not survive the
-re-measurement; each section below says which, and
-[What moved since 15e844e](#what-moved-since-15e844e) says which commit moved
-each number.
+with 8 cores. The first edition was measured at 15e844e, the second at 79dc183
+and the third at 4f6a428. Since 15e844e the engine has changed how people route
+round seating,
+how they reach a seat in a row, how a queue keeps its order, how an overflowing
+queue is routed, how density is counted, how a walker reads the density ahead
+of them and how clearance is counted. Several findings did not survive the
+re-measurements; each section below says which, and
+[What moved since 15e844e](#what-moved-since-15e844e) says which commit or
+edition moved each number.
 
 ## How to read these numbers
 
@@ -28,8 +30,10 @@ the way somebody would draw it in the editor — four walls, doors cut into them
 furniture placed on the floor — rather than opening a template. A template is a
 fixed answer, and the question here is what happens when a plan _changes_.
 
-**Clearance is the time by which 95% of the people who finished were out**
-(`RunSummary.clearanceTime`), not the time the last one left.
+**Clearance is the time by which 95% of the people in the run were out**
+(`RunSummary.clearanceTime`), not the time the last one left. A run in which
+fewer than 95% got out has no clearance time. Every run in this study got
+everybody out.
 
 **The doors are real doors.** Widths come out of `src/core/model/standards.ts`,
 the same stock-size table the inspector offers, so a 3'0" leaf is 0.914 m and not
@@ -47,7 +51,7 @@ difference.
 room — and the crowd is 200 people who arrive all at once and head for the exit.
 
 **Two flow figures appear and they are not the same.** The tables below divide
-the crowd by the time to clear, which includes the walk to the door and so reads
+the 95% of the crowd that clearance counts by the time to clear, which includes the walk to the door and so reads
 lower than the door's capacity. `src/sim/validation/egress.test.ts` measures the
 saturated middle of a run instead, between the 20th and 80th person out, which is
 what a capacity figure means. Where this document quotes a capacity, it is the
@@ -107,24 +111,28 @@ out):
 
 | leaf | clear width | people/s | per m clear | per m **effective** |
 | --- | --- | --- | --- | --- |
-| 2'0" | 0.610 m | 0.54 ±0.04 | 0.88 | 1.74 |
-| 3'0" | 0.914 m | 1.05 ±0.05 | 1.15 | 1.71 |
-| 6'0" pair | 1.829 m | 2.54 ±0.08 | 1.39 | 1.66 |
-| 8'0" pair | 2.438 m | 3.27 ±0.08 | 1.34 | 1.53 |
+| 2'0" | 0.610 m | 0.55 ±0.09 | 0.91 | 1.79 |
+| 3'0" | 0.914 m | 1.14 ±0.09 | 1.25 | 1.86 |
+| 6'0" pair | 1.829 m | 2.57 ±0.09 | 1.40 | 1.68 |
+| 8'0" pair | 2.438 m | 3.20 ±0.09 | 1.31 | 1.49 |
 
-Four times the width buys 6.1 times the flow. Charged against clear width the
+Four times the width buys 5.8 times the flow. Charged against clear width the
 specific flow rises with the opening up to the 6'0" pair, which is what the
 observational literature reports: a narrow door loses proportionally more of
 itself to the clearance people keep from the jambs. Charged against SFPE's
 **effective** width, clear width less a 0.15 m boundary layer each side, it
-reads 1.53 to 1.74, so the disagreement with the literature is mostly about how
+reads 1.49 to 1.86, so the disagreement with the literature is mostly about how
 much of an opening is usable, not about how fast people walk through one.
 
 The single 3'0" leaf is the one that moved. At 15e844e it passed 1.00 people/s,
 1.63 per effective metre. 30b1fba took it to 1.14, the highest per effective
 metre of the four, and the one-leaf clearance in E1 from 207.9 s to 182.0 s.
-This edition's changes took it back to 1.05, 1.71 per effective metre and in
-line with the others; the scan did not isolate which of them did (see
+The changes measured at 4f6a428 took it back to 1.05, 1.71 per effective metre, and this
+edition's to 1.14 again, 1.86 per effective metre and the highest of the four,
+with the one-leaf clearance from 193.4 s to 184.3 s. One change in this edition
+was aimed at narrow openings: the read-ahead fix that took TC12's 0.8 m opening
+from 0.851 to 1.209 (`docs/VALIDATION.md`). The study was not rerun change by
+change, so that is not isolated (see
 [What moved since 15e844e](#what-moved-since-15e844e)).
 
 **Nothing caught this, because nothing measured it.** RiMEA TC12 measures flow
@@ -135,8 +143,9 @@ single-exit case asserts that everybody gets out rather than how fast.
 One thing fell out of the fix on its own: RiMEA TC12 at a 1.2 m opening went from
 1.164 to 1.251 persons/m/s and into the acceptance band, where it had been marked
 as a known failure. It is back under now, at 1.111, because the density field
-now counts a person out to the kernel's 1% cutoff (`docs/VALIDATION.md`): 1.5 and 2.0 m pass, and 0.8,
-1.0 and 1.2 m are below the band.
+counts a person out to the kernel's 1% cutoff (`docs/VALIDATION.md`). 0.8, 1.5
+and 2.0 m pass, 0.8 m by 0.009 since this edition's read-ahead fix, and 1.0 and
+1.2 m are below the band.
 
 ---
 
@@ -146,16 +155,16 @@ now counts a person out to the kernel's 1% cutoff (`docs/VALIDATION.md`): 1.5 an
 
 | exits | total clear | clearance | people/s | per m | peak density | % of time at LOS E/F |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 × 2'0" | 0.610 m | 348.7 s ±20.6 | 0.54 | 0.89 | 7.40 ±0.04 | 97.5 ±0.3 |
-| 1 × 3'0" | 0.914 m | 193.4 s ±13.9 | 0.98 | 1.07 | 7.23 ±0.12 | 95.5 ±0.3 |
-| **1 × 6'0" pair** | **1.829 m** | **82.4 s ±2.5** | 2.31 | 1.26 | 6.95 ±0.05 | 90.9 ±0.7 |
-| 2 × 3'0", same wall | 1.828 m | 108.3 s ±3.9 | 1.75 | 0.96 | 6.81 ±0.14 | 92.7 ±0.4 |
-| 2 × 3'0", opposite walls | 1.828 m | 127.4 s ±4.3 | 1.49 | 0.82 | 6.79 ±0.07 | 93.0 ±0.7 |
-| 4 × 3'0", one per wall | 3.656 m | 64.4 s ±0.6 | 2.95 | 0.81 | 5.97 ±0.15 | 90.5 ±1.8 |
+| 1 × 2'0" | 0.610 m | 344.8 s ±40.0 | 0.55 | 0.90 | 7.37 ±0.01 | 97.5 ±0.5 |
+| 1 × 3'0" | 0.914 m | 184.3 s ±6.8 | 1.03 | 1.13 | 7.30 ±0.06 | 95.4 ±0.1 |
+| **1 × 6'0" pair** | **1.829 m** | **81.2 s ±1.5** | 2.34 | 1.28 | 6.89 ±0.07 | 90.9 ±0.8 |
+| 2 × 3'0", same wall | 1.828 m | 106.7 s ±5.3 | 1.78 | 0.97 | 6.75 ±0.12 | 92.4 ±0.5 |
+| 2 × 3'0", opposite walls | 1.828 m | 125.8 s ±11.3 | 1.51 | 0.83 | 6.75 ±0.05 | 93.5 ±1.1 |
+| 4 × 3'0", one per wall | 3.656 m | 65.3 s ±1.3 | 2.91 | 0.80 | 5.91 ±0.07 | 90.7 ±1.4 |
 
 **One wide opening beats two narrow ones of the same total width, by a lot.**
 Three rows of that table have essentially identical clear width, 1.829 m against
-1.828 m, and clear the same hall in 82.4 s, 108.3 s and 127.4 s. Putting the
+1.828 m, and clear the same hall in 81.2 s, 106.7 s and 125.8 s. Putting the
 same 6 feet of door into two separate leaves rather than a single pair costs
 **31%** more clearance time; splitting those two leaves onto opposite walls
 costs a further 18%, or **55%** against the pair. The seed ranges of the three
@@ -176,8 +185,8 @@ have.** That is not what the arithmetic of "total clear width" alone would tell
 you, and total clear width is what codes are written in.
 
 **Diminishing returns set in.** Going from 0.914 m to 1.829 m, double the width,
-cuts clearance from 193.4 s to 82.4 s, better than double. Going on to 3.656 m
-only reaches 64.4 s, a further 1.28x for another doubling, because by then the
+cuts clearance from 184.3 s to 81.2 s, better than double. Going on to 3.656 m
+only reaches 65.3 s, a further 1.24x for another doubling, because by then the
 doors have stopped being the only constraint and the time is going into walking
 across the room to reach them. There is a width past which more door buys little,
 and for this hall and this crowd it is not far past a single 6'0" pair.
@@ -200,36 +209,39 @@ of that difference.
 
 | layout | items | floor left | clearance | vs empty | mean journey | % of time at LOS E/F | µs/person/step |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| empty | 0 | 590 m² | 108.2 s ±8.7 | | 52.6 s ±4.4 | 92.5 ±1.3 | 12.3 |
-| standing reception | 8 | 586 m² | 109.4 s ±7.3 | +1.2 s ±1.4 | 53.6 s ±3.3 | 92.8 ±1.0 | 15.5 |
-| classroom | 350 | 511 m² | 114.9 s ±8.8 | +6.7 s ±1.5 | 58.1 s ±4.9 | 93.4 ±1.2 | 17.4 |
-| banquet rounds | 360 | 474 m² | 114.5 s ±9.3 | +6.3 s ±1.4 | 56.6 s ±3.6 | 94.0 ±0.9 | 26.0 |
-| theatre | 28 | 590 m² | 115.7 s ±7.8 | +7.6 s ±1.5 | 57.1 s ±5.2 | 93.2 ±0.9 | 12.3 |
-| theatre, rows marked solid | 28 | 359 m² | 120.1 s ±9.9 | +11.9 s ±1.5 | 60.5 s ±6.2 | 94.5 ±0.8 | 12.6 |
+| empty | 0 | 590 m² | 106.3 s ±11.4 | | 51.6 s ±4.8 | 92.3 ±1.2 | 12.2 |
+| standing reception | 8 | 586 m² | 107.2 s ±7.8 | +0.9 s ±1.7 | 52.5 s ±4.1 | 92.5 ±1.4 | 17.6 |
+| classroom | 350 | 511 m² | 113.4 s ±11.1 | +7.2 s ±2.0 | 56.6 s ±5.1 | 93.2 ±1.3 | 21.9 |
+| banquet rounds | 360 | 474 m² | 109.9 s ±6.5 | +3.6 s ±1.7 | 55.6 s ±3.9 | 94.3 ±0.9 | 28.6 |
+| theatre | 28 | 590 m² | 109.5 s ±11.0 | +3.2 s ±2.0 | 54.2 s ±5.0 | 92.6 ±1.1 | 12.3 |
+| theatre, rows marked solid | 28 | 359 m² | 116.9 s ±10.2 | +10.6 s ±1.9 | 59.2 s ±6.2 | 94.4 ±0.8 | 12.3 |
 
-**Furniture costs little.** The classroom adds 6.7 s to the empty hall's 108.2 s,
-banquet rounds 6.3 s and theatre rows 7.6 s: 6 to 7%, for layouts that take up
-to 20% of the floor. The standing reception, +1.2 s ±1.4, is no different from
+**Furniture costs little.** The classroom adds 7.2 s to the empty hall's 106.3 s,
+banquet rounds 3.6 s and theatre rows 3.2 s: 3 to 7%, for layouts that take up
+to 20% of the floor. The standing reception, +0.9 s ±1.7, is no different from
 the empty room. For this hall the exits dominate so completely that what is on the floor
 matters far less than the 55% swing between exit arrangements in E1, which is
 itself the finding, and the reason to be suspicious of a plan that has been
 optimised by moving tables around. Everybody got out in all 120 runs.
 
-**Two findings of the previous edition are withdrawn.** At 15e844e the classroom
-cost 16% and banquet rounds cleared faster than the classroom while covering
-more floor, which that edition read as round tables leaving diagonal routes
-where ranks of desks make corridors. Neither holds now: the classroom costs 6%,
-and it and the banquet are 0.4 s apart, against a standard error of 1.5 s on
-either's difference from the empty hall, which is no difference at all. What
-moved them is in [What moved since 15e844e](#what-moved-since-15e844e). Three
-seeds would not have caught the change either way: at 30b1fba the first three
-put the classroom 3% *faster* than the empty hall.
+**One finding of the first edition is withdrawn, and one is not settled.** At
+15e844e the classroom cost 16% and banquet rounds cleared faster than the
+classroom while covering more floor, which that edition read as round tables
+leaving diagonal routes where ranks of desks make corridors. The 16% does not
+hold: the classroom costs 7%. At 4f6a428 the classroom and the banquet were
+0.4 s apart; in this edition the banquet costs 3.6 s ±1.7 and the classroom
+7.2 s ±2.0. Those errors are on each layout's difference from the empty hall,
+not on their difference from each other, so this document does not call the
+ordering a finding. What moved them is in
+[What moved since 15e844e](#what-moved-since-15e844e). Three seeds would not
+have caught any of it: at 30b1fba the first three put the classroom 3%
+*faster* than the empty hall.
 
 **Theatre rows now cost something, and solid ones cost more.** Crossing a seat
 row is priced at four times open floor in the flow field, so people go round the
-rows by the aisles, and passable rows add 7.6 s. Marking every row an obstacle,
+rows by the aisles, and passable rows add 3.2 s. Marking every row an obstacle,
 the override the inspector offers per item, takes 231 m², 39% of the floor, out
-of circulation and adds 11.9 s, 11%: 4.3 s more than rows left passable.
+of circulation and adds 10.6 s, 10%: 7.4 s more than rows left passable.
 **Everybody still gets out**, which is the part worth checking: the aisles carry
 the crowd rather than stranding it, so this is a usable configuration and not
 just a stricter one.
@@ -240,7 +252,7 @@ the seats can still cross a row. The shipped default is chosen for banquet and
 reception floors, where solid chairs would wall people into their own tables.
 
 **Furniture is what costs compute, not people.** Per-person step cost more than
-doubles from the empty room to the banquet layout, 12.3 to 26.0 µs, on the same
+doubles from the empty room to the banquet layout, 12.2 to 28.6 µs, on the same
 crowd. Tables and other blocking items are obstacles the avoidance layer tests
 against; chairs and seat rows are only priced into the route.
 
@@ -252,33 +264,32 @@ Same hall, same two 3'0" exits on the same wall, everybody arriving at once.
 
 | people | clearance | people/s | mean journey | peak density | % of time at LOS E/F | µs/person/step |
 | --- | --- | --- | --- | --- | --- | --- |
-| 50 | 23.1 s ±2.4 | 2.06 | 11.2 s ±1.0 | 3.02 ±0.52 | 36.7 ±6.2 | 30.4 |
-| 100 | 54.3 s ±5.3 | 1.75 | 26.9 s ±4.3 | 5.68 ±0.33 | 77.3 ±5.0 | 18.0 |
-| 200 | 108.3 s ±3.9 | 1.75 | 53.1 s ±1.5 | 6.81 ±0.14 | 92.7 ±0.4 | 12.0 |
-| 400 | 197.0 s ±5.6 | 1.93 | 94.1 s ±3.7 | 7.21 ±0.05 | 98.3 ±0.1 | 10.4 |
-| 800 | 312.0 s ±8.5 | 2.44 | 141.6 s ±3.0 | 7.67 ±0.07 | 99.7 ±0.0 | 9.9 |
+| 50 | 26.3 s ±9.1 | 1.80 | 11.9 s ±2.1 | 3.15 ±0.54 | 39.4 ±7.6 | 28.3 |
+| 100 | 52.0 s ±4.8 | 1.83 | 25.8 s ±3.2 | 5.61 ±0.21 | 76.9 ±4.8 | 17.0 |
+| 200 | 106.7 s ±5.3 | 1.78 | 51.2 s ±2.1 | 6.75 ±0.12 | 92.4 ±0.5 | 12.0 |
+| 400 | 186.4 s ±6.1 | 2.04 | 89.3 s ±0.7 | 7.22 ±0.03 | 98.4 ±0.0 | 10.0 |
+| 800 | 302.1 s ±5.4 | 2.52 | 139.2 s ±0.9 | 7.63 ±0.04 | 99.7 ±0.0 | 9.1 |
 
-**Clearance is sub-linear in the crowd: sixteen times the people take 13.5
+**Clearance is sub-linear in the crowd: sixteen times the people take 11.5
 times as long.** That is not efficiency, it is the walk-up washing out. With
 fifty people the doors are never continuously busy and most of the clearance time
 is somebody walking across the room; with eight hundred the doors run at capacity
 from the first second to the last, so the marginal person costs only their share
-of the doorway. The flow column shows it directly: 2.06 people/s at fifty, 1.75
-at a hundred, 2.44 at eight hundred. That last is 1.22 per leaf, above the 1.05 a
-single 3'0" leaf passes in the door table with two hundred behind it, so in this
-engine a door passes somewhat more with a bigger crowd pressing on it. Fifty is
-the odd one out at the other end, faster than a hundred: most likely because
-fifty reach two doors without much of a queue at either and walk through at
-close to walking pace instead of shuffling through a jam.
+of the doorway. The flow column shows it directly: 1.80 people/s at fifty, 1.83
+at a hundred, 1.78 at two hundred and 2.52 at eight hundred. That last is 1.26
+per leaf, above the 1.14 a single 3'0" leaf passes in the door table with two
+hundred behind it, so in this engine a door passes somewhat more with a bigger
+crowd pressing on it. Up to two hundred the flow is flat; fifty has the widest
+spread of any row, ±9.1 s on 26.3.
 
 The planning reading is the uncomfortable one: **a hall that clears
 comfortably at half occupancy tells you very little about the same hall full.**
 Doubling the crowd roughly doubles the time, but the density people experience on
 the way out keeps climbing, and it is the density that hurts: the share of time
-spent at level of service E or F goes from 37% at fifty to 93% at two hundred and
+spent at level of service E or F goes from 39% at fifty to 92% at two hundred and
 99.7% at eight hundred.
 
-**Cost per person falls as the crowd grows**, from 30.4 to 9.9 µs per person per
+**Cost per person falls as the crowd grows**, from 28.3 to 9.1 µs per person per
 step. The fixed work of a step — the flow fields, the grid, the density pass — is
 amortised over more people, so the engine gets cheaper per head, not dearer. This
 is the shape you want and the opposite of the quadratic blow-up a naive
@@ -293,16 +304,16 @@ Same hall. 200 people, in through a 6'0" pair on the north wall, out through a
 
 | arrival | peak inside | peak density | mean journey | served |
 | --- | --- | --- | --- | --- |
-| all at once | 165 ±4 | 7.22 ±0.06 | 118.3 s ±5.6 | 200 |
-| uniform over 120 s | 107 ±13 | 6.92 ±0.15 | 72.2 s ±10.6 | 200 |
+| all at once | 165 ±5 | 7.18 ±0.05 | 118.6 s ±11.9 | 200 |
+| uniform over 120 s | 106 ±15 | 6.93 ±0.13 | 71.6 s ±16.3 | 200 |
 | uniform over 600 s | 8 ±0 | 1.07 ±0.02 | 15.3 s ±0.3 | 200 |
-| peak at 600 s | 20 ±1 | 1.73 ±0.17 | 15.5 s ±0.3 | 200 |
+| peak at 600 s | 20 ±1 | 1.71 ±0.14 | 15.6 s ±0.3 | 200 |
 
 **This is the largest effect in the whole study, and it costs nothing to change.**
-The same 200 people through the same doors into the same room take 118.3 s each
+The same 200 people through the same doors into the same room take 118.6 s each
 if they all turn up together and 15.3 s each if they are spread over ten minutes,
-a 7.7x difference in what each person experiences, with not one thing about the
-building altered. Peak occupancy falls from 165 to 8 and peak density from 7.22
+a 7.8x difference in what each person experiences, with not one thing about the
+building altered. Peak occupancy falls from 165 to 8 and peak density from 7.18
 to 1.07 persons/m2, which is the difference between a crush and a quiet room.
 
 The doors are identical in all four rows. What changed is scheduling, and
@@ -310,7 +321,7 @@ scheduling is usually the cheapest thing a venue can change — staggered sessio
 ends, timed tickets, a second coach five minutes later.
 
 Note that the two spread-out profiles are barely distinguishable from each other
-(15.3 s against 15.5 s) while both are transformed relative to the bunched ones.
+(15.3 s against 15.6 s) while both are transformed relative to the bunched ones.
 The lesson is not "shape the arrival curve precisely", it is "do not let
 everybody arrive at once".
 
@@ -325,7 +336,7 @@ does not.
 
 | desks | offered load | mean queue | worst wait | mean journey | served of 120 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 2.67 | 1487 s ±62 | 2930 s ±88 | 1547 s ±64 | 120 |
+| 1 | 2.67 | 1478 s ±75 | 2906 s ±110 | 1538 s ±77 | 120 |
 | 2 | 1.33 | 307 s ±57 | 642 s ±105 | 368 s ±63 | 120 |
 | **3** | **0.89** | **14 s ±0** | 48 s ±4 | 69 s ±0 | 120 |
 | 4 | 0.67 | 4 s ±0 | 47 s ±4 | 61 s ±1 | 120 |
@@ -342,16 +353,16 @@ for anybody deciding how many people to roster.
 **Above capacity the queue is as long as arithmetic says.** With arrivals every
 15 s and a desk that takes 40, the k-th person waits about 25k seconds first
 come, first served: a mean of 1488 s and a worst of 2975 s at one desk, 298 s
-and 595 s at two. Measured, 1487 s and 2930 s at one desk, 307 s and 642 s at
-two. The spread across seeds grows with the queue, ±62 s and ±57 s on the mean
+and 595 s at two. Measured, 1478 s and 2906 s at one desk, 307 s and 642 s at
+two. The spread across seeds grows with the queue, ±75 s and ±57 s on the mean
 against ±0 at three and four desks, because an oversaturated queue carries
 every slow service and every early arrival forward to everybody behind it.
 
 Those worst waits are what first come, first served gives because two queue
-bugs were fixed during this re-measurement; finding 6 has both. Before them
+bugs were fixed during the 79dc183 re-measurement; finding 6 has both. Before them
 two desks read 1706 s ±59 and one desk 3507 s ±251.
 
-The previous edition reported 26 of 120 never served at one desk and a mean
+The first edition, at 15e844e, reported 26 of 120 never served at one desk and a mean
 queue of 690 s. Everybody is served now. That 690 s is below what any order
 of service gives a desk that takes 40 s a person, so part of the wait was not
 being counted as queueing. The mean moved at 424e647, which made a queue past
@@ -389,7 +400,7 @@ chasing. These do not.
 
 Running a tool across configurations it has not been run across before is the
 fastest way to find out what it is quietly wrong about. Five things turned up
-the first time and a sixth on the re-measurement.
+the first time and a sixth on the 79dc183 re-measurement.
 
 **1. Doors did not meter crowds.** The headline finding, above. Fixed, and now
 pinned by `egress.test.ts`.
@@ -443,8 +454,8 @@ straight through the rows.
 Since then crossing a chair or a seat row costs four times open floor in the
 flow field, so people go round by the aisles unless they are shoved in among
 the seats, and an audience reaches a seat from the end of its row and leaves
-the same way. Passable rows now cost 7.6 s ±1.5 over the empty hall and solid
-ones 11.9 s ±1.5. It is still **mitigated rather than fixed**: a row is not an
+the same way. Passable rows now cost 3.2 s ±2.0 over the empty hall and solid
+ones 10.6 s ±1.9. It is still **mitigated rather than fixed**: a row is not an
 obstacle unless it is marked as one, somebody pushed out of a row's passage on
 the way in can still cross the back of the row (the engine test measures 2
 over four seeds), and nothing prompts a user drawing a theatre to mark the
@@ -472,8 +483,8 @@ anybody stands in. It swapped people 2,000 to 4,000 times a run, and the
 longest wait belonged to whoever joined 48th to 62nd of 120. **Fixed**: past
 the drawn places each person stands behind the one ahead, so the order they
 joined in is kept. The swaps fell to under 35 a run, the longest wait belonged
-to the last to join on all three seeds, and one desk read 2950 s ±121. It reads
-2930 s ±88 in this edition.
+to the last to join on all three seeds, and one desk read 2950 s ±121. It read
+2930 s ±88 at 4f6a428 and reads 2906 s ±110 in this edition.
 
 `engine.test.ts` pins both. At a 30 s desk with the line running away from
 the door, the worst wait was 620 to 682 s and is now 436 to 446 s, against
@@ -487,21 +498,21 @@ now nobody does.
 
 `npm run bench` on the same M1 Pro, with the engine committed here and with
 15e844e's, run back to back. The machine was not idle (other work held its load
-average near 6), and run to run these figures move by 10 to 30%, so read
+average near 5), and run to run these figures move by 10 to 30%, so read
 nothing into a smaller difference. A second run on this engine agreed with the
-first to within 3%. Rendering is not measured; this is the physics alone.
+first to within 4%. Rendering is not measured; this is the physics alone.
 
 | venue | asked | simulated | ms/step | µs/person/step | × real time | 15e844e ms/step | 15e844e µs/person |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| coffee bar | 50 | 36 | 1.04 | 29.0 | 96 | 1.45 | 29.1 |
-| conference | 200 | 179 | 5.94 | 33.2 | 17 | 2.67 | 13.4 |
-| conference | 500 | 179 | 5.95 | 33.3 | 17 | 2.57 | 12.1 |
-| concourse | 500 | 253 | 7.20 | 28.5 | 14 | 4.61 | 12.8 |
-| concourse | 1000 | 253 | 7.35 | 29.0 | 14 | 4.68 | 13.0 |
-| banquet | 1000 | 222 | 5.91 | 26.6 | 17 | 4.34 | 17.6 |
+| coffee bar | 50 | 43 | 1.16 | 26.9 | 86 | 1.46 | 29.3 |
+| conference | 200 | 176 | 5.87 | 33.3 | 17 | 2.73 | 13.7 |
+| conference | 500 | 176 | 5.75 | 32.7 | 17 | 2.57 | 12.1 |
+| concourse | 500 | 274 | 6.96 | 25.4 | 14 | 4.55 | 12.7 |
+| concourse | 1000 | 274 | 6.95 | 25.4 | 14 | 4.65 | 13.0 |
+| banquet | 1000 | 184 | 5.89 | 32.0 | 17 | 3.92 | 15.9 |
 
-**A step costs 1.4 to 2.3 times what it did at 15e844e** everywhere but the
-coffee bar, on fewer people, so 1.5 to 2.8 times as much per person. The same
+**A step costs 1.5 to 2.2 times what it did at 15e844e** everywhere but the
+coffee bar, on fewer people, so 2.0 to 2.7 times as much per person. The same
 bench at every commit puts the rise at 30b1fba: the conference went from 2.4 to
 8.5 ms a step there, 16 to 63 µs a person. 1bda5cd took back about a third, and
 98480ab's conference session, with a seat for every delegate, added 1.2 ms.
@@ -510,22 +521,22 @@ bench at every commit puts the rise at 30b1fba: the conference went from 2.4 to
 of them, on a field solved to the cell that person stands on
 (`ensurePointField`), and solved it again whenever that person crossed into
 another cell. A queue shuffling off its line minted a field every other step.
-This edition keeps the route while it still reaches them: the banquet, seeds 1
+654804f keeps the route while it still reaches them: the banquet, seeds 1
 to 3, solves 490, 401 and 597 such routes a run where it solved 5819, 5852 and
-10710. The previous edition printed 11.00 ms a step for the concourse at 500
-and 7.06 for the banquet; they read 7.20 and 5.91 now.
+10710 at 79dc183. 79dc183 printed 11.00 ms a step for the concourse at 500 and 7.06 for
+the banquet, 4f6a428 7.20 and 5.91; they read 6.96 and 5.89 now.
 
 **The venues cap themselves.** Asking the concourse for a thousand people
-simulates 253, because that is what its entrance and ticket gate let in during
-the measured window. It was 294 on the previous edition's engine, 221 before
-the second queue fix in finding 6, when the gate's overflow jammed the
-entrance, and 359 at 15e844e. The µs/person figure is against the number
+simulates 274, because that is what its entrance and ticket gate let in during
+the measured window. It was 253 at 4f6a428, 294 at 79dc183, 221 before the
+second queue fix in finding 6, when the gate's overflow jammed the entrance,
+and 359 at 15e844e. The µs/person figure is against the number
 actually simulated. In a room without a queue, cost per person falls as the
-crowd grows, from 30 µs at fifty to 10 at eight hundred (E3).
+crowd grows, from 28 µs at fifty to 9 at eight hundred (E3).
 
 **Real-time factor is the weak spot.** Playback offers speeds up to × 60. At
-15e844e these venues ran at × 21 to × 69. Now the coffee bar runs at × 96 and
-the rest at × 14 to × 17, up from × 8 to × 15 on the previous edition's engine,
+15e844e these venues ran at × 22 to × 68. Now the coffee bar runs at × 86 and
+the rest at × 14 to × 17, as at 4f6a428 and up from × 8 to × 15 at 79dc183,
 so on them the fastest setting runs as fast as it can and the clock stretches.
 
 ---
@@ -540,14 +551,14 @@ the whole summary, and in the fundamental-diagram sweep, which runs itself twice
 
 Within this study, the three seeds of a configuration differ only in their seed.
 The spread across them is the `±` column, and it is what tells you whether a gap
-between two rows is real: **2 × 3'0" on one wall clears in 108.3 s ±3.9 and on
-opposite walls in 127.4 s ±4.3, so that 19-second gap is a finding; the 1-second
-gap between the empty hall and the reception layout, +1.2 s ±1.4 over twenty
+between two rows is real: **2 × 3'0" on one wall clears in 106.7 s ±5.3 and on
+opposite walls in 125.8 s ±11.3, so that 19-second gap is a finding; the 1-second
+gap between the empty hall and the reception layout, +0.9 s ±1.7 over twenty
 seeds, is not.**
 
 The re-measurement is also a check on the claim. E3's row for two hundred is
 the same hall, the same crowd and the same three seeds as E1's two leaves on one
-wall, run separately, and it reproduces that row exactly: 108.3 s ±3.9. The
+wall, run separately, and it reproduces that row exactly: 106.7 s ±5.3. The
 queue fix in finding 6 changed no experiment without a queue in it, to the
 tenth of a second.
 
@@ -556,7 +567,8 @@ tenth of a second.
 Every commit since 15e844e that touches the engine, run over the study's own
 configurations in a separate checkout: the same three seeds for clearance and
 journey, seed 1 alone for the E5 rows. Commits that changed only templates, the
-code check or the editor were not run.
+code check or the editor were not run. The four commits measured at 4f6a428,
+and this edition's changes, were measured together, not one at a time.
 
 | commit | what it changed | what moved |
 | --- | --- | --- |
@@ -568,7 +580,8 @@ code check or the editor were not run.
 | 1bda5cd | an overflowing queue stays inside the building and out of the seating | E5: one desk's mean queue 1569 to 1501 s, two desks' worst wait 1638 to 1657 s. The starting figures are not 424e647's; E5 moved in between, at a commit the scan did not isolate |
 | 5667501, 4c171e3, da5f7ba, 4524fb7 | how an audience reaches and leaves a seat | nothing: nobody in the study sits down |
 | 689543c | the two queue-order fixes in finding 6 | E5 only |
-| this edition | an overflowing queue keeps its route while it still leads to the person ahead; the density stamp carries a person out to the kernel's 1% cutoff on every grid; the engine does its own trigonometry and exponentials; a default counter is 6'0" by 2'6" | a 3'0" leaf 1.14 to 1.05 p/s and the hall it serves 182.0 to 193.4 s; the 6'0" pair 80.8 to 82.4 s; the classroom's cost over the empty hall +4.4 to +6.7 s over twenty seeds; E4 all at once, mean journey 130.8 to 118.3 s; E5 within the seed spread; a concourse step 11.0 to 7.2 ms |
+| 654804f, a89dc98, 349c5fe, 5743157, measured together at 4f6a428 | an overflowing queue keeps its route while it still leads to the person ahead; the density stamp carries a person out to the kernel's 1% cutoff on every grid; the engine does its own trigonometry and exponentials; a default counter is 6'0" by 2'6" | a 3'0" leaf 1.14 to 1.05 p/s and the hall it serves 182.0 to 193.4 s; the 6'0" pair 80.8 to 82.4 s; the classroom's cost over the empty hall +4.4 to +6.7 s over twenty seeds; E4 all at once, mean journey 130.8 to 118.3 s; E5 within the seed spread; a concourse step 11.0 to 7.2 ms |
+| this edition | a walker's read-ahead falls back to their own spot only when the line to it is blocked, not when it comes near a wall; floor narrower than a body is not cheap floor; a queue grows only over the room it is in, and nobody joins it from outside, among the tables or through a wall; a guest standing in their seat's zone walks to the seat; a wheelchair takes only an end seat it can come in by; clearance counts everybody in the run | a 3'0" leaf 1.05 to 1.14 p/s and the hall it serves 193.4 to 184.3 s; the 6'0" pair 82.4 to 81.2 s; over twenty seeds, banquet rounds' cost over the empty hall +6.3 to +3.6 s and passable theatre rows' +7.6 to +3.2 s; E4 within the seed spread; E5 one desk's mean queue 1487 to 1478 s over three seeds, the other rows unchanged |
 
 30b1fba was written for the banquet buffet, and it moved the study more than
 anything else:
@@ -594,7 +607,7 @@ which wall people walk to.
 
 The classroom's cost over the empty hall went from 11.1 s at 15e844e to 7.1 s
 at c57a030 and to -3.2 s at 30b1fba, on three seeds each. Twenty seeds put it
-at +6.7 s ±1.5 now. Most of the previous edition's 16% went at 30b1fba, which
+at +7.2 s ±2.0 now. Most of the first edition's 16% went at 30b1fba, which
 was not written about classrooms at all.
 
 ## What this does not tell you
@@ -610,11 +623,13 @@ was not written about classrooms at all.
 - **No balking or reneging.** People who join a queue stay in it however long it
   gets, so the counter waits in E5 are longer than real ones would be at the
   saturated end.
-- **A narrow door is pessimistic.** Below about 1.5 m the engine's specific flow
-  falls under the observed band, because it keeps a fixed clearance between a
-  body and a jamb and a narrow opening loses proportionally more of itself to it.
-  CROWD's TC12 sweep records this at 0.8, 1.0 and 1.2 m and it is not fixed.
+- **A narrow door is pessimistic.** At 1.0 and 1.2 m the engine's specific
+  flow falls under the observed band. At 1.0 m the clearance it keeps from each
+  jamb leaves room for one file, not two; at 1.2 m the shortfall came with the
+  density field counting all of each person. CROWD's TC12 sweep records both
+  and they are not fixed; the 0.8 m opening passes, by 0.009. A 2'0" leaf
+  passes 0.91 per clear metre.
 - **Three seeds is three seeds.** Enough to tell a 19-second effect from a
   1-second one, not enough for a confidence interval. Over three seeds the
-  classroom read 3% faster than the empty hall, and over twenty it is 6%
+  classroom read 3% faster than the empty hall, and over twenty it is 7%
   slower, so E2 runs twenty; the other experiments are three.

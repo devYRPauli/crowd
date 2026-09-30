@@ -158,7 +158,7 @@ few seconds, because the queue that makes the far door worth the walk has not
 formed yet when they set off. Without it a crowd queues at the nearest exit
 however long the line grows while an identical door stands open, and a planner
 asking whether a second exit is worth it gets told it bought nothing. In a hall
-with a door at each end, 300 people clear 22% faster for using both.
+with a door at each end, 300 people clear 20% faster for using both.
 
 **2. Avoid — ORCA.**
 Optimal Reciprocal Collision Avoidance, ported faithfully from the RVO2
@@ -305,9 +305,9 @@ other test.
   below under CROWD's own name.
 - **Egress through a door** is measured directly, because it is the number the
   tool is actually asked for and it went wrong once without anything noticing.
-  A pair of 3'0" leaves passes **1.41 persons per metre per second** of clear
-  width, at the top of the 1.2–1.4 the observational literature reports, and
-  doubling a door's width roughly doubles what it passes. The test that holds
+  A pair of 3'0" leaves passes **1.36 persons per metre per second** of clear
+  width, inside the 1.2-1.4 the observational literature reports, and doubling
+  a door's width roughly doubles what it passes. The test that holds
   that relationship exists because for a long time it did not hold: see
   [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 - **ORCA** is checked against hand-built agent and obstacle cases, a brute-force
@@ -315,7 +315,7 @@ other test.
   circle benchmark.
 - **Choice of exit**, run with congestion-aware routing on and off so the
   difference between the two is visible: 40 people take the near door either
-  way; 300 spread across both and clear 22% faster for it.
+  way; 300 spread across both and clear 20% faster for it.
 - **Determinism**, because a comparison that is partly noise is worse than no
   comparison: every starter venue is built twice and has to produce identical
   numbers, and those numbers are pinned, so a machine that computes them
@@ -353,15 +353,18 @@ This is an exploratory planning model, not a safety certification.
   audience goes round by the aisles and reaches a seat from the end of its row,
   but somebody shoved in among the seats can still cross a row. Mark the rows as
   obstacles per item to rule that out: measured over twenty seeds, solid rows
-  take 39% of the floor and add 11% to the clearance time of the empty hall,
-  against 7% for rows left passable, and everybody still gets out. See
+  take 39% of the floor and add 10% to the clearance time of the empty hall,
+  against 3% for rows left passable, and everybody still gets out. See
   [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md). Nothing prompts you to do it.
-- **Narrow doors are pessimistic.** Below about 1.5 m the engine passes fewer
-  people per metre than the observational literature reports, because it keeps a
-  fixed clearance between a body and a jamb and a narrow opening loses
-  proportionally more of itself to it. See `docs/VALIDATION.md`.
+- **Narrow doors are pessimistic.** At 1.0 m and 1.2 m the engine passes 16%
+  and 7% fewer people per metre than the bottom of the band the observational
+  literature reports. At 1.0 m the fixed clearance the engine keeps from each
+  jamb leaves room for one file of people, not two. At 1.2 m there is room for
+  two, and the shortfall came with counting the whole of each person in the
+  density field. 0.8 m is in band, by 0.009.
+  See `docs/VALIDATION.md`.
 - **A dense jam packs slightly too tight.** With 150 people leaving one room by
-  one 1.2 m door, the worst overlap between two bodies is 0.125 m against the
+  one 1.2 m door, the worst overlap between two bodies is 0.115 m against the
   0.10 m the suite allows. The test is marked failing with that number; see
   `docs/VALIDATION.md`.
 - **No balking or reneging at a counter.** Somebody heading for a door will
