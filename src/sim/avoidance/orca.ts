@@ -14,6 +14,21 @@
  * The geometry is written out in scalars rather than through the Vec2 helpers:
  * this runs for every agent against every neighbour on every tick, and each
  * helper call would allocate a temporary.
+ *
+ * Derived from RVO2 <https://gamma.cs.unc.edu/RVO2/>.
+ * SPDX-FileCopyrightText: 2008 University of North Carolina at Chapel Hill
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy
+ * of the License at https://www.apache.org/licenses/LICENSE-2.0. Unless
+ * required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied.
+ *
+ * Changed from the original: ported from C++ to TypeScript, with a per-agent
+ * responsibility share in place of the fixed half, and its maths routed
+ * through `core/math/libm` so runs agree across machines.
  */
 
 import type { Vec2 } from '../../core/math/vec2'

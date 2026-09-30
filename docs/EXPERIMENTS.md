@@ -53,8 +53,8 @@ room — and the crowd is 200 people who arrive all at once and head for the exi
 **Two flow figures appear and they are not the same.** The tables below divide
 the 95% of the crowd that clearance counts by the time to clear, which includes the walk to the door and so reads
 lower than the door's capacity. `src/sim/validation/egress.test.ts` measures the
-saturated middle of a run instead, between the 20th and 80th person out, which is
-what a capacity figure means. Where this document quotes a capacity, it is the
+saturated middle of a run instead, between the 20th and 80th percentile of the
+crowd out, which is what a capacity figure means. Where this document quotes a capacity, it is the
 second.
 
 ---
@@ -65,8 +65,8 @@ The first thing the harness measured was wrong, and it is worth putting first
 because it is the number the tool exists to produce.
 
 A crowd was clearing a 30 × 20 m hall through a single 3'0" door in 20 seconds.
-That is about five people a second through a doorway that passes rather more than
-one. Widening the door barely helped:
+That is more than eight people a second through a doorway that passes rather more
+than one. Widening the door barely helped:
 
 | leaf | clear width | people/s | ratio |
 | --- | --- | --- | --- |
@@ -106,8 +106,8 @@ against a published 1.2–1.4 for doors and this engine's own corridor peak of
 are still counted as having left at the line, because that is when they left.
 
 With both fixes, on today's engine, over three seeds (`npx vite-node
-scripts/study.mjs doors`, the saturated flow between the 20th and 80th person
-out):
+scripts/study.mjs doors`, the saturated flow between the 20th and 80th
+percentile of the crowd out):
 
 | leaf | clear width | people/s | per m clear | per m **effective** |
 | --- | --- | --- | --- | --- |

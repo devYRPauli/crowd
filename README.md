@@ -432,5 +432,11 @@ helps your work, please credit it by name with a link to this repository.
 [`CITATION.cff`](CITATION.cff) has the details, and GitHub's "Cite this
 repository" button formats them.
 
+The collision avoidance in `src/sim/avoidance/orca.ts` is ported from
+[RVO2](https://gamma.cs.unc.edu/RVO2/), copyright University of North Carolina
+at Chapel Hill and licensed under the
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). That file
+carries its notice and says what was changed.
+
 Contributions are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) says what a pull
 request needs.
