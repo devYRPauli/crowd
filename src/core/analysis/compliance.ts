@@ -93,6 +93,15 @@ export const GREEN_GUIDE_RATE = 82
 /** Minimum clear door width under IBC, in metres (32 in). */
 export const MIN_DOOR_WIDTH_M = CODE_MINIMUMS.egressDoorClearWidth
 
+/**
+ * Widths are compared to the millimetre, door by door, which is what the
+ * messages print. A typed 32" is 812.8 mm and the minimum and the stock 2'8"
+ * door 813 mm, and a door typed as 32" failed as "813 mm wide, below the 813 mm
+ * clear minimum". Summed before rounding, three of them still fell 0.6 mm
+ * short of three exits' minimum width.
+ */
+const mm = (metres: number): number => Math.round(metres * 1000)
+
 const exitCountRequired = (occupants: number): number => {
   if (occupants <= 49) return 1
   if (occupants <= 500) return 2
@@ -117,8 +126,10 @@ export const computeCompliance = ({
 
   // Exits are what the engine sends people to: exit zones, and walkable doors
   // marked as a way out. Counting zones alone reported every template, whose
-  // exits are all marked doors, as having none. A zone drawn over a marked door
-  // is still one exit, so the door is not counted again.
+  // exits are all marked doors, as having none. A door onto an exit zone is one
+  // exit with it, and a zone no door opens onto is one by itself. Counted once
+  // per zone, one zone drawn along a frontage merged every door in it into one
+  // exit and failed a hall with two on exit count.
   const exitZones = plan.zones.filter((zone) => zone.kind === 'exit')
   const wallsById = new Map(plan.walls.map((wall) => [wall.id, wall]))
   const doors = plan.openings.filter(isWalkableOpening).flatMap((opening) => {
@@ -130,15 +141,17 @@ export const computeCompliance = ({
     // and so did a pair whose zone covered one leaf. Any overlap counts.
     const threshold = openingThreshold(wall, opening)
     const marked = opening.use === 'exit' || opening.use === 'both'
-    const inExitZone = exitZones.some((zone) => polygonsOverlap(threshold, zone.polygon))
-    return [{ width: opening.width, marked, inExitZone }]
+    const zones = exitZones.filter((zone) => polygonsOverlap(threshold, zone.polygon))
+    return [{ width: opening.width, marked, inExitZone: zones.length > 0, zones }]
   })
   const doorWidths = doors.map((door) => door.width)
   // Exit width is the width of the ways out. Summing every doorway counted the
   // doors between rooms and the ways in, and passed a hall on width it did not
   // have.
-  const exitWidths = doors.filter((d) => d.marked || d.inExitZone).map((d) => d.width)
-  const exitsProvided = exitZones.length + doors.filter((d) => d.marked && !d.inExitZone).length
+  const exitDoors = doors.filter((d) => d.marked || d.inExitZone)
+  const exitWidths = exitDoors.map((d) => d.width)
+  const reached = new Set(doors.flatMap((door) => door.zones))
+  const exitsProvided = exitDoors.length + exitZones.filter((zone) => !reached.has(zone)).length
   const totalExitWidthM = exitWidths.reduce((sum, width) => sum + width, 0)
 
   const widthPerOccupantInches = sprinklered ? 0.15 : 0.2
@@ -184,7 +197,7 @@ export const computeCompliance = ({
     })
   }
 
-  if (totalExitWidthM < requiredWidthM) {
+  if (exitWidths.reduce((sum, width) => sum + mm(width), 0) < mm(requiredWidthM)) {
     issues.push({
       severity: 'fail',
       message: `Egress width is ${totalExitWidthM.toFixed(2)} m against ${requiredWidthM.toFixed(2)} m required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
@@ -192,7 +205,7 @@ export const computeCompliance = ({
   }
 
   for (const width of doorWidths) {
-    if (width < MIN_DOOR_WIDTH_M) {
+    if (mm(width) < mm(MIN_DOOR_WIDTH_M)) {
       issues.push({
         severity: 'fail',
         message: `A doorway is ${(width * 1000).toFixed(0)} mm wide, below the ${(MIN_DOOR_WIDTH_M * 1000).toFixed(0)} mm clear minimum.`,

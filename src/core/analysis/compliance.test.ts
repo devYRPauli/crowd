@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeCompliance, BOUNDARY_LAYER, MIN_DOOR_WIDTH_M, SPECIFIC_FLOW } from './compliance'
 import { PlanBuilder } from '../../library/planBuilder'
 import { DEFAULT_WALL_THICKNESS } from '../model/standards'
+import { parseLength } from '../model/units'
 
 const hall = (width: number, depth: number, doorWidths: number[]) => {
   const b = new PlanBuilder()
@@ -180,6 +181,51 @@ describe('compliance calculator', () => {
     })
     expect(result.exitsProvided).toBe(1)
     expect(result.totalExitWidthM).toBe(0)
+  })
+
+  it('counts two doors onto one exit zone as two exits', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 2, 1.0, 'door', 'exit')
+    b.door(room.south, 8, 1.0, 'door', 'exit')
+    // One area along the whole frontage, outside the wall.
+    b.zone('exit', 0, -2, 10, -DEFAULT_WALL_THICKNESS / 2, 'Street')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 60,
+      targetEgressMinutes: 8,
+    })
+    expect(result.exitsProvided).toBe(2)
+    expect(result.issues.some((issue) => issue.message.includes('marked on the plan'))).toBe(false)
+  })
+
+  it('passes doors typed as exactly the 32 inch minimum', () => {
+    const width = parseLength('32"', 'imperial')!
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 3, width, 'door', 'exit')
+    b.door(room.north, 3, width, 'door', 'exit')
+    b.door(room.east, 3, width, 'door', 'exit')
+    // Two exits' worth of minimum width, and then three, where 550 people need
+    // three exits and sprinklers keep the per-occupant width below the minimum.
+    for (const [plannedAttendance, sprinklered] of [
+      [60, false],
+      [550, true],
+    ] as const) {
+      const result = computeCompliance({
+        plan: b.build(),
+        occupancy: 'assembly-standing',
+        sprinklered,
+        plannedAttendance,
+        targetEgressMinutes: 8,
+      })
+      expect(result.bindingRule).toBe('minimum')
+      expect(result.exitsRequired).toBe(plannedAttendance > 500 ? 3 : 2)
+      expect(result.issues.some((issue) => issue.message.includes('clear minimum'))).toBe(false)
+      expect(result.issues.some((issue) => issue.message.startsWith('Egress width'))).toBe(false)
+    }
   })
 
   it('flags a door below the clear minimum', () => {
