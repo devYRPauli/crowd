@@ -61,8 +61,13 @@ const tx = async <T>(
   return new Promise<T>((resolve, reject) => {
     const transaction = db.transaction(STORE, mode)
     const request = run(transaction.objectStore(STORE))
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('Local storage request failed.'))
+    // A write is kept once its transaction commits, not when its request
+    // succeeds, and a full quota aborts at the commit, after the request has
+    // already said yes. Settling on the request marked a venue saved that the
+    // browser then threw away.
+    transaction.oncomplete = () => resolve(request.result)
+    transaction.onabort = () =>
+      reject(transaction.error ?? request.error ?? new Error('Local storage request failed.'))
   })
 }
 

@@ -31,6 +31,8 @@ interface Faults {
   open: Fault
   read: Fault
   write: Fault
+  /** Refused as the write commits, after its request succeeded: a full quota. */
+  commit: Fault
 }
 
 class FakeRequest<T> {
@@ -43,55 +45,68 @@ class FakeRequest<T> {
 
 const installIndexedDb = () => {
   const rows = new Map<string, StoredRow>()
-  const faults: Faults = { open: null, read: null, write: null }
+  const faults: Faults = { open: null, read: null, write: null, commit: null }
   const storeNames = new Set<string>()
   const modes: IDBTransactionMode[] = []
   let opens = 0
 
+  /** How a request's transaction ends once the request has settled. */
+  type End = (error: Error | null | undefined) => void
+
   // Requests settle on a later microtask, as real ones do: the module attaches
   // its handlers after the call returns, so a synchronous answer would be lost.
-  const settle = <T>(compute: () => T): FakeRequest<T> => {
+  // `end` hears `undefined` for a request that succeeded.
+  const settle = <T>(compute: () => T, end?: End): FakeRequest<T> => {
     const request = new FakeRequest<T>()
     queueMicrotask(() => {
       try {
         request.result = compute()
         request.onsuccess?.()
+        end?.(undefined)
       } catch (thrown) {
         request.error = thrown instanceof Error ? thrown : null
         request.onerror?.()
+        end?.(request.error)
       }
     })
     return request
   }
 
-  const reads = {
+  const reads = (end?: End) => ({
     get: (id: string) =>
       settle(() => {
         if (faults.read) throw faults.read
         const row = rows.get(id)
         return row ? { ...row } : undefined
-      }),
+      }, end),
     getAll: () =>
       settle(() => {
         if (faults.read) throw faults.read
         return [...rows.values()].map((row) => ({ ...row }))
-      }),
-  }
+      }, end),
+  })
 
-  const writes = {
+  // A real transaction holds its writes until it commits, and throws them away
+  // if it aborts; these are applied up front and taken back on an abort.
+  const writes = (end?: End) => ({
     put: (row: StoredRow) =>
       settle(() => {
         if (faults.write) throw faults.write
+        const before = rows.get(row.id)
         rows.set(row.id, { ...row })
+        undo.push(() => (before ? rows.set(row.id, before) : rows.delete(row.id)))
         return row.id
-      }),
+      }, end),
     delete: (id: string) =>
       settle(() => {
         if (faults.write) throw faults.write
+        const before = rows.get(id)
         rows.delete(id)
+        if (before) undo.push(() => rows.set(id, before))
         return undefined
-      }),
-  }
+      }, end),
+  })
+  let undo: Array<() => void> = []
 
   const refuse = () => {
     throw new Error('ReadOnlyError: the transaction is read-only.')
@@ -101,7 +116,7 @@ const installIndexedDb = () => {
     objectStoreNames: { contains: (name: string) => storeNames.has(name) },
     createObjectStore: (name: string) => {
       storeNames.add(name)
-      return { ...reads, ...writes, createIndex: () => undefined }
+      return { ...reads(), ...writes(), createIndex: () => undefined }
     },
     // A store the upgrade never created is not there to be opened, which is what
     // keeps the `onupgradeneeded` path load-bearing rather than decorative. Real
@@ -109,9 +124,32 @@ const installIndexedDb = () => {
     transaction: (name: string, mode: IDBTransactionMode) => {
       if (!storeNames.has(name)) throw new Error(`No object store named ${name}.`)
       modes.push(mode)
+      const transaction = {
+        error: null as Error | null,
+        oncomplete: null as (() => void) | null,
+        onabort: null as (() => void) | null,
+        objectStore: () => store,
+      }
+      // The transaction ends a microtask after its request: it aborts on the
+      // request's error, or at the commit on a fault there, and completes if not.
+      const end: End = (error) =>
+        queueMicrotask(() => {
+          const refused = error !== undefined ? error : mode === 'readwrite' ? faults.commit : null
+          const taken = undo
+          undo = []
+          if (refused === null && error === undefined) {
+            transaction.oncomplete?.()
+            return
+          }
+          for (const back of taken.reverse()) back()
+          transaction.error = refused instanceof Error ? refused : null
+          transaction.onabort?.()
+        })
       const store =
-        mode === 'readwrite' ? { ...reads, ...writes } : { ...reads, put: refuse, delete: refuse }
-      return { objectStore: () => store }
+        mode === 'readwrite'
+          ? { ...reads(end), ...writes(end) }
+          : { ...reads(end), put: refuse, delete: refuse }
+      return transaction
     },
   }
 
@@ -546,6 +584,24 @@ describe('when the browser will not store anything', () => {
     await expect(storage.saveProject(expanded)).resolves.toBeUndefined()
     expect((await storage.loadProject(hall.id))?.document.name).toBe('Main hall + mezzanine')
     expect(db.opens()).toBe(1)
+  })
+
+  it('refuses a save the browser threw away as it committed', async () => {
+    const hall = venue('Main hall', '2024-03-01T10:00:00.000Z')
+    await storage.saveProject(hall)
+
+    // A full quota can refuse the transaction after its put has succeeded.
+    // The save resolved on the put and the editor marked the venue saved.
+    db.faults.commit = new Error('QuotaExceededError')
+    const expanded = {
+      ...hall,
+      name: 'Main hall + mezzanine',
+      updatedAt: '2024-03-02T10:00:00.000Z',
+    }
+    await expect(storage.saveProject(expanded)).rejects.toThrow('QuotaExceededError')
+
+    db.faults.commit = null
+    expect((await storage.loadProject(hall.id))?.document.name).toBe('Main hall')
   })
 
   it('reports a store it cannot read instead of calling it empty', async () => {
