@@ -206,6 +206,29 @@ describe('the first thing anybody sees', () => {
     await waitFor(() => expect(editor().document.name).toBe(getTemplate(DEFAULT_TEMPLATE_ID)?.name))
     expect(screen.getByRole('dialog', { name: 'CROWD' })).toBeDefined()
   })
+
+  it('gives somebody who asks for an empty plan an empty plan', async () => {
+    render(<App />)
+    await screen.findByRole('dialog', { name: 'CROWD' })
+    expect(editor().document.plan.walls.length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start with an empty plan' }))
+
+    expect(screen.queryByRole('dialog', { name: 'CROWD' })).toBeNull()
+    expect(editor().document.name).toBe('Untitled venue')
+    expect(editor().document.plan.walls).toEqual([])
+    expect(editor().document.plan.furniture).toEqual([])
+  })
+
+  it('leaves the starter venue open for somebody who only closes the welcome', async () => {
+    render(<App />)
+    await screen.findByRole('dialog', { name: 'CROWD' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.queryByRole('dialog', { name: 'CROWD' })).toBeNull()
+    expect(editor().document.name).toBe(getTemplate(DEFAULT_TEMPLATE_ID)?.name)
+  })
 })
 
 describe('what the shell wires together', () => {

@@ -360,7 +360,7 @@ describe('the welcome', () => {
   it('hands a first-time user straight to a venue', () => {
     const onClose = vi.fn()
     const onTemplates = vi.fn()
-    render(<Welcome onClose={onClose} onTemplates={onTemplates} />)
+    render(<Welcome onClose={onClose} onEmpty={vi.fn()} onTemplates={onTemplates} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Open a venue' }))
 
@@ -373,14 +373,17 @@ describe('the welcome', () => {
     )
   })
 
-  it('gets out of the way for somebody who wants to start drawing', () => {
+  it('asks for an empty plan for somebody who wants to start drawing', () => {
     const onClose = vi.fn()
+    const onEmpty = vi.fn()
     const onTemplates = vi.fn()
-    render(<Welcome onClose={onClose} onTemplates={onTemplates} />)
+    render(<Welcome onClose={onClose} onEmpty={onEmpty} onTemplates={onTemplates} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Start with an empty plan' }))
 
-    expect(onClose).toHaveBeenCalledTimes(1)
+    // Closing alone left the starter venue open behind the dialog.
+    expect(onEmpty).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
     expect(onTemplates).not.toHaveBeenCalled()
   })
 })

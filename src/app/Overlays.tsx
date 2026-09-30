@@ -138,9 +138,11 @@ export const ShortcutSheet = ({ onClose }: { onClose: () => void }) => (
 
 export const Welcome = ({
   onClose,
+  onEmpty,
   onTemplates,
 }: {
   onClose: () => void
+  onEmpty: () => void
   onTemplates: () => void
 }) => (
   <Modal
@@ -148,7 +150,7 @@ export const Welcome = ({
     onClose={onClose}
     footer={
       <>
-        <button className="btn" onClick={onClose}>
+        <button className="btn" onClick={onEmpty}>
           Start with an empty plan
         </button>
         <button

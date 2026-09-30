@@ -25,6 +25,7 @@ import { useEditor } from '../state/editorStore'
 import { useSimulation } from '../state/simulationStore'
 import { getTemplate, DEFAULT_TEMPLATE_ID } from '../library/templates'
 import { planBounds } from '../core/model/planGeometry'
+import { createDocument } from '../core/model/defaults'
 import {
   loadProject,
   rememberLastProject,
@@ -379,7 +380,16 @@ export const App = () => {
       ) : null}
       {showShortcuts ? <ShortcutSheet onClose={() => setShowShortcuts(false)} /> : null}
       {showWelcome ? (
-        <Welcome onClose={() => setShowWelcome(false)} onTemplates={() => setShowTemplates(true)} />
+        <Welcome
+          onClose={() => setShowWelcome(false)}
+          onEmpty={() => {
+            // The starter venue is already open behind the welcome, and this
+            // button used to only close the dialog and leave it there.
+            replaceDocument(createDocument(), 'New project')
+            setShowWelcome(false)
+          }}
+          onTemplates={() => setShowTemplates(true)}
+        />
       ) : null}
     </div>
   )
