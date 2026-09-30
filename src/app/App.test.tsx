@@ -441,6 +441,23 @@ describe('autosave', () => {
     expect(editor().dirty).toBe(false)
   })
 
+  it('writes the last edit before another venue replaces it', async () => {
+    vi.useFakeTimers()
+    render(<App />)
+    await act(async () => undefined)
+
+    act(() => editor().apply((doc) => ({ ...doc, name: 'Riverside Hall' }), 'Rename project'))
+    const edited = editor().document
+    act(() => vi.advanceTimersByTime(1000))
+    act(() => editor().replaceDocument(savedVenue(), 'Open venue'))
+
+    // The timer went with the venue it was waiting on, and the rename with it.
+    expect(vi.mocked(saveProject)).toHaveBeenCalledWith(edited)
+    await act(async () => undefined)
+    // The venue now open is the one a reload should come back to.
+    expect(vi.mocked(rememberLastProject)).not.toHaveBeenCalledWith(edited.id)
+  })
+
   it('says so when the browser will not take the save', async () => {
     // This used to be swallowed whole. A browser that had stopped accepting
     // writes — a full quota, a blocked database — looked exactly like one that

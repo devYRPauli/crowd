@@ -280,7 +280,9 @@ describe('removing and starting over', () => {
     expect(doc().name).toBe('Untitled venue')
     expect(doc().plan.walls).toHaveLength(0)
     expect(useSimulation.getState().summary).toBeNull()
-    expect(disk.remembered).toContain(doc().id)
+    // Nothing has been written for it yet, so a reload still has the last
+    // project that was.
+    expect(disk.remembered).toEqual([])
     expect(onClose).toHaveBeenCalled()
   })
 })

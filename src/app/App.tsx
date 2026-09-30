@@ -217,10 +217,10 @@ export const App = () => {
   const autosaveFailed = useRef(false)
   useEffect(() => {
     if (!dirty) return
-    const timer = setTimeout(() => {
-      void saveProject(document)
+    const save = (reopen: boolean) =>
+      saveProject(document)
         .then(() => {
-          rememberLastProject(document.id)
+          if (reopen) rememberLastProject(document.id)
           markSaved(document)
           autosaveFailed.current = false
         })
@@ -234,8 +234,15 @@ export const App = () => {
               'error',
             )
         })
-    }, 2000)
-    return () => clearTimeout(timer)
+    const timer = setTimeout(() => void save(true), 2000)
+    return () => {
+      clearTimeout(timer)
+      // Opening another venue ends this one's wait, and the timer went with it:
+      // whatever was done in the last two seconds was never written, and was
+      // gone the next time anybody opened the project. It is written now, and
+      // not remembered as the one to reopen, because somebody has moved on.
+      if (useEditor.getState().document.id !== document.id) void save(false)
+    }
   }, [document, dirty, markSaved])
 
   useEffect(() => {

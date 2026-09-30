@@ -98,8 +98,10 @@ export const ProjectsModal = ({
             onClick={() => {
               const fresh = createDocument('Untitled venue')
               stop()
+              // Not remembered until autosave has written it: an id with no
+              // project behind it sent the next reload to the starter venue
+              // instead of back to the one that was open before.
               replaceDocument(fresh, 'New project')
-              rememberLastProject(fresh.id)
               onClose()
             }}
           >
