@@ -8,7 +8,7 @@
  * the reconciler's way entirely.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Viewport } from '../render/Viewport'
 import { ToolController } from '../editor/ToolController'
 import { CrowdRenderer, type CrowdColorMode } from '../render/crowd/CrowdRenderer'
@@ -17,8 +17,22 @@ import { useEditor } from '../state/editorStore'
 import { useSimulation } from '../state/simulationStore'
 import { planBounds } from '../core/model/planGeometry'
 import { formatArea } from '../core/model/units'
-import type { Label } from '../render/LabelLayer'
 import type { FacilityType } from '../sim/metrics/los'
+
+/**
+ * Where the camera was left, if the browser will say.
+ *
+ * Reading storage that has been blocked throws rather than returning nothing,
+ * and this ran bare while the viewport was being built: a browser set to block
+ * site data got the crash screen instead of an editor with the default view.
+ */
+const storedCamera = (): string | null => {
+  try {
+    return localStorage.getItem('crowd:camera')
+  } catch {
+    return null
+  }
+}
 
 export interface ViewportHandle {
   viewport: Viewport | null
@@ -71,7 +85,7 @@ export const ViewportHost = ({
     controllerRef.current = new ToolController(viewport)
     handleRef.current = { viewport, controller: controllerRef.current }
 
-    const stored = localStorage.getItem('crowd:camera')
+    const stored = storedCamera()
     if (stored) viewport.restoreCamera(stored)
     else viewport.frame(planBounds(useEditor.getState().document.plan, 3), false)
 
@@ -128,27 +142,32 @@ export const ViewportHost = ({
   }, [view.preset])
 
   // --- room labels --------------------------------------------------------
-  const roomLabels = useMemo<Label[]>(() => {
-    if (!view.showRoomLabels) return []
-    const viewport = viewportRef.current
-    if (!viewport) return []
-    return viewport.rooms
-      .filter((room) => room.area > 4)
-      .map((room) => ({
-        id: `room-${room.id}`,
-        text: formatArea(room.area, document.settings.units),
-        x: room.center.x,
-        y: 0.04,
-        z: room.center.y,
-        variant: 'area' as const,
-        maxDistance: 90,
-      }))
-  }, [document, view.showRoomLabels])
-
+  // An effect, not a memo over the render: the rooms are the viewport's, and
+  // they only follow the document once the effect above has handed it over.
+  // Read during render they were the previous plan's, so an area lagged one
+  // edit behind and an emptied venue kept the old room's floor area on it.
   useEffect(() => {
+    const viewport = viewportRef.current
     // Only publish room labels when no tool is mid-gesture and using the layer.
-    if (tool === 'select') viewportRef.current?.setLabels(roomLabels)
-  }, [roomLabels, tool])
+    if (!viewport || tool !== 'select') return
+    if (!view.showRoomLabels) {
+      viewport.setLabels([])
+      return
+    }
+    viewport.setLabels(
+      viewport.rooms
+        .filter((room) => room.area > 4)
+        .map((room) => ({
+          id: `room-${room.id}`,
+          text: formatArea(room.area, document.settings.units),
+          x: room.center.x,
+          y: 0.04,
+          z: room.center.y,
+          variant: 'area' as const,
+          maxDistance: 90,
+        })),
+    )
+  }, [document, view.showRoomLabels, tool])
 
   // --- simulation ---------------------------------------------------------
   useEffect(() => {
