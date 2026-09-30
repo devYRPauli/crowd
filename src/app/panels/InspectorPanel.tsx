@@ -9,6 +9,7 @@
 import { useEditor } from '../../state/editorStore'
 import {
   isLocked,
+  lockedOpeningIn,
   updateFurniture,
   updateOpening,
   updateServicePoint,
@@ -21,7 +22,7 @@ import { resolveCatalogItem } from '../../library/catalog'
 import { polygonArea } from '../../core/math/geometry'
 import { wallLength } from '../../core/model/planGeometry'
 import { formatArea, formatLength } from '../../core/model/units'
-import { ZONE_LABELS } from '../../core/model/defaults'
+import { OPENING_NOUNS, ZONE_LABELS } from '../../core/model/defaults'
 import { add, angleOf, fromAngle } from '../../core/math/vec2'
 import type { Opening, Zone } from '../../core/model/types'
 import {
@@ -104,6 +105,7 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
     const angle = angleOf({ x: wall.b.x - wall.a.x, y: wall.b.y - wall.a.y })
     // Locked itself, or holding a locked door that moving it would carry along.
     const held = isLocked(document, ref)
+    const heldOpening = lockedOpeningIn(document, wall.id)
     return (
       <>
         {header('Wall', formatLength(length, units))}
@@ -111,8 +113,8 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
           <Field
             label="Length"
             hint={
-              held && !wall.locked
-                ? 'A locked door is in this wall.'
+              heldOpening && !wall.locked
+                ? `A locked ${OPENING_NOUNS[heldOpening.kind]} is in this wall.`
                 : 'Changing this moves the far end.'
             }
           >

@@ -390,6 +390,17 @@ describe('deleting the selection', () => {
     expect(editor().document).toBe(kept.document)
     expect(editor().history).toBe(kept.history)
   })
+
+  it('says it is a window when a locked window keeps the wall', () => {
+    editor().apply(
+      (doc) => updateOpening(doc, hall.door.id, { kind: 'window', locked: true }),
+      'Lock',
+    )
+    editor().setSelection([ref('wall', hall.room.south.id)])
+    editor().deleteSelection()
+
+    expect(editor().toasts.at(-1)?.message).toBe('A locked window is in that wall.')
+  })
 })
 
 describe('opening another venue', () => {

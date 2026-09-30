@@ -346,14 +346,14 @@ export const findObject = (doc: CrowdDocument, ref: PlanObjectRef) => {
   }
 }
 
-/** Whether a locked door or window is hung in this wall. */
-export const holdsLockedOpening = (doc: CrowdDocument, wallId: string): boolean =>
-  doc.plan.openings.some((opening) => opening.wallId === wallId && opening.locked)
+/** A locked door or window hung in this wall, if there is one. */
+export const lockedOpeningIn = (doc: CrowdDocument, wallId: string): Opening | undefined =>
+  doc.plan.openings.find((opening) => opening.wallId === wallId && opening.locked)
 
 export const isLocked = (doc: CrowdDocument, ref: PlanObjectRef): boolean => {
   const object = findObject(doc, ref)
   if (object && 'locked' in object && object.locked) return true
   // A door is placed along its wall, so moving or turning the wall moves and
   // turns the door. A locked door in an unlocked wall only refused deletion.
-  return ref.kind === 'wall' && holdsLockedOpening(doc, ref.id)
+  return ref.kind === 'wall' && lockedOpeningIn(doc, ref.id) !== undefined
 }

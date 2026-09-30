@@ -11,6 +11,7 @@ import type {
   AgentProfile,
   DocumentSettings,
   ItineraryStep,
+  OpeningKind,
   Population,
   Scenario,
   Plan,
@@ -234,6 +235,15 @@ export const ZONE_COLORS: Record<string, string> = {
   'keep-clear': '#e8b33a',
   seating: '#8a7fb8',
   measure: '#38bdf8',
+}
+
+/** What a message calls an opening. */
+export const OPENING_NOUNS: Record<OpeningKind, string> = {
+  door: 'door',
+  'double-door': 'door',
+  opening: 'opening',
+  window: 'window',
+  gate: 'gate',
 }
 
 export const ZONE_LABELS: Record<string, string> = {

@@ -422,6 +422,14 @@ describe('the inspector with a locked object selected', () => {
     expect((screen.getByLabelText(/^locked$/i) as HTMLInputElement).checked).toBe(false)
   })
 
+  it('names a locked window as a window, not a door', () => {
+    openWith({ walls: [makeWall()], openings: [makeDoor({ kind: 'window', locked: true })] })
+    select({ kind: 'wall', id: 'wall-1' })
+    show()
+
+    expect(screen.getByText('A locked window is in this wall.')).toBeTruthy()
+  })
+
   it('offers the lock on an area and a counter too', () => {
     const zone: Zone = {
       id: 'zone-1',

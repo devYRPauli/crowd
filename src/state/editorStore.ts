@@ -23,7 +23,7 @@ import {
   undo,
   undoLabel,
 } from '../core/document/history'
-import { createDocument } from '../core/model/defaults'
+import { OPENING_NOUNS, createDocument } from '../core/model/defaults'
 import {
   DEFAULT_DOOR_HEIGHT,
   DEFAULT_DOOR_WIDTH,
@@ -33,7 +33,7 @@ import {
   DEFAULT_WINDOW_SILL,
   DEFAULT_WINDOW_WIDTH,
 } from '../core/model/standards'
-import { holdsLockedOpening, isLocked, removeObjects } from '../core/document/mutations'
+import { isLocked, lockedOpeningIn, removeObjects } from '../core/document/mutations'
 import type { ThemeName } from '../render/theme'
 import type { ViewPreset } from '../render/CameraRig'
 
@@ -237,9 +237,11 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   deleteSelection: () => {
     const { selection, document, apply, toast } = get()
-    if (selection.some((ref) => ref.kind === 'wall' && holdsLockedOpening(document, ref.id))) {
-      toast('A locked door is in that wall.')
-    }
+    const held = selection.flatMap((ref) => {
+      const opening = ref.kind === 'wall' ? lockedOpeningIn(document, ref.id) : undefined
+      return opening ? [opening] : []
+    })[0]
+    if (held) toast(`A locked ${OPENING_NOUNS[held.kind]} is in that wall.`)
     const removable = selection.filter(
       (ref) => Boolean(findRef(document, ref)) && !isLocked(document, ref),
     )
