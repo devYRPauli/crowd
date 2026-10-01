@@ -115,8 +115,12 @@ export const ViewportHost = ({
     controllerRef.current?.refresh()
   }, [document])
 
+  // The tool redraws on a selection change as well: its handles are drawn from
+  // the selection, and after Cmd-A or a pick in Layers the rotate ring did not
+  // appear until the pointer moved.
   useEffect(() => {
     viewportRef.current?.setSelection([...selection])
+    controllerRef.current?.refresh()
   }, [selection])
 
   useEffect(() => {

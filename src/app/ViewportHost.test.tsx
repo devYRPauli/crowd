@@ -21,7 +21,7 @@ import { PlanBuilder } from '../library/planBuilder'
 import type { Label } from '../render/LabelLayer'
 import type { CrowdDocument } from '../core/model/types'
 
-const published = vi.hoisted(() => ({ labels: [] as Label[][] }))
+const published = vi.hoisted(() => ({ labels: [] as Label[][], refreshes: 0 }))
 
 vi.mock('../render/Viewport', () => ({
   Viewport: class {
@@ -53,7 +53,9 @@ vi.mock('../render/Viewport', () => ({
 
 vi.mock('../editor/ToolController', () => ({
   ToolController: class {
-    refresh() {}
+    refresh() {
+      published.refreshes++
+    }
     setTool() {}
   },
 }))
@@ -107,6 +109,7 @@ const mount = () =>
 
 afterEach(() => {
   published.labels = []
+  published.refreshes = 0
   vi.restoreAllMocks()
 })
 
@@ -125,6 +128,21 @@ describe('room labels', () => {
 
     act(() => useEditor.getState().replaceDocument(createDocument(), 'New project'))
     expect(published.labels.at(-1)).toEqual([])
+  })
+})
+
+describe('the tool in hand', () => {
+  it('redraws when the selection changes and the plan does not', () => {
+    const doc = hall()
+    open(doc)
+    mount()
+    const before = published.refreshes
+
+    // Cmd-A changes only the selection, and the rotate ring it should have
+    // drawn did not appear until the pointer moved.
+    act(() => useEditor.getState().setSelection([{ kind: 'wall', id: doc.plan.walls[0].id }]))
+
+    expect(published.refreshes).toBe(before + 1)
   })
 })
 
