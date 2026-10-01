@@ -24,6 +24,18 @@ export const inches = (value: number): number => Math.round(value * 25.4) / 1000
 /** Feet and inches, in metres, the way a drawing carries them. */
 export const feet = (value: number, extraInches = 0): number => inches(value * 12 + extraInches)
 
+/**
+ * The size a stored width is called. A width that is exactly what a half-inch
+ * size rounds to is taken as that size, and anything else as drawn: a 3'0"
+ * door is stored as 914 mm, and two of them failed the 72" that 360 people
+ * need. Allowing every width the half millimetre instead passed widths that
+ * are no stock size short of the code, a typed 95.95" door against 96".
+ */
+export const nominal = (metres: number): number => {
+  const halfInches = Math.round((metres * 2000) / 25.4)
+  return inches(halfInches / 2) === metres ? (halfInches * 25.4) / 2000 : metres
+}
+
 export interface StandardSize {
   /** Metres — what the document stores. */
   readonly metres: number
@@ -150,12 +162,9 @@ export const DEFAULT_COUNTER_DEPTH = feet(2, 6)
  *
  * Indicative only, and the UI says so every time one is quoted.
  */
-/** IBC 1010.1.1's egress door clear width, in the inches the code states it. */
-export const EGRESS_DOOR_CLEAR_INCHES = 32
-
 export const CODE_MINIMUMS = {
   /** IBC 1010.1.1 — clear width of an egress door. */
-  egressDoorClearWidth: inches(EGRESS_DOOR_CLEAR_INCHES),
+  egressDoorClearWidth: inches(32),
   /** IBC 1010.1.1 — clear height of an egress door. */
   egressDoorHeight: inches(80),
   /** IBC 1010.1.1 — a single leaf may not exceed this. */

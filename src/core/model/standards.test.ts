@@ -18,6 +18,8 @@ import {
   WINDOW_HEIGHTS,
   WINDOW_SILLS,
   WINDOW_WIDTHS,
+  feet,
+  nominal,
   isStandard,
   nearestStandard,
 } from './standards'
@@ -341,6 +343,17 @@ describe('OPENING_JAMB', () => {
     // walls would silently narrow the plan's main entry.
     expect(DEFAULT_DOOR_WIDTH + 2 * OPENING_JAMB).toBeCloseTo(1.016, 9)
     expect(2 * OPENING_JAMB).toBeLessThan(DOOR_WIDTHS[0].metres)
+  })
+})
+
+describe('nominal', () => {
+  it('takes a stored stock size as the size it is called, and anything else as drawn', () => {
+    expect(nominal(feet(3))).toBe(0.9144)
+    expect(nominal(CODE_MINIMUMS.egressDoorClearWidth)).toBe(0.8128)
+    expect(nominal(feet(6))).toBe(1.8288)
+    // 812 mm is no half-inch size rounded, and neither is a typed 95.99".
+    expect(nominal(0.812)).toBe(0.812)
+    expect(nominal(2.438146)).toBe(2.438146)
   })
 })
 

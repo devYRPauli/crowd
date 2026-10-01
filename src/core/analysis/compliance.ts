@@ -16,7 +16,7 @@ import type { Plan, UnitSystem } from '../model/types'
 import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
 import { polygonsOverlap } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
-import { EGRESS_DOOR_CLEAR_INCHES } from '../model/standards'
+import { CODE_MINIMUMS, nominal } from '../model/standards'
 import { formatDuration } from '../model/units'
 
 const SQFT_PER_SQM = 10.7639
@@ -95,13 +95,12 @@ export const BOUNDARY_LAYER = 0.15
 export const GREEN_GUIDE_RATE = 82
 
 /**
- * Minimum clear door width under IBC, in metres: the code's 32 in exactly, not
- * the stock 2'8" door of 813 mm that stands for it elsewhere. Held to that, a
- * door typed as 32" failed as "813 mm wide, below the 813 mm clear minimum",
- * three exits' minimum failed a 96" door by the 0.6 mm three roundings added,
- * and half a millimetre allowed for each of them passed a 95.95" one.
+ * Minimum clear door width under IBC, in metres: the 32 in the code states,
+ * not the 813 mm it is stored as. Held to 813 mm, a door typed as 32" failed as
+ * "813 mm wide, below the 813 mm clear minimum", and three exits' minimum
+ * failed a 96" door by the 0.6 mm three roundings added.
  */
-export const MIN_DOOR_WIDTH_M = (EGRESS_DOOR_CLEAR_INCHES * MM_PER_INCH) / 1000
+export const MIN_DOOR_WIDTH_M = nominal(CODE_MINIMUMS.egressDoorClearWidth)
 
 const exitCountRequired = (occupants: number): number => {
   if (occupants <= 49) return 1
@@ -204,33 +203,32 @@ export const computeCompliance = ({
     })
   }
 
-  // A width that fails is quoted finer than the half millimetre it can fail
-  // by. At formatLength's centimetre and tenth of an inch, an 812 mm door
+  // A width that fails is quoted to a tenth of a millimetre or a hundredth of
+  // an inch. At formatLength's centimetre and tenth of an inch, an 812 mm door
   // failed as 2' 8" wide, below the 2' 8" clear minimum.
   const clear = (metres: number) =>
     units === 'imperial'
       ? `${((metres * 1000) / MM_PER_INCH).toFixed(2)}"`
       : `${(metres * 1000).toFixed(1)} mm`
 
-  // Stock sizes are stored to the millimetre, so a door can be up to half of
-  // one short of the size it is called: two 3'0" doors are 914 mm each and
-  // failed the 72" that 360 people need. Each door is allowed that half
-  // millimetre and no more. Rounded to the millimetre first as well, each got
-  // nearly a whole one, and four typed 50.02" doors passed 3 mm short.
-  const short = (widthM: number, doors: number, requiredM: number) =>
-    widthM * 1000 + doors / 2 < requiredM * 1000
-  if (short(totalExitWidthM, exitWidths.length, requiredWidthM)) {
+  // Each door counts as the size it is called, and is compared to the
+  // micrometre: three 32" minimums add up to 2.4383999999999997 m, and a 96"
+  // door is 2.4384.
+  const short = (widthM: number, requiredM: number) =>
+    Math.round(widthM * 1e6) < Math.round(requiredM * 1e6)
+  const calledExitWidthM = exitWidths.reduce((sum, width) => sum + nominal(width), 0)
+  if (short(calledExitWidthM, requiredWidthM)) {
     issues.push({
       severity: 'fail',
-      message: `Egress width is ${clear(totalExitWidthM)} against ${clear(requiredWidthM)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
+      message: `Egress width is ${clear(calledExitWidthM)} against ${clear(requiredWidthM)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
     })
   }
 
   for (const width of doorWidths) {
-    if (short(width, 1, MIN_DOOR_WIDTH_M)) {
+    if (short(nominal(width), MIN_DOOR_WIDTH_M)) {
       issues.push({
         severity: 'fail',
-        message: `A doorway is ${clear(width)} wide, below the ${clear(MIN_DOOR_WIDTH_M)} clear minimum.`,
+        message: `A doorway is ${clear(nominal(width))} wide, below the ${clear(MIN_DOOR_WIDTH_M)} clear minimum.`,
       })
       break
     }

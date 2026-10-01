@@ -288,6 +288,10 @@ describe('compliance calculator', () => {
 
     // A millimetre under the minimum, and at a tenth of an inch both read 2' 8".
     expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32.00" clear minimum.`)
+    // Allowed half a millimetre for rounding, 812.4 mm passed as 32".
+    expect(doorway(0.8124)).toBe(`A doorway is 31.98" wide, below the 32.00" clear minimum.`)
+    expect(doorway(parseLength('32"', 'imperial')!)).toBeUndefined()
+    expect(doorway(feet(2, 8))).toBeUndefined()
   })
 
   it('passes stock doors against the width they are called', () => {
@@ -310,14 +314,14 @@ describe('compliance calculator', () => {
     expect(egress(360, 'metric')).toBeUndefined()
     // One more person needs a fifth of an inch the doors do not have.
     expect(egress(361, 'metric')).toBe(
-      'Egress width is 1828.0 mm against 1833.9 mm required (from the per-occupant calculation).',
+      'Egress width is 1828.8 mm against 1833.9 mm required (from the per-occupant calculation).',
     )
     expect(egress(361, 'imperial')).toBe(
-      'Egress width is 71.97" against 72.20" required (from the per-occupant calculation).',
+      'Egress width is 72.00" against 72.20" required (from the per-occupant calculation).',
     )
   })
 
-  it('allows each exit only the half millimetre it can have lost', () => {
+  it('takes a width that is no stock size as drawn', () => {
     // Rounded to the millimetre and then given half of one, each exit had
     // nearly a whole millimetre to spare: four doors typed as 50.02" are 0.12"
     // short of the 200.2" that 1001 people need, and they passed.
@@ -384,14 +388,18 @@ describe('compliance calculator', () => {
 
     // Three exits need 96". Held to three stored 2'8" doors, 3 x 813 mm, a 96"
     // door failed by the 0.6 mm the rounding added; allowed half a millimetre
-    // for each of them as well, a 95.95" door passed.
+    // for each of them as well, a 95.95" door passed, and half a millimetre
+    // for the door alone passed a 95.99" one.
     expect(result.issues.filter((issue) => issue.severity === 'fail')).toEqual([])
-    expect(egress('95.95"').issues.filter((issue) => issue.severity === 'fail')).toEqual([
-      {
-        severity: 'fail',
-        message:
-          'Egress width is 95.95" against 96.00" required (the minimum door width binds here, not the per-occupant calculation).',
-      },
+    const fails = (width: string) =>
+      egress(width)
+        .issues.filter((issue) => issue.severity === 'fail')
+        .map((issue) => issue.message)
+    expect(fails('95.95"')).toEqual([
+      'Egress width is 95.95" against 96.00" required (the minimum door width binds here, not the per-occupant calculation).',
+    ])
+    expect(fails('95.99"')).toEqual([
+      'Egress width is 95.99" against 96.00" required (the minimum door width binds here, not the per-occupant calculation).',
     ])
   })
 
