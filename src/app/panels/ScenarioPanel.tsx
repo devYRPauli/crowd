@@ -7,7 +7,7 @@
  * which is how parallel desks get balanced rather than all queued at one.
  */
 
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
 import { useEditor } from '../../state/editorStore'
 import {
   addPopulation,
@@ -244,6 +244,7 @@ const PopulationEditor = ({ population, index }: { population: Population; index
   const apply = useEditor((state) => state.apply)
   const sealHistory = useEditor((state) => state.sealHistory)
   const entries = document.plan.zones.filter((zone) => zone.kind === 'entry')
+  const entriesLabel = useId()
 
   const patch = (changes: Partial<Population>, label: string, coalesceKey?: string) =>
     apply((doc) => updatePopulation(doc, population.id, changes), label, coalesceKey)
@@ -381,10 +382,12 @@ const PopulationEditor = ({ population, index }: { population: Population; index
         />
       ) : null}
 
-      <Field
-        label="Entering through"
-        hint={entries.length === 0 ? 'Draw an entry area to choose one.' : undefined}
-      >
+      {/* A label can only name one control, and Field's pointed at this list's
+          wrapper, so the doors were read out with nothing saying what they were for. */}
+      <div className="field" role="group" aria-labelledby={entriesLabel}>
+        <span className="field-label" id={entriesLabel}>
+          Entering through
+        </span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {entries.map((zone) => (
             <Checkbox
@@ -404,7 +407,10 @@ const PopulationEditor = ({ population, index }: { population: Population; index
             />
           ))}
         </div>
-      </Field>
+        {entries.length === 0 ? (
+          <span className="hint">Draw an entry area to choose one.</span>
+        ) : null}
+      </div>
 
       <ItineraryEditor population={population} />
       <span className="hint">

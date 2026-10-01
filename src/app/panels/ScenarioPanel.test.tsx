@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ScenarioPanel } from './ScenarioPanel'
 import { Simulation } from '../../sim/engine'
 import { useEditor } from '../../state/editorStore'
@@ -212,6 +212,14 @@ describe('groups of people', () => {
 
     fireEvent.click(screen.getByLabelText('Main doors'))
     expect(group().entryIds).toEqual([])
+  })
+
+  it('names the doors it offers as the ones a group comes in through', () => {
+    openWith({ zones: [entry, exit] })
+    render(<ScenarioPanel />)
+
+    const doors = screen.getByRole('group', { name: 'Entering through' })
+    expect(within(doors).getByRole('checkbox', { name: 'Main doors' })).toBeDefined()
   })
 
   it('says there is nowhere to come in, rather than offering the way out', () => {
