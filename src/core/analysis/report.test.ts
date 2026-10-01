@@ -144,7 +144,7 @@ describe('report export', () => {
     })
     // The figures alone can round to the same width either side of a failure.
     expect(narrow.split('\n')).toContain(
-      '• Fails: A doorway is 700.0 mm wide, below the 813.0 mm clear minimum.',
+      '• Fails: A doorway is 700.0 mm wide, below the 812.8 mm clear minimum.',
     )
   })
 

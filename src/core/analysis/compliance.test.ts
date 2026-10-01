@@ -271,8 +271,8 @@ describe('compliance calculator', () => {
         units,
       }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
 
-    expect(message('metric')).toBe('A doorway is 700.0 mm wide, below the 813.0 mm clear minimum.')
-    expect(message('imperial')).toBe(`A doorway is 27.56" wide, below the 32.01" clear minimum.`)
+    expect(message('metric')).toBe('A doorway is 700.0 mm wide, below the 812.8 mm clear minimum.')
+    expect(message('imperial')).toBe(`A doorway is 27.56" wide, below the 32.00" clear minimum.`)
   })
 
   it('never prints a width that fails as the size it falls short of', () => {
@@ -287,7 +287,7 @@ describe('compliance calculator', () => {
       }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
 
     // A millimetre under the minimum, and at a tenth of an inch both read 2' 8".
-    expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32.01" clear minimum.`)
+    expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32.00" clear minimum.`)
   })
 
   it('passes stock doors against the width they are called', () => {
@@ -340,29 +340,40 @@ describe('compliance calculator', () => {
     )
   })
 
-  it('allows the stored minimum its half millimetre too', () => {
-    // Three exits' minimum is three 32" doors, stored as 3 x 813 mm, and one
-    // 96" door, exactly that, failed it by the 0.6 mm the rounding added.
-    const b = new PlanBuilder()
-    const room = b.room(0, 0, 15, 15)
-    b.door(room.south, 3, parseLength('96"', 'imperial')!, 'door', 'exit')
-    b.zone('exit', 1, 12, 3, 14, 'North exit')
-    b.zone('exit', 12, 12, 14, 14, 'East exit')
-    const result = computeCompliance({
-      plan: b.build(),
-      occupancy: 'assembly-standing',
-      sprinklered: true,
-      plannedAttendance: 600,
-      targetEgressMinutes: 8,
-      units: 'imperial',
-    })
-
+  it('holds the exits to the minimum the code states, not its stored rounding', () => {
+    const egress = (width: string) => {
+      const b = new PlanBuilder()
+      const room = b.room(0, 0, 15, 15)
+      b.door(room.south, 3, parseLength(width, 'imperial')!, 'door', 'exit')
+      b.zone('exit', 1, 12, 3, 14, 'North exit')
+      b.zone('exit', 12, 12, 14, 14, 'East exit')
+      return computeCompliance({
+        plan: b.build(),
+        occupancy: 'assembly-standing',
+        sprinklered: true,
+        plannedAttendance: 600,
+        targetEgressMinutes: 8,
+        units: 'imperial',
+      })
+    }
+    const result = egress('96"')
     expect([result.bindingRule, result.exitsRequired, result.exitsProvided]).toEqual([
       'minimum',
       3,
       3,
     ])
+
+    // Three exits need 96". Held to three stored 2'8" doors, 3 x 813 mm, a 96"
+    // door failed by the 0.6 mm the rounding added; allowed half a millimetre
+    // for each of them as well, a 95.95" door passed.
     expect(result.issues.filter((issue) => issue.severity === 'fail')).toEqual([])
+    expect(egress('95.95"').issues.filter((issue) => issue.severity === 'fail')).toEqual([
+      {
+        severity: 'fail',
+        message:
+          'Egress width is 95.95" against 96.00" required (the minimum door width binds here, not the per-occupant calculation).',
+      },
+    ])
   })
 
   it('uses the reduced width allowance when the building is sprinklered', () => {

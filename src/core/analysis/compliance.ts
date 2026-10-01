@@ -16,7 +16,7 @@ import type { Plan, UnitSystem } from '../model/types'
 import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
 import { polygonsOverlap } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
-import { CODE_MINIMUMS } from '../model/standards'
+import { EGRESS_DOOR_CLEAR_INCHES } from '../model/standards'
 
 const SQFT_PER_SQM = 10.7639
 const MM_PER_INCH = 25.4
@@ -92,15 +92,15 @@ export const SPECIFIC_FLOW = 1.3
 export const BOUNDARY_LAYER = 0.15
 /** Green Guide level-route flow rate, persons per metre per minute. */
 export const GREEN_GUIDE_RATE = 82
-/** Minimum clear door width under IBC, in metres (32 in). */
-export const MIN_DOOR_WIDTH_M = CODE_MINIMUMS.egressDoorClearWidth
 
 /**
- * A door is held to the minimum to the millimetre. A typed 32" is 812.8 mm and
- * the minimum and the stock 2'8" door 813 mm, and a door typed as 32" failed
- * as "813 mm wide, below the 813 mm clear minimum".
+ * Minimum clear door width under IBC, in metres: the code's 32 in exactly, not
+ * the stock 2'8" door of 813 mm that stands for it elsewhere. Held to that, a
+ * door typed as 32" failed as "813 mm wide, below the 813 mm clear minimum",
+ * three exits' minimum failed a 96" door by the 0.6 mm three roundings added,
+ * and half a millimetre allowed for each of them passed a 95.95" one.
  */
-const mm = (metres: number): number => Math.round(metres * 1000)
+export const MIN_DOOR_WIDTH_M = (EGRESS_DOOR_CLEAR_INCHES * MM_PER_INCH) / 1000
 
 const exitCountRequired = (occupants: number): number => {
   if (occupants <= 49) return 1
@@ -205,22 +205,20 @@ export const computeCompliance = ({
 
   // A width that fails is quoted finer than the half millimetre it can fail
   // by. At formatLength's centimetre and tenth of an inch, an 812 mm door
-  // failed as 2' 8" wide, below the 2' 8" clear minimum. The minimum is quoted
-  // as stored, 32.01" and not the code's 32", because that is what it fires on.
+  // failed as 2' 8" wide, below the 2' 8" clear minimum.
   const clear = (metres: number) =>
     units === 'imperial'
       ? `${((metres * 1000) / MM_PER_INCH).toFixed(2)}"`
       : `${(metres * 1000).toFixed(1)} mm`
 
-  // Stock sizes and code minimums are stored to the millimetre, so each can be
-  // up to half of one off the size it is called: two 3'0" doors are 914 mm each
-  // and failed the 72" that 360 people need, and one typed 96" door failed the
-  // 3 x 813 mm that three exits' 32" minimum is stored as. Each stored width is
-  // allowed that half millimetre and no more. Rounded to the millimetre first
-  // as well, each door got nearly a whole one, and four typed 50.02" doors
-  // passed 3 mm short.
-  const storedWidths = exitWidths.length + (bindingRule === 'minimum' ? requiredExits : 0)
-  if (totalExitWidthM * 1000 + storedWidths / 2 < requiredWidthM * 1000) {
+  // Stock sizes are stored to the millimetre, so a door can be up to half of
+  // one short of the size it is called: two 3'0" doors are 914 mm each and
+  // failed the 72" that 360 people need. Each door is allowed that half
+  // millimetre and no more. Rounded to the millimetre first as well, each got
+  // nearly a whole one, and four typed 50.02" doors passed 3 mm short.
+  const short = (widthM: number, doors: number, requiredM: number) =>
+    widthM * 1000 + doors / 2 < requiredM * 1000
+  if (short(totalExitWidthM, exitWidths.length, requiredWidthM)) {
     issues.push({
       severity: 'fail',
       message: `Egress width is ${clear(totalExitWidthM)} against ${clear(requiredWidthM)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
@@ -228,7 +226,7 @@ export const computeCompliance = ({
   }
 
   for (const width of doorWidths) {
-    if (mm(width) < mm(MIN_DOOR_WIDTH_M)) {
+    if (short(width, 1, MIN_DOOR_WIDTH_M)) {
       issues.push({
         severity: 'fail',
         message: `A doorway is ${clear(width)} wide, below the ${clear(MIN_DOOR_WIDTH_M)} clear minimum.`,

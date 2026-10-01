@@ -150,9 +150,12 @@ export const DEFAULT_COUNTER_DEPTH = feet(2, 6)
  *
  * Indicative only, and the UI says so every time one is quoted.
  */
+/** IBC 1010.1.1's egress door clear width, in the inches the code states it. */
+export const EGRESS_DOOR_CLEAR_INCHES = 32
+
 export const CODE_MINIMUMS = {
   /** IBC 1010.1.1 — clear width of an egress door. */
-  egressDoorClearWidth: inches(32),
+  egressDoorClearWidth: inches(EGRESS_DOOR_CLEAR_INCHES),
   /** IBC 1010.1.1 — clear height of an egress door. */
   egressDoorHeight: inches(80),
   /** IBC 1010.1.1 — a single leaf may not exceed this. */
