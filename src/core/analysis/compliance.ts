@@ -96,11 +96,9 @@ export const GREEN_GUIDE_RATE = 82
 export const MIN_DOOR_WIDTH_M = CODE_MINIMUMS.egressDoorClearWidth
 
 /**
- * Widths are compared to the millimetre, door by door. A typed 32" is 812.8 mm
- * and the minimum and the stock 2'8" door 813 mm, and a door typed as 32"
- * failed as "813 mm wide, below the 813 mm clear minimum". Summed before
- * rounding, three of them still fell 0.6 mm short of three exits' minimum
- * width.
+ * A door is held to the minimum to the millimetre. A typed 32" is 812.8 mm and
+ * the minimum and the stock 2'8" door 813 mm, and a door typed as 32" failed
+ * as "813 mm wide, below the 813 mm clear minimum".
  */
 const mm = (metres: number): number => Math.round(metres * 1000)
 
@@ -200,36 +198,33 @@ export const computeCompliance = ({
     })
   }
 
-  // A width that fails is quoted finer than the millimetre it failed by. At
-  // formatLength's centimetre and tenth of an inch, an 812 mm door failed as
-  // 2' 8" wide, below the 2' 8" clear minimum.
+  // A width that fails is quoted finer than the half millimetre it can fail
+  // by. At formatLength's centimetre and tenth of an inch, an 812 mm door
+  // failed as 2' 8" wide, below the 2' 8" clear minimum. The minimum is quoted
+  // as stored, 32.01" and not the code's 32", because that is what it fires on.
   const clear = (metres: number) =>
     units === 'imperial'
       ? `${((metres * 1000) / MM_PER_INCH).toFixed(2)}"`
-      : `${(metres * 1000).toFixed(0)} mm`
+      : `${(metres * 1000).toFixed(1)} mm`
 
-  // Stock sizes are stored to the millimetre, so each can be half of one under
-  // the size it is called: two 3'0" doors are 914 mm each, and they failed the
-  // 72" that 360 people need by the 0.8 mm the rounding took off them.
-  const exitWidthMm = exitWidths.reduce((sum, width) => sum + mm(width), 0)
-  if (exitWidthMm + exitWidths.length / 2 < requiredWidthM * 1000) {
+  // Stock sizes and code minimums are stored to the millimetre, so a door can
+  // fall up to half of one short of the size it is called: two 3'0" doors are
+  // 914 mm each and failed the 72" that 360 people need, and three typed 32"
+  // doors fell 0.6 mm short of three exits' minimum. That half millimetre is
+  // all an exit is allowed. Rounded to the millimetre first as well, each got
+  // nearly a whole one, and four typed 50.02" doors passed 3 mm short.
+  if (totalExitWidthM * 1000 + exitWidths.length / 2 < requiredWidthM * 1000) {
     issues.push({
       severity: 'fail',
       message: `Egress width is ${clear(totalExitWidthM)} against ${clear(requiredWidthM)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
     })
   }
 
-  // The code sets the minimum in whole inches and it is stored to the
-  // millimetre, so to the hundredth it read as 32.01".
-  const minimumDoor =
-    units === 'imperial'
-      ? `${Math.round((MIN_DOOR_WIDTH_M * 1000) / MM_PER_INCH)}"`
-      : clear(MIN_DOOR_WIDTH_M)
   for (const width of doorWidths) {
     if (mm(width) < mm(MIN_DOOR_WIDTH_M)) {
       issues.push({
         severity: 'fail',
-        message: `A doorway is ${clear(width)} wide, below the ${minimumDoor} clear minimum.`,
+        message: `A doorway is ${clear(width)} wide, below the ${clear(MIN_DOOR_WIDTH_M)} clear minimum.`,
       })
       break
     }

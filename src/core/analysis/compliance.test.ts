@@ -266,8 +266,8 @@ describe('compliance calculator', () => {
         units,
       }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
 
-    expect(message('metric')).toBe('A doorway is 700 mm wide, below the 813 mm clear minimum.')
-    expect(message('imperial')).toBe(`A doorway is 27.56" wide, below the 32" clear minimum.`)
+    expect(message('metric')).toBe('A doorway is 700.0 mm wide, below the 813.0 mm clear minimum.')
+    expect(message('imperial')).toBe(`A doorway is 27.56" wide, below the 32.01" clear minimum.`)
   })
 
   it('never prints a width that fails as the size it falls short of', () => {
@@ -282,7 +282,7 @@ describe('compliance calculator', () => {
       }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
 
     // A millimetre under the minimum, and at a tenth of an inch both read 2' 8".
-    expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32" clear minimum.`)
+    expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32.01" clear minimum.`)
   })
 
   it('passes stock doors against the width they are called', () => {
@@ -305,10 +305,33 @@ describe('compliance calculator', () => {
     expect(egress(360, 'metric')).toBeUndefined()
     // One more person needs a fifth of an inch the doors do not have.
     expect(egress(361, 'metric')).toBe(
-      'Egress width is 1828 mm against 1834 mm required (from the per-occupant calculation).',
+      'Egress width is 1828.0 mm against 1833.9 mm required (from the per-occupant calculation).',
     )
     expect(egress(361, 'imperial')).toBe(
       'Egress width is 71.97" against 72.20" required (from the per-occupant calculation).',
+    )
+  })
+
+  it('allows each exit only the half millimetre it can have lost', () => {
+    // Rounded to the millimetre and then given half of one, each exit had
+    // nearly a whole millimetre to spare: four doors typed as 50.02" are 0.12"
+    // short of the 200.2" that 1001 people need, and they passed.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 20, 20)
+    const width = parseLength('50.02"', 'imperial')!
+    for (const wall of [room.north, room.east, room.south, room.west])
+      b.door(wall, 5, width, 'door', 'exit')
+    const egress = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-tables',
+      sprinklered: false,
+      plannedAttendance: 1001,
+      targetEgressMinutes: 8,
+      units: 'imperial',
+    }).issues.find((issue) => issue.message.startsWith('Egress width'))?.message
+
+    expect(egress).toBe(
+      'Egress width is 200.08" against 200.20" required (from the per-occupant calculation).',
     )
   })
 
