@@ -27,8 +27,11 @@
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* index.html offers both schemes, so without one per theme the browser drew
+   native controls (select menus, scrollbars) dark over the light theme. */
 :root,
 [data-theme='light'] {
+  color-scheme: light;
   --bg: #eef1f5;
   --surface: #ffffff;
   --surface-2: #f5f7fa;
@@ -48,6 +51,7 @@
 }
 
 [data-theme='dark'] {
+  color-scheme: dark;
   --bg: #0f1319;
   --surface: #171c24;
   --surface-2: #1d232c;
