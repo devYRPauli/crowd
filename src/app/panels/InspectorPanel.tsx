@@ -27,6 +27,7 @@ import { add, angleOf, fromAngle } from '../../core/math/vec2'
 import type { Opening, OpeningKind, WallKind, Zone } from '../../core/model/types'
 import {
   DOOR_WIDTHS,
+  DOUBLE_DOOR_FROM,
   OPENING_JAMB,
   WINDOW_WIDTHS,
   isStandard,
@@ -214,6 +215,27 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
     // head cannot be either.
     const maxHeight = wall ? Math.max(0.2, wall.height - opening.sill) : 10
     const maxSill = wall ? Math.max(0, wall.height - opening.height) : 10
+    const sizes = opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS
+    const stock = isStandard(sizes, opening.width) ? nearestStandard(sizes, opening.width) : null
+    // A door hangs as a pair from 5'0", as it does when one is placed. Widening
+    // a 3'0" door to 6'0" here left one leaf the width of a pair, and choosing
+    // the 6'0" pair from the stock sizes did the same.
+    const setWidth = (width: number) =>
+      apply(
+        (doc) =>
+          updateOpening(doc, opening.id, {
+            width,
+            ...(opening.kind === 'door' || opening.kind === 'double-door'
+              ? {
+                  kind:
+                    Math.min(width, maxWidth) >= DOUBLE_DOOR_FROM
+                      ? ('double-door' as const)
+                      : ('door' as const),
+                }
+              : {}),
+          }),
+        'Set width',
+      )
     return (
       <>
         {header(
@@ -221,47 +243,35 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
           formatLength(opening.width, units),
         )}
         <div className="panel-body">
-          <Field
-            label="Width"
-            hint={
-              isStandard(opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS, opening.width)
-                ? undefined
-                : 'Not a stock size'
-            }
-          >
+          <Field label="Width" hint={stock ? undefined : 'Not a stock size'}>
             <LengthInput
               value={opening.width}
               units={units}
               min={0.3}
               max={maxWidth}
               disabled={Boolean(opening.locked)}
-              onCommit={(width) =>
-                apply((doc) => updateOpening(doc, opening.id, { width }), 'Set width')
-              }
+              onCommit={setWidth}
             />
           </Field>
           <Field label="Stock size">
             <Select
-              value={
-                nearestStandard(
-                  opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS,
-                  opening.width,
-                )?.imperial ?? ''
-              }
+              value={stock?.imperial ?? ''}
               disabled={Boolean(opening.locked)}
               onChange={(imperial) => {
-                const sizes = opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS
                 const chosen = sizes.find((size) => size.imperial === imperial)
-                if (!chosen) return
-                apply(
-                  (doc) => updateOpening(doc, opening.id, { width: chosen.metres }),
-                  'Set width',
-                )
+                if (chosen) setWidth(chosen.metres)
               }}
-              options={(opening.kind === 'window' ? WINDOW_WIDTHS : DOOR_WIDTHS).map((size) => ({
-                value: size.imperial,
-                label: size.note ? `${size.imperial} — ${size.note}` : size.imperial,
-              }))}
+              // A width nobody makes shows as itself. Showing the nearest stock
+              // size instead named a size the door was not, and picking that
+              // size, already the selected option, fired no change and did
+              // nothing.
+              options={[
+                ...(stock ? [] : [{ value: '', label: 'Custom width' }]),
+                ...sizes.map((size) => ({
+                  value: size.imperial,
+                  label: size.note ? `${size.imperial} — ${size.note}` : size.imperial,
+                })),
+              ]}
             />
           </Field>
           <Slider

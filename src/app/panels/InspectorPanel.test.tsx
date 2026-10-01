@@ -151,17 +151,31 @@ describe('the inspector with a doorway selected', () => {
     show()
 
     expect(screen.getByText('Not a stock size')).toBeDefined()
-    // The dropdown snaps to the nearest orderable leaf rather than blanking, so
-    // correcting the width is one click — but it therefore *names* a size this
-    // door is not, and the hint beside the width box is the only thing saying
-    // the two disagree.
-    expect(control(/^stock size$/i).value).toBe(`3'0"`)
+    // The dropdown used to show the nearest leaf, 3'0", which named a size
+    // this door is not, and choosing 3'0" from it then changed nothing: it was
+    // already the selected option, so the browser fired no change.
+    expect(control(/^stock size$/i).value).toBe('')
 
-    fireEvent.change(control(/^stock size$/i), { target: { value: `2'8"` } })
+    fireEvent.change(control(/^stock size$/i), { target: { value: `3'0"` } })
 
-    // 2'8" is 32 inches, carried to the millimetre — 0.813 m, not "about 0.81".
-    expect(firstOpening().width).toBeCloseTo(0.813, 6)
+    // 3'0" is 36 inches, carried to the millimetre: 0.914 m, not "about 0.91".
+    expect(firstOpening().width).toBeCloseTo(0.914, 6)
     expect(screen.queryByText('Not a stock size')).toBeNull()
+    expect(screen.queryByRole('option', { name: 'Custom width' })).toBeNull()
+  })
+
+  it('hangs a door as a pair once it is wide enough to be one, and back again', () => {
+    openWith({ walls: [makeWall()], openings: [makeDoor()] })
+    select({ kind: 'opening', id: 'door-1' })
+    show()
+
+    fireEvent.change(control(/^stock size$/i), { target: { value: `6'0" pair` } })
+    // A single leaf six feet wide is not made, and placing a door this wide
+    // already draws a pair. Widening one in the inspector drew one leaf.
+    expect(firstOpening()).toMatchObject({ width: 1.829, kind: 'double-door' })
+
+    typeAndLeave(/^width$/i, '0.914 m')
+    expect(firstOpening()).toMatchObject({ width: 0.914, kind: 'door' })
   })
 
   it('will not let the position slider push a door off the end of its wall', () => {
