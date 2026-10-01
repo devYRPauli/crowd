@@ -289,6 +289,16 @@ describe('saving the view', () => {
     expect(restored.camera.position.distanceTo(camera.camera.position)).toBeCloseTo(0, 9)
   })
 
+  it('saves a camera on its way somewhere where it is going', () => {
+    const camera = rig()
+    camera.lookAtPoint(5, 7, true)
+    camera.update(0.1)
+    const moving = camera.snapshot()
+    while (camera.update(0.1));
+
+    expect(moving).toBe(camera.snapshot())
+  })
+
   it('keeps the default view when the stored pose cannot be read', () => {
     const camera = rig()
     const before = camera.camera.position.clone()

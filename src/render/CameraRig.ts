@@ -272,7 +272,10 @@ export class CameraRig {
 
   /** Serialisable pose, so the view survives a reload. */
   snapshot(): string {
-    const s = this.state
+    // A camera on its way to a view is saved where it is going. Saved where it
+    // was, a viewport rebuilt mid-swing sat between two views with the one it
+    // was swinging to still lit.
+    const s = this.to ?? this.state
     return JSON.stringify([s.target.x, s.target.z, s.azimuth, s.polar, s.distance, s.perspective])
   }
 
