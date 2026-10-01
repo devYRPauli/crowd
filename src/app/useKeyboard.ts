@@ -197,7 +197,15 @@ export const useKeyboard = ({
           const onPlan = target === document.body || target === viewportRef.current.viewport?.canvas
           if (!onPlan || event.shiftKey) return
           event.preventDefault()
-          editor.setView({ preset: editor.view.preset === 'plan' ? 'iso' : 'plan' })
+          // A camera put back from the last visit, or turned by hand, is in no
+          // named view, and is judged by where it looks. Read as "not plan", a
+          // camera already looking straight down was sent to Plan, and the
+          // first Tab after a reload did nothing.
+          const inPlan =
+            editor.view.preset === null
+              ? Boolean(viewportRef.current.viewport?.isPlanView)
+              : editor.view.preset === 'plan'
+          editor.setView({ preset: inPlan ? 'iso' : 'plan' })
           return
         }
         case '.':

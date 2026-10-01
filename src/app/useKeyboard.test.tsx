@@ -119,7 +119,7 @@ const reachedTheBrowser = (key: string, chord: Chord = {}): boolean =>
 
 const mount = (options: { overlayOpen?: boolean; toolConsumes?: boolean } = {}) => {
   const frame = vi.fn()
-  const viewport = { frame, spacePanned: false }
+  const viewport = { frame, spacePanned: false, isPlanView: false }
   const handleKeyDown = vi.fn(() => options.toolConsumes ?? false)
   const onToggleHeatmap = vi.fn()
   const onShowShortcuts = vi.fn()
@@ -493,6 +493,22 @@ describe('the view and the run', () => {
     // means also stopping it, or the camera swings and the focus ring walks off
     // into the panel behind at the same time.
     expect(reachedTheBrowser('Tab')).toBe(false)
+  })
+
+  it('reads a camera in no named view by where it is looking', () => {
+    const { viewport } = mount()
+
+    // A camera put back from the last visit, or turned by hand, is in no named
+    // view. Looking straight down, the first Tab after a reload only lit Plan.
+    editor().setView({ preset: null })
+    viewport.isPlanView = true
+    press('Tab')
+    expect(editor().view.preset).toBe('iso')
+
+    editor().setView({ preset: null })
+    viewport.isPlanView = false
+    press('Tab')
+    expect(editor().view.preset).toBe('plan')
   })
 
   it('leaves Tab to move focus off a control, and Shift-Tab everywhere', () => {
