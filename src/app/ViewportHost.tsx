@@ -8,7 +8,7 @@
  * the reconciler's way entirely.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Viewport } from '../render/Viewport'
 import type { ViewPreset } from '../render/CameraRig'
 import { ToolController } from '../editor/ToolController'
@@ -61,6 +61,10 @@ export const ViewportHost = ({
   const densityRef = useRef<DensityOverlay | null>(null)
   const controllerRef = useRef<ToolController | null>(null)
   const appliedPreset = useRef<ViewPreset | null>(null)
+  // Read once, before any effect runs. StrictMode's development remount saves
+  // the camera on the way out, and read in the effect it turned a first visit
+  // into a return to a turned camera, so no view button was ever lit in dev.
+  const [initialCamera] = useState(storedCamera)
 
   const document = useEditor((state) => state.document)
   const selection = useEditor((state) => state.selection)
@@ -97,9 +101,8 @@ export const ViewportHost = ({
     // The viewport starts in the 3D view. A camera restored from the last visit
     // is wherever it was left, and the preset effect used to swing it back.
     appliedPreset.current = 'iso'
-    const stored = storedCamera()
-    if (stored) {
-      viewport.restoreCamera(stored)
+    if (initialCamera) {
+      viewport.restoreCamera(initialCamera)
       leavePreset()
     } else viewport.frame(planBounds(useEditor.getState().document.plan, 3), false)
 
@@ -121,7 +124,7 @@ export const ViewportHost = ({
       viewportRef.current = null
       handleRef.current = { viewport: null, controller: null }
     }
-  }, [handleRef])
+  }, [handleRef, initialCamera])
 
   // --- document, selection, tools ----------------------------------------
   useEffect(() => {
@@ -141,10 +144,16 @@ export const ViewportHost = ({
     controllerRef.current?.setTool(tool)
   }, [tool])
 
+  // Its own effect, because setting the theme rebuilds every mesh in the plan,
+  // and on the whole view it ran again on every change to it: each orbit that
+  // took the light off a view button rebuilt the venue.
+  useEffect(() => {
+    viewportRef.current?.setTheme(view.theme)
+  }, [view.theme])
+
   useEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
-    viewport.setTheme(view.theme)
     viewport.setGridVisible(view.showGrid)
     viewport.setPlanOptions({
       showZones: view.showZones,

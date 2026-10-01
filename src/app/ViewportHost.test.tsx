@@ -10,8 +10,9 @@
  * of it: the rooms it found in the last plan it was handed.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { StrictMode } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen, type RenderOptions } from '@testing-library/react'
 import { ViewportHost, type ViewportHandle } from './ViewportHost'
 import { ErrorBoundary } from './ErrorBoundary'
 import { WebGLUnavailableError } from '../render/webgl'
@@ -28,6 +29,7 @@ const published = vi.hoisted(() => ({
   refreshes: 0,
   noGpu: false,
   views: [] as string[],
+  themes: [] as string[],
   orbit: null as (() => void) | null,
 }))
 
@@ -50,10 +52,12 @@ vi.mock('../render/Viewport', () => ({
     frame() {}
     restoreCamera() {}
     cameraSnapshot() {
-      return ''
+      return '{}'
     }
     setSelection() {}
-    setTheme() {}
+    setTheme(theme: string) {
+      published.themes.push(theme)
+    }
     setGridVisible() {}
     setPlanOptions() {}
     setView(preset: string) {
@@ -112,7 +116,7 @@ const open = (doc: CrowdDocument) =>
     view: { ...useEditor.getState().view, showRoomLabels: true },
   })
 
-const mount = (wrapper?: typeof ErrorBoundary) =>
+const mount = (wrapper?: RenderOptions['wrapper']) =>
   render(
     <ViewportHost
       handleRef={{ current: { viewport: null, controller: null } as ViewportHandle }}
@@ -130,10 +134,14 @@ afterEach(() => {
   published.refreshes = 0
   published.noGpu = false
   published.views = []
+  published.themes = []
   published.orbit = null
-  localStorage.clear()
   vi.restoreAllMocks()
 })
+
+// Before, not after: the unmount that cleans up after a test saves the camera,
+// and it runs after this file's own hooks.
+beforeEach(() => localStorage.clear())
 
 describe('room labels', () => {
   it('labels the rooms of the plan on screen, not the one before it', () => {
@@ -193,6 +201,30 @@ describe('the named views', () => {
     // The 3D view was applied on top of the restored camera and swung it back.
     expect(published.views).toEqual([])
     expect(useEditor.getState().view.preset).toBeNull()
+  })
+
+  it('lights the 3D view on a first visit, under StrictMode too', () => {
+    open(hall())
+    act(() => useEditor.getState().setView({ preset: 'iso' }))
+    mount(StrictMode)
+
+    // The development double mount saved the camera on its way out, found it
+    // on the way back in, and treated a first visit as a return to a turned
+    // camera, so no view button was ever lit in development.
+    expect(useEditor.getState().view.preset).toBe('iso')
+  })
+
+  it('repaints nothing when the camera is turned', () => {
+    open(hall())
+    act(() => useEditor.getState().setView({ preset: 'plan' }))
+    mount()
+    const painted = published.themes.length
+
+    // Taking the lit button off replaced the view settings and set the theme
+    // again with them, and setting the theme rebuilds every mesh in the plan.
+    act(() => published.orbit?.())
+    expect(useEditor.getState().view.preset).toBeNull()
+    expect(published.themes).toHaveLength(painted)
   })
 })
 
