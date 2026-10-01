@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeCompliance, BOUNDARY_LAYER, MIN_DOOR_WIDTH_M, SPECIFIC_FLOW } from './compliance'
 import { PlanBuilder } from '../../library/planBuilder'
-import { DEFAULT_WALL_THICKNESS } from '../model/standards'
+import { DEFAULT_WALL_THICKNESS, feet } from '../model/standards'
 import { parseLength } from '../model/units'
 
 const hall = (width: number, depth: number, doorWidths: number[]) => {
@@ -267,7 +267,49 @@ describe('compliance calculator', () => {
       }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
 
     expect(message('metric')).toBe('A doorway is 700 mm wide, below the 813 mm clear minimum.')
-    expect(message('imperial')).toBe(`A doorway is 2' 3.6" wide, below the 2' 8" clear minimum.`)
+    expect(message('imperial')).toBe(`A doorway is 27.56" wide, below the 32" clear minimum.`)
+  })
+
+  it('never prints a width that fails as the size it falls short of', () => {
+    const doorway = (width: number) =>
+      computeCompliance({
+        plan: hall(10, 10, [width]),
+        occupancy: 'assembly-standing',
+        sprinklered: false,
+        plannedAttendance: 20,
+        targetEgressMinutes: 8,
+        units: 'imperial',
+      }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
+
+    // A millimetre under the minimum, and at a tenth of an inch both read 2' 8".
+    expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32" clear minimum.`)
+  })
+
+  it('passes stock doors against the width they are called', () => {
+    // Stock sizes are stored to the millimetre: a 3'0" door is 914 mm, not
+    // 914.4. Two of them are 72", and they failed the 72" that 360 people need.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 3, feet(3), 'door', 'exit')
+    b.door(room.north, 3, feet(3), 'door', 'exit')
+    const egress = (plannedAttendance: number, units: 'metric' | 'imperial') =>
+      computeCompliance({
+        plan: b.build(),
+        occupancy: 'assembly-tables',
+        sprinklered: false,
+        plannedAttendance,
+        targetEgressMinutes: 8,
+        units,
+      }).issues.find((issue) => issue.message.startsWith('Egress width'))?.message
+
+    expect(egress(360, 'metric')).toBeUndefined()
+    // One more person needs a fifth of an inch the doors do not have.
+    expect(egress(361, 'metric')).toBe(
+      'Egress width is 1828 mm against 1834 mm required (from the per-occupant calculation).',
+    )
+    expect(egress(361, 'imperial')).toBe(
+      'Egress width is 71.97" against 72.20" required (from the per-occupant calculation).',
+    )
   })
 
   it('uses the reduced width allowance when the building is sprinklered', () => {
