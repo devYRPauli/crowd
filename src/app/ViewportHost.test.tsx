@@ -30,6 +30,7 @@ const published = vi.hoisted(() => ({
   noGpu: false,
   views: [] as string[],
   themes: [] as string[],
+  restored: [] as string[],
   orbit: null as (() => void) | null,
 }))
 
@@ -50,7 +51,9 @@ vi.mock('../render/Viewport', () => ({
       published.labels.push(labels)
     }
     frame() {}
-    restoreCamera() {}
+    restoreCamera(snapshot: string) {
+      published.restored.push(snapshot)
+    }
     cameraSnapshot() {
       return '{}'
     }
@@ -135,6 +138,7 @@ afterEach(() => {
   published.noGpu = false
   published.views = []
   published.themes = []
+  published.restored = []
   published.orbit = null
   vi.restoreAllMocks()
 })
@@ -212,6 +216,15 @@ describe('the named views', () => {
     // on the way back in, and treated a first visit as a return to a turned
     // camera, so no view button was ever lit in development.
     expect(useEditor.getState().view.preset).toBe('iso')
+  })
+
+  it('puts a viewport rebuilt in the same place back where the last one was', () => {
+    open(hall())
+    mount(StrictMode)
+
+    // A hot update rebuilds the viewport the way the development remount does,
+    // and read once per mount, the camera went back to where the page loaded.
+    expect(published.restored).toEqual(['{}'])
   })
 
   it('repaints nothing when the camera is turned', () => {

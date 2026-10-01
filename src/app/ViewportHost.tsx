@@ -8,7 +8,7 @@
  * the reconciler's way entirely.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Viewport } from '../render/Viewport'
 import type { ViewPreset } from '../render/CameraRig'
 import { ToolController } from '../editor/ToolController'
@@ -61,10 +61,12 @@ export const ViewportHost = ({
   const densityRef = useRef<DensityOverlay | null>(null)
   const controllerRef = useRef<ToolController | null>(null)
   const appliedPreset = useRef<ViewPreset | null>(null)
-  // Read once, before any effect runs. StrictMode's development remount saves
-  // the camera on the way out, and read in the effect it turned a first visit
-  // into a return to a turned camera, so no view button was ever lit in dev.
-  const [initialCamera] = useState(storedCamera)
+  // Where this host's last viewport was left. StrictMode's development remount
+  // and a hot update rebuild the viewport in the same host. Read back from
+  // storage, that camera was taken for a return to a turned one, and no view
+  // button was ever lit in dev; read once per host, a hot update put the
+  // camera back where the page had loaded it.
+  const lastCamera = useRef<string | null>(null)
 
   const document = useEditor((state) => state.document)
   const selection = useEditor((state) => state.selection)
@@ -99,12 +101,17 @@ export const ViewportHost = ({
     }
     viewport.onOrbit = leavePreset
     // The viewport starts in the 3D view. A camera restored from the last visit
-    // is wherever it was left, and the preset effect used to swing it back.
-    appliedPreset.current = 'iso'
-    if (initialCamera) {
-      viewport.restoreCamera(initialCamera)
-      leavePreset()
-    } else viewport.frame(planBounds(useEditor.getState().document.plan, 3), false)
+    // is wherever it was left, and the preset effect used to swing it back. One
+    // rebuilt in the same host goes back to its camera, still in its view.
+    if (lastCamera.current !== null) viewport.restoreCamera(lastCamera.current)
+    else {
+      appliedPreset.current = 'iso'
+      const stored = storedCamera()
+      if (stored) {
+        viewport.restoreCamera(stored)
+        leavePreset()
+      } else viewport.frame(planBounds(useEditor.getState().document.plan, 3), false)
+    }
 
     const saveCamera = () => {
       try {
@@ -117,6 +124,7 @@ export const ViewportHost = ({
 
     return () => {
       clearInterval(timer)
+      lastCamera.current = viewport.cameraSnapshot()
       saveCamera()
       crowd.dispose()
       density.dispose()
@@ -124,7 +132,7 @@ export const ViewportHost = ({
       viewportRef.current = null
       handleRef.current = { viewport: null, controller: null }
     }
-  }, [handleRef, initialCamera])
+  }, [handleRef])
 
   // --- document, selection, tools ----------------------------------------
   useEffect(() => {
