@@ -340,6 +340,25 @@ describe('compliance calculator', () => {
     )
   })
 
+  it('says how long the Green Guide capacity is for, in one minute too', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 10, 10)
+    b.door(room.south, 3, 1, 'door', 'exit')
+    const warning = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 100,
+      targetEgressMinutes: 1,
+      units: 'metric',
+    }).issues.find((issue) => issue.message.startsWith('Green Guide'))?.message
+
+    // A metre of exit passes 82 people a minute.
+    expect(warning).toBe(
+      'Green Guide capacity for evacuation in 1 min is 82; the scenario has 100.',
+    )
+  })
+
   it('holds the exits to the minimum the code states, not its stored rounding', () => {
     const egress = (width: string) => {
       const b = new PlanBuilder()

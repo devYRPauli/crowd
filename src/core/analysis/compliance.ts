@@ -17,6 +17,7 @@ import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
 import { polygonsOverlap } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
 import { EGRESS_DOOR_CLEAR_INCHES } from '../model/standards'
+import { formatDuration } from '../model/units'
 
 const SQFT_PER_SQM = 10.7639
 const MM_PER_INCH = 25.4
@@ -245,7 +246,7 @@ export const computeCompliance = ({
   if (plannedAttendance > greenGuideCapacity && greenGuideCapacity > 0) {
     issues.push({
       severity: 'warn',
-      message: `Green Guide capacity for evacuation in ${targetEgressMinutes} minutes is ${greenGuideCapacity}; the scenario has ${plannedAttendance}.`,
+      message: `Green Guide capacity for evacuation in ${formatDuration(targetEgressMinutes * 60)} is ${greenGuideCapacity}; the scenario has ${plannedAttendance}.`,
     })
   }
 

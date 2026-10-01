@@ -130,6 +130,13 @@ describe('report export', () => {
     expect(line).toMatch(/: \d+' [\d.]+" drawn against \d*'? ?[\d.]+" required/)
   })
 
+  it('says how long the Green Guide capacity is for', () => {
+    const brief = toBrief({ ...input, codeCheck: { ...input.codeCheck, targetEgressMinutes: 2.5 } })
+    expect(brief.split('\n').find((line) => line.startsWith('• Green Guide'))).toMatch(
+      /^• Green Guide capacity: \d+ people in 2 min 30 s\.$/,
+    )
+  })
+
   it('says which checks the venue fails', () => {
     const { document } = input
     const narrow = toBrief({
