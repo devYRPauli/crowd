@@ -11,8 +11,10 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, render } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { ViewportHost, type ViewportHandle } from './ViewportHost'
+import { ErrorBoundary } from './ErrorBoundary'
+import { WebGLUnavailableError } from '../render/webgl'
 import { useEditor } from '../state/editorStore'
 import { createHistory } from '../core/document/history'
 import { createDocument } from '../core/model/defaults'
@@ -21,10 +23,14 @@ import { PlanBuilder } from '../library/planBuilder'
 import type { Label } from '../render/LabelLayer'
 import type { CrowdDocument } from '../core/model/types'
 
-const published = vi.hoisted(() => ({ labels: [] as Label[][], refreshes: 0 }))
+const published = vi.hoisted(() => ({ labels: [] as Label[][], refreshes: 0, noGpu: false }))
 
 vi.mock('../render/Viewport', () => ({
   Viewport: class {
+    constructor() {
+      if (published.noGpu)
+        throw new WebGLUnavailableError(new Error('Error creating WebGL context.'))
+    }
     crowdLayer = { add: () => {} }
     overlayLayer = { add: () => {} }
     canvas = document.createElement('canvas')
@@ -95,7 +101,7 @@ const open = (doc: CrowdDocument) =>
     view: { ...useEditor.getState().view, showRoomLabels: true },
   })
 
-const mount = () =>
+const mount = (wrapper?: typeof ErrorBoundary) =>
   render(
     <ViewportHost
       handleRef={{ current: { viewport: null, controller: null } as ViewportHandle }}
@@ -105,11 +111,13 @@ const mount = () =>
       showSafety={false}
       onPickPerson={() => {}}
     />,
+    { wrapper },
   )
 
 afterEach(() => {
   published.labels = []
   published.refreshes = 0
+  published.noGpu = false
   vi.restoreAllMocks()
 })
 
@@ -143,6 +151,20 @@ describe('the tool in hand', () => {
     act(() => useEditor.getState().setSelection([{ kind: 'wall', id: doc.plan.walls[0].id }]))
 
     expect(published.refreshes).toBe(before + 1)
+  })
+})
+
+describe('a browser with no WebGL 2', () => {
+  it('reaches the crash screen that says so', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    published.noGpu = true
+    open(hall())
+
+    mount(ErrorBoundary)
+
+    // The viewport is built in an effect, and an effect that throws still
+    // reaches the boundary; the screen it reaches has to be the right one.
+    expect(screen.getByText('CROWD needs WebGL 2')).toBeDefined()
   })
 })
 

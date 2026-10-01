@@ -9,6 +9,7 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { WebGLUnavailableError } from '../render/webgl'
 
 interface Props {
   children: ReactNode
@@ -38,6 +39,25 @@ export class ErrorBoundary extends Component<Props, State> {
   override render(): ReactNode {
     const { error } = this.state
     if (!error) return this.props.children
+
+    // A reload cannot bring back a context the browser will not create, and
+    // telling the user it would sent them round the same failure again.
+    if (error instanceof WebGLUnavailableError) {
+      return (
+        <div className="crash" role="alert">
+          <h1>CROWD needs WebGL 2</h1>
+          <p>
+            This browser could not start the 3D view. Turn on hardware acceleration in its settings,
+            or open CROWD in a current Chrome, Edge, Firefox or Safari. Any venue you have saved is
+            still in this browser.
+          </p>
+          <details>
+            <summary>What happened</summary>
+            <pre>{String(error.cause ?? error.message)}</pre>
+          </details>
+        </div>
+      )
+    }
 
     return (
       <div className="crash" role="alert">

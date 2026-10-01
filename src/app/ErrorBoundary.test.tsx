@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ErrorBoundary } from './ErrorBoundary'
+import { WebGLUnavailableError } from '../render/webgl'
 
 const Boom = ({ throws }: { throws: boolean }) => {
   if (throws) throw new Error('the viewport fell over')
@@ -67,6 +68,23 @@ describe('the crash screen', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('says what the browser lacks when it cannot draw the 3D view at all', () => {
+    const NoGpu = () => {
+      throw new WebGLUnavailableError(new Error('Error creating WebGL context.'))
+    }
+    render(
+      <ErrorBoundary>
+        <NoGpu />
+      </ErrorBoundary>,
+    )
+    // The general screen promised a reload would bring the venue back, and a
+    // browser with acceleration off fails the same way every time.
+    expect(screen.getByText('CROWD needs WebGL 2')).toBeDefined()
+    expect(screen.getByRole('alert').textContent).toMatch(/hardware acceleration/)
+    expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull()
+    expect(screen.getByText('Error: Error creating WebGL context.')).toBeDefined()
   })
 
   it('keeps the stack where somebody debugging it can reach it', () => {

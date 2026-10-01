@@ -33,6 +33,7 @@ import {
   WebGLRenderer,
   type Object3D,
 } from 'three'
+import { WebGLUnavailableError } from './webgl'
 import type { CrowdDocument, PlanObjectRef } from '../core/model/types'
 import type { Vec2 } from '../core/math/vec2'
 import type { Bounds } from '../core/math/geometry'
@@ -150,12 +151,16 @@ export class Viewport {
     this.container = container
     this.materials = new MaterialLibrary(theme)
 
-    this.renderer = new WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true,
-    })
+    try {
+      this.renderer = new WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: true,
+      })
+    } catch (error) {
+      throw new WebGLUnavailableError(error)
+    }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ACESFilmicToneMapping
