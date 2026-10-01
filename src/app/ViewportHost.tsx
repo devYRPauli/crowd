@@ -10,6 +10,7 @@
 
 import { useEffect, useRef } from 'react'
 import { Viewport } from '../render/Viewport'
+import type { ViewPreset } from '../render/CameraRig'
 import { ToolController } from '../editor/ToolController'
 import { CrowdRenderer, type CrowdColorMode } from '../render/crowd/CrowdRenderer'
 import { DensityOverlay } from '../render/overlays/DensityOverlay'
@@ -59,6 +60,7 @@ export const ViewportHost = ({
   const crowdRef = useRef<CrowdRenderer | null>(null)
   const densityRef = useRef<DensityOverlay | null>(null)
   const controllerRef = useRef<ToolController | null>(null)
+  const appliedPreset = useRef<ViewPreset | null>(null)
 
   const document = useEditor((state) => state.document)
   const selection = useEditor((state) => state.selection)
@@ -85,9 +87,21 @@ export const ViewportHost = ({
     controllerRef.current = new ToolController(viewport)
     handleRef.current = { viewport, controller: controllerRef.current }
 
+    // A turned camera is in no named view. The lit button said it was, and
+    // asking for that view again changed nothing, so Plan did nothing after an
+    // orbit until another view had been picked first.
+    const leavePreset = () => {
+      if (useEditor.getState().view.preset !== null) useEditor.getState().setView({ preset: null })
+    }
+    viewport.onOrbit = leavePreset
+    // The viewport starts in the 3D view. A camera restored from the last visit
+    // is wherever it was left, and the preset effect used to swing it back.
+    appliedPreset.current = 'iso'
     const stored = storedCamera()
-    if (stored) viewport.restoreCamera(stored)
-    else viewport.frame(planBounds(useEditor.getState().document.plan, 3), false)
+    if (stored) {
+      viewport.restoreCamera(stored)
+      leavePreset()
+    } else viewport.frame(planBounds(useEditor.getState().document.plan, 3), false)
 
     const saveCamera = () => {
       try {
@@ -142,7 +156,9 @@ export const ViewportHost = ({
   }, [view])
 
   useEffect(() => {
-    viewportRef.current?.setView(view.preset)
+    if (view.preset && view.preset !== appliedPreset.current)
+      viewportRef.current?.setView(view.preset)
+    appliedPreset.current = view.preset
   }, [view.preset])
 
   // --- room labels --------------------------------------------------------

@@ -65,7 +65,8 @@ export interface ToolOptions {
 
 export interface ViewOptions {
   theme: ThemeName
-  preset: ViewPreset
+  /** The view the camera is in, or null once it has been orbited off one. */
+  preset: ViewPreset | null
   showGrid: boolean
   showZones: boolean
   showSeats: boolean

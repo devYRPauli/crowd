@@ -133,6 +133,8 @@ export class Viewport {
   private hover: PlanObjectRef | null = null
 
   private navigating: 'orbit' | 'pan' | null = null
+  /** The user turned the camera by hand, so it is no longer in a named view. */
+  onOrbit: (() => void) | null = null
   private lastPointer = { x: 0, y: 0 }
   private spaceHeld = false
   /**
@@ -644,8 +646,10 @@ export class Viewport {
       const dx = event.clientX - this.lastPointer.x
       const dy = event.clientY - this.lastPointer.y
       this.lastPointer = { x: event.clientX, y: event.clientY }
-      if (this.navigating === 'orbit') this.rig.orbit(dx, dy)
-      else this.rig.pan(dx, dy)
+      if (this.navigating === 'orbit') {
+        this.rig.orbit(dx, dy)
+        this.onOrbit?.()
+      } else this.rig.pan(dx, dy)
       return
     }
     this.handlers.onPointerMove?.(this.pointerInfo(event))

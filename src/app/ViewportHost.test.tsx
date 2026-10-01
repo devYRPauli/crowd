@@ -23,7 +23,13 @@ import { PlanBuilder } from '../library/planBuilder'
 import type { Label } from '../render/LabelLayer'
 import type { CrowdDocument } from '../core/model/types'
 
-const published = vi.hoisted(() => ({ labels: [] as Label[][], refreshes: 0, noGpu: false }))
+const published = vi.hoisted(() => ({
+  labels: [] as Label[][],
+  refreshes: 0,
+  noGpu: false,
+  views: [] as string[],
+  orbit: null as (() => void) | null,
+}))
 
 vi.mock('../render/Viewport', () => ({
   Viewport: class {
@@ -50,7 +56,12 @@ vi.mock('../render/Viewport', () => ({
     setTheme() {}
     setGridVisible() {}
     setPlanOptions() {}
-    setView() {}
+    setView(preset: string) {
+      published.views.push(preset)
+    }
+    set onOrbit(handler: (() => void) | null) {
+      published.orbit = handler
+    }
     setContinuous() {}
     invalidate() {}
     dispose() {}
@@ -118,6 +129,9 @@ afterEach(() => {
   published.labels = []
   published.refreshes = 0
   published.noGpu = false
+  published.views = []
+  published.orbit = null
+  localStorage.clear()
   vi.restoreAllMocks()
 })
 
@@ -151,6 +165,34 @@ describe('the tool in hand', () => {
     act(() => useEditor.getState().setSelection([{ kind: 'wall', id: doc.plan.walls[0].id }]))
 
     expect(published.refreshes).toBe(before + 1)
+  })
+})
+
+describe('the named views', () => {
+  it('takes the view off the lit button once the camera is turned by hand', () => {
+    open(hall())
+    act(() => useEditor.getState().setView({ preset: 'plan' }))
+    mount()
+    expect(published.views).toEqual(['plan'])
+
+    // After an orbit the Plan button stayed lit, and clicking it again changed
+    // nothing, so it did nothing until another view had been picked first.
+    act(() => published.orbit?.())
+    expect(useEditor.getState().view.preset).toBeNull()
+
+    act(() => useEditor.getState().setView({ preset: 'plan' }))
+    expect(published.views).toEqual(['plan', 'plan'])
+  })
+
+  it('leaves a camera restored from the last visit where it was', () => {
+    localStorage.setItem('crowd:camera', '{}')
+    open(hall())
+    act(() => useEditor.getState().setView({ preset: 'iso' }))
+    mount()
+
+    // The 3D view was applied on top of the restored camera and swung it back.
+    expect(published.views).toEqual([])
+    expect(useEditor.getState().view.preset).toBeNull()
   })
 })
 
