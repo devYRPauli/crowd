@@ -10,11 +10,32 @@ describe('Field', () => {
   it('shows its label and its hint beside the control', () => {
     render(
       <Field label="Width" hint="Not a stock size">
-        <input aria-label="Width" defaultValue="0.9" />
+        <input defaultValue="0.9" />
       </Field>,
     )
     expect(screen.getByText('Width')).toBeDefined()
     expect(screen.getByText('Not a stock size')).toBeDefined()
+  })
+
+  it('names the control it wraps, whichever kind it is', () => {
+    render(
+      <>
+        <Field label="Width">
+          <LengthInput value={0.914} units="metric" onCommit={() => {}} />
+        </Field>
+        <Field label="People">
+          <NumberInput value={300} onCommit={() => {}} />
+        </Field>
+        <Field label="Type">
+          <Select value="door" onChange={() => {}} options={[{ value: 'door', label: 'Door' }]} />
+        </Field>
+      </>,
+    )
+    // A span beside the box named nothing, so every field in the inspector
+    // read out as an unnamed text box.
+    expect((screen.getByRole('textbox', { name: 'Width' }) as HTMLInputElement).value).toBe('91 cm')
+    expect((screen.getByRole('textbox', { name: 'People' }) as HTMLInputElement).value).toBe('300')
+    expect((screen.getByRole('combobox', { name: 'Type' }) as HTMLSelectElement).value).toBe('door')
   })
 })
 

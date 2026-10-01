@@ -10,26 +10,44 @@
  * meant to discard.
  */
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import {
+  cloneElement,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react'
 import { formatLength, parseLength } from '../../core/model/units'
 import type { UnitSystem } from '../../core/model/types'
 import { CloseIcon } from './icons'
 
+/**
+ * A labelled control. The label names the control it wraps, which a span
+ * beside it did not: a screen reader announced every box in the inspector as
+ * an unnamed text field.
+ */
 export const Field = ({
   label,
   children,
   hint,
 }: {
   label: string
-  children: ReactNode
+  children: ReactElement<{ id?: string }>
   hint?: string
-}) => (
-  <div className="field">
-    <span className="field-label">{label}</span>
-    {children}
-    {hint ? <span className="hint">{hint}</span> : null}
-  </div>
-)
+}) => {
+  const id = useId()
+  return (
+    <div className="field">
+      <label className="field-label" htmlFor={id}>
+        {label}
+      </label>
+      {cloneElement(children, { id })}
+      {hint ? <span className="hint">{hint}</span> : null}
+    </div>
+  )
+}
 
 /**
  * A figure as people write one: "1,200" pasted from a spreadsheet, or "600 s"
@@ -55,6 +73,7 @@ export const NumberInput = ({
   step = 1,
   suffix,
   disabled,
+  id,
 }: {
   value: number
   onCommit: (value: number) => void
@@ -63,6 +82,7 @@ export const NumberInput = ({
   step?: number
   suffix?: string
   disabled?: boolean
+  id?: string
 }) => {
   const [draft, setDraft] = useState<string | null>(null)
   const [invalid, setInvalid] = useState(false)
@@ -95,6 +115,7 @@ export const NumberInput = ({
   return (
     <div style={{ position: 'relative' }}>
       <input
+        id={id}
         className={`input is-mono${invalid ? ' is-invalid' : ''}`}
         type="text"
         inputMode="decimal"
@@ -147,6 +168,7 @@ export const LengthInput = ({
   min = 0.01,
   max,
   disabled,
+  id,
 }: {
   value: number
   units: UnitSystem
@@ -154,6 +176,7 @@ export const LengthInput = ({
   min?: number
   max?: number
   disabled?: boolean
+  id?: string
 }) => {
   const [draft, setDraft] = useState<string | null>(null)
   const [invalid, setInvalid] = useState(false)
@@ -177,6 +200,7 @@ export const LengthInput = ({
 
   return (
     <input
+      id={id}
       className={`input is-mono${invalid ? ' is-invalid' : ''}`}
       type="text"
       disabled={disabled}
@@ -199,13 +223,16 @@ export const Select = <T extends string>({
   options,
   onChange,
   disabled,
+  id,
 }: {
   value: T
   options: Array<{ value: T; label: string }>
   onChange: (value: T) => void
   disabled?: boolean
+  id?: string
 }) => (
   <select
+    id={id}
     className="select"
     value={value}
     disabled={disabled}
