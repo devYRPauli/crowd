@@ -9,7 +9,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useEditor } from './editorStore'
 import { createHistory } from '../core/document/history'
-import { addWall, renameDocument, updateFurniture, updateOpening } from '../core/document/mutations'
+import {
+  addWall,
+  renameDocument,
+  setBackdrop,
+  updateFurniture,
+  updateOpening,
+} from '../core/document/mutations'
 import { createDocument, createPopulation } from '../core/model/defaults'
 import { PlanBuilder, step } from '../library/planBuilder'
 import {
@@ -167,6 +173,24 @@ describe('editing the venue', () => {
     editor().redo()
     expect(editor().document.name).toBe('Riverside Hall — evening')
     expect(editor().dirty).toBe(true)
+  })
+
+  it('lets go of an object the edit took out of the venue', () => {
+    editor().setSelection([ref('backdrop', 'backdrop'), ref('zone', hall.exit.id)])
+    const kept = editor().selection
+
+    // Remove in the layers panel is an edit like any other, not a delete, and
+    // the tracing it removed stayed selected with the inspector offering an
+    // opacity slider for an image that had gone.
+    editor().apply((doc) => setBackdrop(doc, undefined), 'Remove backdrop')
+    expect(editor().selection).toEqual([ref('zone', hall.exit.id)])
+
+    // An edit that leaves everything selected in place keeps the selection
+    // itself, so nothing that watches it redraws for no reason.
+    editor().setSelection(kept.slice(1))
+    const zoneOnly = editor().selection
+    editor().apply((doc) => renameDocument(doc, 'Hall C'), 'Rename')
+    expect(editor().selection).toBe(zoneOnly)
   })
 
   it('keeps an edit made while the save was writing unsaved', () => {

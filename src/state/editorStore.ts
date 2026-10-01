@@ -173,7 +173,16 @@ export const useEditor = create<EditorState>()((set, get) => ({
     const next = mutate(state.document)
     if (next === state.document) return
     const history = commit(state.history, next, label, coalesceKey)
-    set({ history, document: history.present.value, dirty: true })
+    const document = history.present.value
+    // Any edit can take a selected object out of the venue, not just a delete:
+    // Remove in the layers panel left the tracing selected after it had gone.
+    const selection = state.selection.filter((ref) => referenceExists(document, ref))
+    set({
+      history,
+      document,
+      dirty: true,
+      ...(selection.length === state.selection.length ? {} : { selection }),
+    })
   },
 
   sealHistory: () => set((state) => ({ history: seal(state.history) })),
@@ -246,11 +255,9 @@ export const useEditor = create<EditorState>()((set, get) => ({
     )
     // What survived stays selected, which is how a locked object refused in a
     // mixed selection stays reachable: the inspector is the only place to
-    // unlock it. Reading the new document rather than subtracting `removable`
-    // also drops the refs that went without being named — a door leaves with
-    // the wall it is hung on.
-    const doc = get().document
-    set((state) => ({ selection: state.selection.filter((ref) => referenceExists(doc, ref)) }))
+    // unlock it. `apply` reads the new document rather than subtracting
+    // `removable`, so the refs that went without being named go too — a door
+    // leaves with the wall it is hung on.
   },
 
   setHover: (ref) => set({ hover: ref }),
