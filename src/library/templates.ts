@@ -62,6 +62,10 @@ const coffeeBar = (): CrowdDocument => {
   const b = new PlanBuilder()
   const room = b.room(0, 0, feet(46), feet(33), { height: feet(10) })
   const street = b.door(room.south, 2.0, feet(6), 'door', 'both')
+  // At tables and chairs this floor holds 102, and above 49 the code wants a
+  // second way out. With the street door alone the first venue anybody opened
+  // failed its own code check.
+  b.door(room.east, 5.0, feet(3), 'door', 'exit')
   b.window(room.west, 3, feet(8))
   b.window(room.west, 7, feet(8))
   b.window(room.north, 5, feet(8))
@@ -138,6 +142,10 @@ const conference = (): CrowdDocument => {
   const hall = b.room(0, 0, feet(99), feet(86), { height: feet(14) })
   const mainDoor = b.door(hall.south, 4, feet(8), 'door', 'both')
   const sideDoor = b.door(hall.south, 12, feet(8), 'door', 'both')
+  // The session room's own way out, beside the east block. The hall holds 568
+  // at tables and chairs, which needs three exits, and it had the two doors
+  // the delegates come in by.
+  b.door(hall.east, 17.2, feet(6), 'door', 'exit')
   // Partition between the foyer and the session room.
   const partition = b.wall(
     { x: 0, y: 12 },
@@ -244,7 +252,9 @@ const gallery = (): CrowdDocument => {
   const b = new PlanBuilder()
   const room = b.room(0, 0, feet(79), feet(53), { height: feet(12) })
   const frontDoor = b.door(room.south, 3, feet(8), 'door', 'both')
-  b.door(room.east, 8, feet(5))
+  // 280 at tables and chairs need a second exit, and this door was drawn
+  // without being one.
+  b.door(room.east, 8, feet(5), 'door', 'exit')
   // Interior partitions that make a route rather than one big box.
   const p1 = b.wall(
     { x: 8, y: 0.2 },
@@ -345,7 +355,9 @@ const gallery = (): CrowdDocument => {
 const pollingStation = (): CrowdDocument => {
   const b = new PlanBuilder()
   const room = b.room(0, 0, feet(60), feet(40), { height: feet(10) })
-  const wayIn = b.door(room.south, 3, feet(6), 'door', 'entry')
+  // The way in is a way out too. Marked for entry only, it left one exit for
+  // a room the code wants two in.
+  const wayIn = b.door(room.south, 3, feet(6), 'door', 'both')
   const wayOut = b.door(room.north, 15, feet(6), 'door', 'exit')
 
   // Four poll-book stations, because two cannot keep up with the door: voters

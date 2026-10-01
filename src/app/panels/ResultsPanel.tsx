@@ -14,6 +14,7 @@ import { useSimulation } from '../../state/simulationStore'
 import { deriveFindings } from '../../sim/metrics/findings'
 import {
   computeCompliance,
+  DEFAULT_CODE_CHECK,
   OCCUPANT_LOAD_FACTORS,
   type CodeCheckSettings,
 } from '../../core/analysis/compliance'
@@ -312,11 +313,7 @@ export const ResultsPanel = ({
   // Held here, above both, because the brief has to check the code the way the
   // panel is set. It used to assume unsprinklered tables and chairs whatever
   // the panel said.
-  const [codeCheck, setCodeCheck] = useState<CodeCheckSettings>({
-    occupancy: 'assembly-tables',
-    sprinklered: false,
-    targetEgressMinutes: 8,
-  })
+  const [codeCheck, setCodeCheck] = useState<CodeCheckSettings>(DEFAULT_CODE_CHECK)
 
   // A run is kept across an edit on purpose — the whole point of the panel is
   // to read it while trying the change it suggests — but the code check below

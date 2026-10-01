@@ -28,10 +28,10 @@ import { Simulation } from '../sim/engine'
 import { hashString } from '../core/math/random'
 
 const PINNED: Record<string, number> = {
-  'coffee-bar': 1195228775,
-  conference: 4120090599,
-  gallery: 3616662045,
-  'polling-station': 1071860088,
+  'coffee-bar': 2378000595,
+  conference: 111465080,
+  gallery: 635745389,
+  'polling-station': 2764346458,
   concourse: 1783554573,
   banquet: 2629696028,
 }

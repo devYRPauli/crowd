@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { TEMPLATES } from './templates'
+import { computeCompliance, DEFAULT_CODE_CHECK } from '../core/analysis/compliance'
 import { Simulation } from '../sim/engine'
 import { parseDocument, serializeDocument } from '../core/document/serialize'
 import { detectRooms } from '../core/model/rooms'
@@ -45,6 +46,20 @@ describe('starter templates', () => {
           for (const id of step.targetIds ?? []) expect(targets.has(id)).toBe(true)
         }
       }
+    },
+  )
+
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))(
+    '%s passes the code check the results panel opens with',
+    (_id, template) => {
+      const { plan, scenario, settings } = template.build()
+      const fails = computeCompliance({
+        ...DEFAULT_CODE_CHECK,
+        plan,
+        plannedAttendance: scenario.populations.reduce((sum, p) => sum + p.count, 0),
+        units: settings.units,
+      }).issues.filter((issue) => issue.severity === 'fail')
+      expect(fails).toEqual([])
     },
   )
 

@@ -56,6 +56,13 @@ export type CodeCheckSettings = Pick<
   'occupancy' | 'sprinklered' | 'targetEgressMinutes'
 >
 
+/** What the code check opens with, before anybody has said what the venue is. */
+export const DEFAULT_CODE_CHECK: CodeCheckSettings = {
+  occupancy: 'assembly-tables',
+  sprinklered: false,
+  targetEgressMinutes: 8,
+}
+
 export interface ComplianceResult {
   floorAreaSqm: number
   floorAreaSqft: number
