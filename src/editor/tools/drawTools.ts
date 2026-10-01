@@ -8,7 +8,7 @@
  * a plan editor lacks it.
  */
 
-import type { Tool, ToolContext } from '../types'
+import { isChord, type Tool, type ToolContext } from '../types'
 import type { PointerInfo } from '../../render/Viewport'
 import type { Vec2 } from '../../core/math/vec2'
 import { add, angleOf, distance, fromAngle, sub } from '../../core/math/vec2'
@@ -203,6 +203,7 @@ export class WallTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
+    if (isChord(event)) return false
     if (event.key === 'Escape') {
       if (this.points.length) {
         this.reset(ctx)
@@ -250,8 +251,9 @@ export class WallTool implements Tool {
       this.retarget(ctx)
       return true
     }
-    if (/^[a-z]$/i.test(event.key) && this.typed) {
-      // Allow typing a unit suffix such as `cm` or `ft`.
+    if (/^[a-z'"]$/i.test(event.key) && this.typed) {
+      // A unit suffix such as `cm` or `ft`, or feet and inches as 11'2". The
+      // marks were left out, so 11'2" went in as 112.
       this.typed += event.key
       this.retarget(ctx)
       return true

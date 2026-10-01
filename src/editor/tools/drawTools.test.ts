@@ -433,6 +433,34 @@ describe('WallTool typed length', () => {
     expect(h.walls()[0].b.x).toBeCloseTo(3.048, 9)
   })
 
+  it('takes feet and inches as they are written', () => {
+    const h = harness({ settings: { units: 'imperial' } })
+    const tool = new WallTool()
+
+    tool.onPointerDown(pointer(0, 0), h.ctx)
+    // The marks were refused, so 11'2" arrived as 112 and drew 112 feet.
+    expect(type(tool, h.ctx, `11'2"`)).toEqual([true, true, true, true, true])
+    tool.onPointerMove(pointer(10, 0), h.ctx)
+    tool.onKeyDown(press('Enter'), h.ctx)
+
+    expect(h.walls()[0].b.x).toBeCloseTo(134 * 0.0254, 9)
+  })
+
+  it('leaves Cmd-Z to undo while a length is typed', () => {
+    const h = harness()
+    const tool = new WallTool()
+
+    tool.onPointerDown(pointer(0, 0), h.ctx)
+    type(tool, h.ctx, '4.5')
+    // It was typed as a 'z', which stopped the figure parsing and undid nothing.
+    const undo = { key: 'z', metaKey: true } as unknown as KeyboardEvent
+    expect(tool.onKeyDown(undo, h.ctx)).toBe(false)
+    tool.onPointerMove(pointer(10, 0), h.ctx)
+    tool.onKeyDown(press('Enter'), h.ctx)
+
+    expect(h.walls()[0].b.x).toBeCloseTo(4.5, 9)
+  })
+
   it('accepts a unit suffix typed after the number', () => {
     const h = harness()
     const tool = new WallTool()

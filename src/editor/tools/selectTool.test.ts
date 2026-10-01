@@ -1562,10 +1562,27 @@ describe('keyboard editing', () => {
     expect(tool.onKeyDown(press(']'), h.ctx)).toBe(true)
     expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 12, 9)
 
-    expect(tool.onKeyDown(press('[', true), h.ctx)).toBe(true)
+    // Shift-[ is what a US keyboard reports as '{'. The test used to send
+    // '[' with Shift, which no keyboard does, and the 1 degree turn the
+    // shortcut sheet promises could not be reached.
+    expect(tool.onKeyDown(press('{', true), h.ctx)).toBe(true)
     expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 12 - Math.PI / 180, 9)
+    expect(tool.onKeyDown(press('}', true), h.ctx)).toBe(true)
+    expect(furnitureById(h, 'a').rotation).toBeCloseTo(Math.PI / 12, 9)
     // Turning on the spot: a lone object must not orbit its own centre.
     expect(furnitureById(h, 'a').position).toEqual({ x: 2, y: 2 })
+  })
+
+  it('leaves a chord to the browser and the editor', () => {
+    const h = harness({ furniture: [item('a', 2, 2)] })
+    const tool = new SelectTool()
+    tool.onPointerDown(pointer(2, 2, { hit: pick('furniture', 'a', 2, 2) }), h.ctx)
+    tool.onPointerUp(pointer(2, 2), h.ctx)
+
+    // Cmd-[ is the browser's Back, and it turned the selection instead.
+    const back = { key: '[', metaKey: true, shiftKey: false } as unknown as KeyboardEvent
+    expect(tool.onKeyDown(back, h.ctx)).toBe(false)
+    expect(furnitureById(h, 'a').rotation).toBe(0)
   })
 
   it('leaves keys it cannot use to the application', () => {

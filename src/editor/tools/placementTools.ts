@@ -8,7 +8,7 @@
  * objects feel quick rather than fiddly.
  */
 
-import type { Tool, ToolContext } from '../types'
+import { isChord, type Tool, type ToolContext } from '../types'
 import type { PointerInfo } from '../../render/Viewport'
 import type { Vec2 } from '../../core/math/vec2'
 import type { Plan, ServicePoint } from '../../core/model/types'
@@ -130,11 +130,14 @@ export class FurnitureTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
+    if (isChord(event)) return false
     if (event.key === 'Escape') {
       ctx.setTool('select')
       return true
     }
-    if (event.key.toLowerCase() === 'r') {
+    // Option-R on a Mac types the registered sign, so with Alt held the key is
+    // known by where it is on the keyboard.
+    if (event.key.toLowerCase() === 'r' || (event.altKey && event.code === 'KeyR')) {
       const step = (event.shiftKey ? Math.PI / 2 : Math.PI / 12) * (event.altKey ? -1 : 1)
       this.rotation += step
       // The preview carries the angle resolved at the last pointer move, wall
@@ -426,6 +429,7 @@ export class ServiceTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
+    if (isChord(event)) return false
     if (event.key === 'Escape') {
       ctx.setTool('select')
       return true

@@ -124,8 +124,11 @@ const pointer = (
   ...mods,
 })
 
-// Node has no KeyboardEvent, and the tools read four fields off it.
-const key = (name: string, mods: { shiftKey?: boolean; altKey?: boolean } = {}): KeyboardEvent =>
+// Node has no KeyboardEvent, and the tools read these fields off it.
+const key = (
+  name: string,
+  mods: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; code?: string } = {},
+): KeyboardEvent =>
   ({
     key: name,
     shiftKey: false,
@@ -694,7 +697,10 @@ describe('FurnitureTool placement', () => {
 
     expect(tool.onKeyDown(key('r'), h.ctx)).toBe(true)
     expect(tool.onKeyDown(key('R', { shiftKey: true }), h.ctx)).toBe(true)
-    expect(tool.onKeyDown(key('r', { altKey: true }), h.ctx)).toBe(true)
+    // Option-R on a Mac types the registered sign; the key is known by its place.
+    expect(tool.onKeyDown(key('\u00ae', { altKey: true, code: 'KeyR' }), h.ctx)).toBe(true)
+    // Cmd-R is the browser's reload, and it turned the table instead.
+    expect(tool.onKeyDown(key('r', { metaKey: true }), h.ctx)).toBe(false)
     // Every other key belongs to the app: a tool that swallowed them would take
     // Ctrl-Z and the delete key with it for as long as a chair is on the cursor.
     expect(tool.onKeyDown(key('z'), h.ctx)).toBe(false)

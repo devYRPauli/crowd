@@ -9,7 +9,7 @@
  */
 
 import type { Tool, ToolContext } from '../types'
-import { HANDLE_HIT_PX, type Handle } from '../types'
+import { HANDLE_HIT_PX, isChord, type Handle } from '../types'
 import type { PointerInfo } from '../../render/Viewport'
 import type { CrowdDocument, PlanObjectRef, Wall } from '../../core/model/types'
 import type { Vec2 } from '../../core/math/vec2'
@@ -678,6 +678,7 @@ export class SelectTool implements Tool {
   }
 
   onKeyDown(event: KeyboardEvent, ctx: ToolContext): boolean {
+    if (isChord(event)) return false
     const step = event.shiftKey ? 1 : ctx.document.settings.gridSize
     // A run of presses on one selection is one step. Keyed by the selection,
     // because nothing seals between presses: picking another object from the
@@ -714,9 +715,14 @@ export class SelectTool implements Tool {
       case 'ArrowDown':
         nudge(0, step)
         return true
+      // Shift-[ arrives as '{' on a US layout, and matching '[' alone left the
+      // 1 degree turn on the shortcut sheet out of reach.
       case '[':
-      case ']': {
-        const delta = (event.key === '[' ? -1 : 1) * (event.shiftKey ? Math.PI / 180 : Math.PI / 12)
+      case ']':
+      case '{':
+      case '}': {
+        const back = event.key === '[' || event.key === '{'
+        const delta = (back ? -1 : 1) * (event.shiftKey ? Math.PI / 180 : Math.PI / 12)
         // Over the movable part of the selection, like every other edit here: a
         // keystroke that walks past the lock is the easiest way to knock a
         // finished shell out of true while drawing over it.

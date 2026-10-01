@@ -66,6 +66,17 @@ export interface Tool {
   onKeyDown?(event: KeyboardEvent, ctx: ToolContext): boolean
 }
 
+/**
+ * A key held with Cmd, or with Ctrl alone, is a command for the editor or the
+ * browser, not part of anything a tool is typing. The tools matched the bare
+ * key, so Cmd-Z while a wall length was typed added a 'z' to it and undid
+ * nothing, and Cmd-R with a table on the cursor turned the table instead of
+ * reloading. Ctrl with Alt is AltGr on Windows, which is how some layouts type
+ * '[' and ']'.
+ */
+export const isChord = (event: KeyboardEvent): boolean =>
+  event.metaKey || (event.ctrlKey && !event.altKey)
+
 /** Screen-space handles a tool exposes for direct manipulation. */
 export interface Handle {
   id: string
