@@ -1404,6 +1404,20 @@ describe('locked objects', () => {
     expect(wallById(h, 'w').b).toEqual({ x: 4, y: 0 })
   })
 
+  it('shows no distance while a locked object is dragged', () => {
+    const h = harness({ furniture: [item('a', 2, 2, { locked: true })] })
+    const tool = new SelectTool()
+
+    tool.onPointerDown(pointer(2, 2, { hit: pick('furniture', 'a', 2, 2) }), h.ctx)
+    tool.onPointerMove(pointer(3, 2), h.ctx)
+    tool.onPointerMove(pointer(4, 2), h.ctx)
+
+    // The table stayed put while a growing distance followed the pointer.
+    expect(h.labels()).toEqual([])
+    expect(h.edits).toEqual([])
+    expect(furnitureById(h, 'a').position).toEqual({ x: 2, y: 2 })
+  })
+
   it('moves the rest of a mixed selection and leaves the locked one behind', () => {
     const h = harness({
       furniture: [item('free', 1, 1), item('pinned', 5, 5, { locked: true })],

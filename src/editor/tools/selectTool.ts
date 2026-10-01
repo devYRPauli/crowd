@@ -425,6 +425,10 @@ export class SelectTool implements Tool {
         return
       }
       case 'move': {
+        // A locked selection stays put, and a distance and snap guides that
+        // followed the pointer anyway said it was moving.
+        const moving = this.movable(ctx)
+        if (moving.length === 0) return
         const raw = sub(info.ground, this.mode.start)
         let delta = raw
         if (info.shiftKey) {
@@ -446,7 +450,6 @@ export class SelectTool implements Tool {
             })),
           ])
         }
-        const moving = this.movable(ctx)
         // An alt-drag is one gesture, so the copy and the move that carries it
         // off share the copy's key: undone as two steps, the first undo puts
         // the copy back exactly on top of the original, which looks like
