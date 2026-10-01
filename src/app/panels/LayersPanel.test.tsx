@@ -146,6 +146,27 @@ describe('the object browser', () => {
     expect(screen.getByText('Exit')).toBeDefined()
   })
 
+  it('names each kind of wall and door the way the pickers do', () => {
+    openWith({
+      walls: [
+        { ...makeWall('wall-1', { x: 4, y: 0 }), kind: 'barrier' },
+        { ...makeWall('wall-2', { x: 0, y: 2.5 }), kind: 'glass' },
+      ],
+      openings: [
+        { ...plan.openings![0], id: 'gate-1', kind: 'gate', locked: false },
+        { ...plan.openings![0], id: 'pair-1', kind: 'double-door', offset: 3, locked: false },
+      ],
+    })
+    render(<LayersPanel />)
+
+    // The rows printed the raw kind, so a barrier read 'barrier' here and
+    // 'Crowd barrier' in the inspector, and a gate was listed as a door.
+    expect(screen.getByText('Crowd barrier')).toBeDefined()
+    expect(screen.getByText('Glazed')).toBeDefined()
+    expect(screen.getByText('Gate')).toBeDefined()
+    expect(screen.getByText('Double door')).toBeDefined()
+  })
+
   it('selects one thing on a click and adds to the selection on a shift-click', () => {
     openWith(plan)
     render(<LayersPanel />)

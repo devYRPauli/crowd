@@ -17,6 +17,7 @@ import type {
   Plan,
   CrowdDocument,
   ServicePoint,
+  WallKind,
 } from './types'
 import { SCHEMA_VERSION } from './types'
 import {
@@ -235,6 +236,24 @@ export const ZONE_COLORS: Record<string, string> = {
   'keep-clear': '#e8b33a',
   seating: '#8a7fb8',
   measure: '#38bdf8',
+}
+
+/** What a list or a picker calls a kind of wall. */
+export const WALL_LABELS: Record<WallKind, string> = {
+  wall: 'Solid wall',
+  partition: 'Partition',
+  glass: 'Glazed',
+  barrier: 'Crowd barrier',
+  rail: 'Handrail',
+}
+
+/** What a list or a picker calls a kind of opening. */
+export const OPENING_LABELS: Record<OpeningKind, string> = {
+  door: 'Door',
+  'double-door': 'Double door',
+  opening: 'Open doorway',
+  gate: 'Gate',
+  window: 'Window',
 }
 
 /** What a message calls an opening. */

@@ -22,9 +22,9 @@ import { resolveCatalogItem } from '../../library/catalog'
 import { polygonArea } from '../../core/math/geometry'
 import { wallLength } from '../../core/model/planGeometry'
 import { formatArea, formatLength } from '../../core/model/units'
-import { OPENING_NOUNS, ZONE_LABELS } from '../../core/model/defaults'
+import { OPENING_LABELS, OPENING_NOUNS, WALL_LABELS, ZONE_LABELS } from '../../core/model/defaults'
 import { add, angleOf, fromAngle } from '../../core/math/vec2'
-import type { Opening, Zone } from '../../core/model/types'
+import type { Opening, OpeningKind, WallKind, Zone } from '../../core/model/types'
 import {
   DOOR_WIDTHS,
   OPENING_JAMB,
@@ -178,13 +178,10 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               onChange={(kind) =>
                 apply((doc) => updateWall(doc, wall.id, { kind }), 'Set wall type')
               }
-              options={[
-                { value: 'wall', label: 'Solid wall' },
-                { value: 'partition', label: 'Partition' },
-                { value: 'glass', label: 'Glazed' },
-                { value: 'barrier', label: 'Crowd barrier' },
-                { value: 'rail', label: 'Handrail' },
-              ]}
+              options={(Object.keys(WALL_LABELS) as WallKind[]).map((kind) => ({
+                value: kind,
+                label: WALL_LABELS[kind],
+              }))}
             />
           </Field>
           <Checkbox
@@ -314,13 +311,10 @@ export const InspectorPanel = ({ inspectedPerson }: { inspectedPerson: React.Rea
               onChange={(kind) =>
                 apply((doc) => updateOpening(doc, opening.id, { kind }), 'Set type')
               }
-              options={[
-                { value: 'door', label: 'Door' },
-                { value: 'double-door', label: 'Double door' },
-                { value: 'opening', label: 'Open doorway' },
-                { value: 'gate', label: 'Gate' },
-                { value: 'window', label: 'Window' },
-              ]}
+              options={(Object.keys(OPENING_LABELS) as OpeningKind[]).map((kind) => ({
+                value: kind,
+                label: OPENING_LABELS[kind],
+              }))}
             />
           </Field>
           {opening.kind !== 'window' && (

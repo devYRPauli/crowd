@@ -9,7 +9,7 @@
 import { useEditor } from '../../state/editorStore'
 import { Checkbox, Slider } from '../components/ui'
 import { resolveCatalogItem } from '../../library/catalog'
-import { ZONE_COLORS, ZONE_LABELS } from '../../core/model/defaults'
+import { OPENING_LABELS, WALL_LABELS, ZONE_COLORS, ZONE_LABELS } from '../../core/model/defaults'
 import { formatLength } from '../../core/model/units'
 import { wallLength } from '../../core/model/planGeometry'
 import type { PlanObjectRef } from '../../core/model/types'
@@ -65,7 +65,7 @@ export const LayersPanel = () => {
         <Row
           key={wall.id}
           refObject={{ kind: 'wall', id: wall.id }}
-          label={wall.kind === 'wall' ? 'Wall' : wall.kind}
+          label={WALL_LABELS[wall.kind]}
           meta={formatLength(wallLength(wall), units)}
           locked={wall.locked}
         />
@@ -77,9 +77,7 @@ export const LayersPanel = () => {
         <Row
           key={opening.id}
           refObject={{ kind: 'opening', id: opening.id }}
-          label={
-            opening.kind === 'window' ? 'Window' : opening.kind === 'opening' ? 'Opening' : 'Door'
-          }
+          label={OPENING_LABELS[opening.kind]}
           meta={formatLength(opening.width, units)}
           locked={opening.locked}
         />

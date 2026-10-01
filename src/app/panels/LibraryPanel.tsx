@@ -24,10 +24,10 @@ import {
 } from '../../core/model/standards'
 import { useEditor } from '../../state/editorStore'
 import { formatLength } from '../../core/model/units'
-import { ZONE_LABELS } from '../../core/model/defaults'
+import { WALL_LABELS, ZONE_LABELS } from '../../core/model/defaults'
 import { updateSettings } from '../../core/document/mutations'
 import { Field, LengthInput, Segmented, Select } from '../components/ui'
-import type { UnitSystem } from '../../core/model/types'
+import type { UnitSystem, WallKind } from '../../core/model/types'
 
 const Thumbnail = ({ item }: { item: CatalogItem }) => {
   const { width, depth } = item.size
@@ -174,13 +174,10 @@ const ToolOptions = ({ units }: { units: UnitSystem }) => {
           <Select
             value={options.wallKind}
             onChange={(wallKind) => setToolOptions({ wallKind })}
-            options={[
-              { value: 'wall', label: 'Solid wall' },
-              { value: 'partition', label: 'Partition' },
-              { value: 'glass', label: 'Glazed' },
-              { value: 'barrier', label: 'Crowd barrier' },
-              { value: 'rail', label: 'Handrail' },
-            ]}
+            options={(Object.keys(WALL_LABELS) as WallKind[]).map((kind) => ({
+              value: kind,
+              label: WALL_LABELS[kind],
+            }))}
           />
         </Field>
         <div className="row">
