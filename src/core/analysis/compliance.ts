@@ -191,10 +191,15 @@ export const computeCompliance = ({
     })
   }
 
+  // Either side of 50. It told a venue of 52, which already needed a second
+  // exit, that one more person would require one.
   if (Math.abs(designOccupantLoad - 50) <= 5) {
     issues.push({
       severity: 'warn',
-      message: `At ${designOccupantLoad} occupants you are on the 50-person threshold. One more person requires a second exit and a wider corridor — this is a step change, not a gradient.`,
+      message:
+        designOccupantLoad < 50
+          ? `At ${designOccupantLoad} occupants you are ${50 - designOccupantLoad} short of the 50-person threshold, where a second exit and a wider corridor become required. This is a step change, not a gradient.`
+          : `At ${designOccupantLoad} occupants you have reached the 50-person threshold, so a second exit and a wider corridor are required; ${designOccupantLoad - 49} fewer and one exit would do. This is a step change, not a gradient.`,
     })
   }
 
@@ -207,13 +212,15 @@ export const computeCompliance = ({
       ? `${((metres * 1000) / MM_PER_INCH).toFixed(2)}"`
       : `${(metres * 1000).toFixed(1)} mm`
 
-  // Stock sizes and code minimums are stored to the millimetre, so a door can
-  // fall up to half of one short of the size it is called: two 3'0" doors are
-  // 914 mm each and failed the 72" that 360 people need, and three typed 32"
-  // doors fell 0.6 mm short of three exits' minimum. That half millimetre is
-  // all an exit is allowed. Rounded to the millimetre first as well, each got
-  // nearly a whole one, and four typed 50.02" doors passed 3 mm short.
-  if (totalExitWidthM * 1000 + exitWidths.length / 2 < requiredWidthM * 1000) {
+  // Stock sizes and code minimums are stored to the millimetre, so each can be
+  // up to half of one off the size it is called: two 3'0" doors are 914 mm each
+  // and failed the 72" that 360 people need, and one typed 96" door failed the
+  // 3 x 813 mm that three exits' 32" minimum is stored as. Each stored width is
+  // allowed that half millimetre and no more. Rounded to the millimetre first
+  // as well, each door got nearly a whole one, and four typed 50.02" doors
+  // passed 3 mm short.
+  const storedWidths = exitWidths.length + (bindingRule === 'minimum' ? requiredExits : 0)
+  if (totalExitWidthM * 1000 + storedWidths / 2 < requiredWidthM * 1000) {
     issues.push({
       severity: 'fail',
       message: `Egress width is ${clear(totalExitWidthM)} against ${clear(requiredWidthM)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
@@ -233,14 +240,14 @@ export const computeCompliance = ({
   if (plannedAttendance > calculatedOccupantLoad && calculatedOccupantLoad > 0) {
     issues.push({
       severity: 'warn',
-      message: `The scenario puts ${plannedAttendance} people in a space whose code occupant load is ${calculatedOccupantLoad}. The calculation below uses the larger figure.`,
+      message: `The scenario puts ${plannedAttendance} people in a space whose code occupant load is ${calculatedOccupantLoad}. The code check uses the larger figure.`,
     })
   }
 
   if (plannedAttendance > greenGuideCapacity && greenGuideCapacity > 0) {
     issues.push({
       severity: 'warn',
-      message: `Green Guide capacity for a ${targetEgressMinutes}-minute evacuation is ${greenGuideCapacity}; the scenario has ${plannedAttendance}.`,
+      message: `Green Guide capacity for evacuation in ${targetEgressMinutes} minutes is ${greenGuideCapacity}; the scenario has ${plannedAttendance}.`,
     })
   }
 

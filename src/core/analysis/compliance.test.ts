@@ -83,7 +83,12 @@ describe('compliance calculator', () => {
       targetEgressMinutes: 8,
       units: 'metric',
     })
-    expect(cliff.issues.some((issue) => issue.message.includes('50-person threshold'))).toBe(true)
+    // 52 already needs a second exit, and it was told one more person would.
+    expect(
+      cliff.issues.find((issue) => issue.message.includes('50-person threshold'))?.message,
+    ).toBe(
+      'At 52 occupants you have reached the 50-person threshold, so a second exit and a wider corridor are required; 3 fewer and one exit would do. This is a step change, not a gradient.',
+    )
   })
 
   it('counts doors marked as a way out, as the engine does', () => {
@@ -333,6 +338,31 @@ describe('compliance calculator', () => {
     expect(egress).toBe(
       'Egress width is 200.08" against 200.20" required (from the per-occupant calculation).',
     )
+  })
+
+  it('allows the stored minimum its half millimetre too', () => {
+    // Three exits' minimum is three 32" doors, stored as 3 x 813 mm, and one
+    // 96" door, exactly that, failed it by the 0.6 mm the rounding added.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 15, 15)
+    b.door(room.south, 3, parseLength('96"', 'imperial')!, 'door', 'exit')
+    b.zone('exit', 1, 12, 3, 14, 'North exit')
+    b.zone('exit', 12, 12, 14, 14, 'East exit')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: true,
+      plannedAttendance: 600,
+      targetEgressMinutes: 8,
+      units: 'imperial',
+    })
+
+    expect([result.bindingRule, result.exitsRequired, result.exitsProvided]).toEqual([
+      'minimum',
+      3,
+      3,
+    ])
+    expect(result.issues.filter((issue) => issue.severity === 'fail')).toEqual([])
   })
 
   it('uses the reduced width allowance when the building is sprinklered', () => {
