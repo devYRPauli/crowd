@@ -11,7 +11,7 @@
 import type { CrowdDocument } from '../model/types'
 import type { RunSummary } from '../../sim/types'
 import type { Finding } from '../../sim/metrics/findings'
-import { formatArea, formatDuration } from '../model/units'
+import { formatArea, formatDuration, formatLength } from '../model/units'
 import { computeCompliance, type CodeCheckSettings } from './compliance'
 
 export interface ReportInput {
@@ -215,6 +215,7 @@ export const toBrief = (input: ReportInput): string => {
     ...input.codeCheck,
     plan: document.plan,
     plannedAttendance: document.scenario.populations.reduce((sum, p) => sum + p.count, 0),
+    units: document.settings.units,
   })
   const units = document.settings.units
 
@@ -281,10 +282,10 @@ export const toBrief = (input: ReportInput): string => {
     `• Exits: ${compliance.exitsProvided} marked, ${compliance.exitsRequired} required for ${compliance.designOccupantLoad} occupants.`,
   )
   lines.push(
-    `• Egress width: ${compliance.totalExitWidthM.toFixed(2)} m drawn against ${compliance.requiredWidthM.toFixed(2)} m required, ${input.codeCheck.sprinklered ? 'sprinklered' : 'not sprinklered'}.`,
+    `• Egress width: ${formatLength(compliance.totalExitWidthM, units)} drawn against ${formatLength(compliance.requiredWidthM, units)} required, ${input.codeCheck.sprinklered ? 'sprinklered' : 'not sprinklered'}.`,
   )
   lines.push(
-    `• SFPE hand calculation: ${formatDuration(compliance.hydraulicEgressSeconds)} to clear, using ${compliance.effectiveWidthM.toFixed(2)} m of effective width.`,
+    `• SFPE hand calculation: ${formatDuration(compliance.hydraulicEgressSeconds)} to clear, using ${formatLength(compliance.effectiveWidthM, units)} of effective width.`,
   )
   lines.push('')
   lines.push(

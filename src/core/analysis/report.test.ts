@@ -120,6 +120,16 @@ describe('report export', () => {
     expect(line(sprinklered)).toContain(', sprinklered')
   })
 
+  it('writes widths in the units the venue is set to', () => {
+    const { document } = input
+    const imperial = toBrief({
+      ...input,
+      document: { ...document, settings: { ...document.settings, units: 'imperial' } },
+    })
+    const line = imperial.split('\n').find((l) => l.includes('Egress width'))
+    expect(line).toMatch(/: \d+' [\d.]+" drawn against \d*'? ?[\d.]+" required/)
+  })
+
   it('names files safely', () => {
     expect(reportFileName({ ...input.document, name: 'Puck Building / 3rd floor!' }, 'csv')).toBe(
       'puck-building-3rd-floor-report.csv',

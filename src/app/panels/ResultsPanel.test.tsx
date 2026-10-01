@@ -463,6 +463,20 @@ describe('the code check', () => {
     ).toBeDefined()
   })
 
+  it('measures in the units the venue is set to', () => {
+    const doc = openWith({ walls: [wall], openings: [pair] })
+    useEditor
+      .getState()
+      .replaceDocument({ ...doc, settings: { ...doc.settings, units: 'imperial' } })
+    show()
+
+    // The rest of the app spoke feet and inches and the code check alone
+    // printed metres, with its floor area always in square metres.
+    const cell = (label: string) => screen.getByText(label).closest('tr')?.lastElementChild
+    expect(cell('Doorway width drawn')?.textContent).toBe(`6' 0"`)
+    expect(cell('Enclosed floor area')?.textContent).toMatch(/ ft²$/)
+  })
+
   it('recomputes the evacuation capacity from the plan as the target time is changed', () => {
     openWith({ walls: [wall], openings: [pair], zones: [exitZone] }, 600)
     show()

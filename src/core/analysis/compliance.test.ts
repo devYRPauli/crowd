@@ -23,6 +23,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 0,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.floorAreaSqm).toBeCloseTo(100, 0)
     expect(result.calculatedOccupantLoad).toBe(72)
@@ -35,6 +36,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 100,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     // A 1.0 m door has 0.7 m of effective width — a 30% difference.
     expect(result.effectiveWidthM).toBeCloseTo(1.0 - BOUNDARY_LAYER * 2, 6)
@@ -48,6 +50,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 10,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(small.bindingRule).toBe('minimum')
 
@@ -57,6 +60,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 2000,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(large.bindingRule).toBe('calculated')
   })
@@ -68,6 +72,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 48,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.exitsRequired).toBeGreaterThanOrEqual(2)
     const cliff = computeCompliance({
@@ -76,6 +81,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 52,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(cliff.issues.some((issue) => issue.message.includes('50-person threshold'))).toBe(true)
   })
@@ -93,6 +99,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 100,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.exitsProvided).toBe(2)
     expect(result.issues.some((issue) => issue.message.includes('marked on the plan'))).toBe(false)
@@ -111,6 +118,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 100,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.totalExitWidthM).toBeCloseTo(2.44, 6)
     expect(result.effectiveWidthM).toBeCloseTo(2.44 - 4 * BOUNDARY_LAYER, 6)
@@ -127,6 +135,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 20,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.exitsProvided).toBe(1)
   })
@@ -146,6 +155,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 20,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.exitsProvided).toBe(1)
     expect(result.totalExitWidthM).toBeCloseTo(1.0, 6)
@@ -163,6 +173,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 20,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.totalExitWidthM).toBeCloseTo(1.83, 6)
   })
@@ -178,6 +189,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 20,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.exitsProvided).toBe(1)
     expect(result.totalExitWidthM).toBe(0)
@@ -196,6 +208,7 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 60,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(result.exitsProvided).toBe(2)
     expect(result.issues.some((issue) => issue.message.includes('marked on the plan'))).toBe(false)
@@ -220,6 +233,7 @@ describe('compliance calculator', () => {
         sprinklered,
         plannedAttendance,
         targetEgressMinutes: 8,
+        units: 'metric',
       })
       expect(result.bindingRule).toBe('minimum')
       expect(result.exitsRequired).toBe(plannedAttendance > 500 ? 3 : 2)
@@ -235,9 +249,25 @@ describe('compliance calculator', () => {
       sprinklered: false,
       plannedAttendance: 20,
       targetEgressMinutes: 8,
+      units: 'metric',
     })
     expect(0.7).toBeLessThan(MIN_DOOR_WIDTH_M)
     expect(result.issues.some((issue) => issue.message.includes('clear minimum'))).toBe(true)
+  })
+
+  it('writes its widths in the units the venue is set to', () => {
+    const message = (units: 'metric' | 'imperial') =>
+      computeCompliance({
+        plan: hall(10, 10, [0.7]),
+        occupancy: 'assembly-standing',
+        sprinklered: false,
+        plannedAttendance: 20,
+        targetEgressMinutes: 8,
+        units,
+      }).issues.find((issue) => issue.message.includes('clear minimum'))?.message
+
+    expect(message('metric')).toBe('A doorway is 700 mm wide, below the 813 mm clear minimum.')
+    expect(message('imperial')).toBe(`A doorway is 2' 3.6" wide, below the 2' 8" clear minimum.`)
   })
 
   it('uses the reduced width allowance when the building is sprinklered', () => {
@@ -246,6 +276,7 @@ describe('compliance calculator', () => {
       occupancy: 'assembly-standing' as const,
       plannedAttendance: 1500,
       targetEgressMinutes: 8,
+      units: 'metric' as const,
     }
     const plain = computeCompliance({ ...base, sprinklered: false })
     const sprinklered = computeCompliance({ ...base, sprinklered: true })

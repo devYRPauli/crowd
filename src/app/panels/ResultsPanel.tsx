@@ -18,7 +18,13 @@ import {
   type CodeCheckSettings,
 } from '../../core/analysis/compliance'
 import { LOS_TABLES, type FacilityType } from '../../sim/metrics/los'
-import { formatArea, formatDuration, formatNumber, formatPercent } from '../../core/model/units'
+import {
+  formatArea,
+  formatDuration,
+  formatLength,
+  formatNumber,
+  formatPercent,
+} from '../../core/model/units'
 import { Checkbox, Field, NumberInput, Segmented, Select, Sparkline, Stat } from '../components/ui'
 import { TrashIcon } from '../components/icons'
 import { downloadText } from '../../core/document/storage'
@@ -116,12 +122,13 @@ const CompliancePanel = ({
 }) => {
   const plan = useEditor((state) => state.document.plan)
   const scenario = useEditor((state) => state.document.scenario)
+  const units = useEditor((state) => state.document.settings.units)
   const { occupancy, sprinklered, targetEgressMinutes: minutes } = settings
 
   const attendance = scenario.populations.reduce((sum, p) => sum + p.count, 0)
   const result = useMemo(
-    () => computeCompliance({ ...settings, plan, plannedAttendance: attendance }),
-    [plan, settings, attendance],
+    () => computeCompliance({ ...settings, plan, plannedAttendance: attendance, units }),
+    [plan, settings, attendance, units],
   )
 
   return (
@@ -160,7 +167,7 @@ const CompliancePanel = ({
         <tbody>
           <tr>
             <td>Enclosed floor area</td>
-            <td className="num">{formatArea(result.floorAreaSqm, 'metric')}</td>
+            <td className="num">{formatArea(result.floorAreaSqm, units)}</td>
           </tr>
           <tr>
             <td>Occupant load (IBC)</td>
@@ -178,17 +185,17 @@ const CompliancePanel = ({
           </tr>
           <tr>
             <td>Egress width required</td>
-            <td className="num">{result.requiredWidthM.toFixed(2)} m</td>
+            <td className="num">{formatLength(result.requiredWidthM, units)}</td>
           </tr>
           <tr>
             <td>Doorway width drawn</td>
-            <td className="num">{result.totalExitWidthM.toFixed(2)} m</td>
+            <td className="num">{formatLength(result.totalExitWidthM, units)}</td>
           </tr>
           <tr>
             <td title="After subtracting a 150 mm boundary layer from each side">
               Effective width (SFPE)
             </td>
-            <td className="num">{result.effectiveWidthM.toFixed(2)} m</td>
+            <td className="num">{formatLength(result.effectiveWidthM, units)}</td>
           </tr>
           <tr>
             <td>Hand-calculated egress</td>

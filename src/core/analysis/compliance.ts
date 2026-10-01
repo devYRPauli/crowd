@@ -12,7 +12,8 @@
  * does this comment, because it matters.
  */
 
-import type { Plan } from '../model/types'
+import type { Plan, UnitSystem } from '../model/types'
+import { formatLength } from '../model/units'
 import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
 import { polygonsOverlap } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
@@ -46,6 +47,8 @@ export interface ComplianceInput {
   plannedAttendance: number
   /** Target evacuation time for the UK capacity calculation, in minutes. */
   targetEgressMinutes: number
+  /** How the messages write a width; the figures stay in metres. */
+  units: UnitSystem
 }
 
 /** The part of a code check the planner chooses rather than draws. */
@@ -115,6 +118,7 @@ export const computeCompliance = ({
   sprinklered,
   plannedAttendance,
   targetEgressMinutes,
+  units,
 }: ComplianceInput): ComplianceResult => {
   const factor =
     OCCUPANT_LOAD_FACTORS.find((entry) => entry.id === occupancy) ?? OCCUPANT_LOAD_FACTORS[0]
@@ -200,15 +204,19 @@ export const computeCompliance = ({
   if (exitWidths.reduce((sum, width) => sum + mm(width), 0) < mm(requiredWidthM)) {
     issues.push({
       severity: 'fail',
-      message: `Egress width is ${totalExitWidthM.toFixed(2)} m against ${requiredWidthM.toFixed(2)} m required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
+      message: `Egress width is ${formatLength(totalExitWidthM, units)} against ${formatLength(requiredWidthM, units)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
     })
   }
 
+  // A clear width is quoted to the millimetre in metric, where formatLength
+  // would round 813 mm to 81 cm, and in feet and inches otherwise.
+  const clear = (metres: number) =>
+    units === 'imperial' ? formatLength(metres, units) : `${(metres * 1000).toFixed(0)} mm`
   for (const width of doorWidths) {
     if (mm(width) < mm(MIN_DOOR_WIDTH_M)) {
       issues.push({
         severity: 'fail',
-        message: `A doorway is ${(width * 1000).toFixed(0)} mm wide, below the ${(MIN_DOOR_WIDTH_M * 1000).toFixed(0)} mm clear minimum.`,
+        message: `A doorway is ${clear(width)} wide, below the ${clear(MIN_DOOR_WIDTH_M)} clear minimum.`,
       })
       break
     }
