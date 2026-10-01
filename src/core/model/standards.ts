@@ -24,18 +24,6 @@ export const inches = (value: number): number => Math.round(value * 25.4) / 1000
 /** Feet and inches, in metres, the way a drawing carries them. */
 export const feet = (value: number, extraInches = 0): number => inches(value * 12 + extraInches)
 
-/**
- * The size a stored width is called. A width that is exactly what a half-inch
- * size rounds to is taken as that size, and anything else as drawn: a 3'0"
- * door is stored as 914 mm, and two of them failed the 72" that 360 people
- * need. Allowing every width the half millimetre instead passed widths that
- * are no stock size short of the code, a typed 95.95" door against 96".
- */
-export const nominal = (metres: number): number => {
-  const halfInches = Math.round((metres * 2000) / 25.4)
-  return inches(halfInches / 2) === metres ? (halfInches * 25.4) / 2000 : metres
-}
-
 export interface StandardSize {
   /** Metres — what the document stores. */
   readonly metres: number
@@ -64,6 +52,19 @@ export const DOOR_WIDTHS: readonly StandardSize[] = [
   { metres: feet(6), imperial: `6'0" pair`, note: 'Pair of 3\'0", commercial entry' },
   { metres: feet(8), imperial: `8'0" pair`, note: 'Pair of 4\'0"' },
 ] as const
+
+/**
+ * The width a door is called. A size from the catalogue above is stored to the
+ * millimetre, so a 3'0" door is 914 mm and two of them failed the 72" that 360
+ * people need; it counts as the whole inches it is sold as. Any other width is
+ * taken as drawn. Allowing every width the half millimetre instead passed a
+ * typed 95.95" door against 96", and taking every width that some half inch
+ * rounds to as that size made a typed 800 mm door 800.1 mm.
+ */
+export const nominal = (metres: number): number =>
+  DOOR_WIDTHS.some((size) => size.metres === metres)
+    ? (Math.round((metres * 1000) / 25.4) * 25.4) / 1000
+    : metres
 
 /** Head heights. 6'8" is the standard everywhere; commercial goes taller. */
 export const DOOR_HEIGHTS: readonly StandardSize[] = [

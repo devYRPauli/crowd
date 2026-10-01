@@ -294,7 +294,7 @@ export const toBrief = (input: ReportInput): string => {
     `• SFPE hand calculation: ${formatDuration(compliance.hydraulicEgressSeconds)} to clear, using ${formatLength(compliance.effectiveWidthM, units)} of effective width.`,
   )
   lines.push(
-    `• Green Guide capacity: ${compliance.greenGuideCapacity} people in ${formatDuration(input.codeCheck.targetEgressMinutes * 60)}.`,
+    `• Green Guide capacity: ${compliance.greenGuideCapacity} people in ${input.codeCheck.targetEgressMinutes} min.`,
   )
   // What the panel says under its figures. Without it a venue that failed by a
   // fraction of an inch read "1.83 m drawn against 1.83 m required", and

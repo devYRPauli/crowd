@@ -347,13 +347,15 @@ describe('OPENING_JAMB', () => {
 })
 
 describe('nominal', () => {
-  it('takes a stored stock size as the size it is called, and anything else as drawn', () => {
+  it('takes a catalogued door as the size it is called, and anything else as drawn', () => {
     expect(nominal(feet(3))).toBe(0.9144)
     expect(nominal(CODE_MINIMUMS.egressDoorClearWidth)).toBe(0.8128)
     expect(nominal(feet(6))).toBe(1.8288)
-    // 812 mm is no half-inch size rounded, and neither is a typed 95.99".
     expect(nominal(0.812)).toBe(0.812)
     expect(nominal(2.438146)).toBe(2.438146)
+    // What 31.5" and 63" round to, and no door anybody sells.
+    expect(nominal(0.8)).toBe(0.8)
+    expect(nominal(1.6)).toBe(1.6)
   })
 })
 

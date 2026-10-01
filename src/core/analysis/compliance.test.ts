@@ -290,6 +290,10 @@ describe('compliance calculator', () => {
     expect(doorway(0.812)).toBe(`A doorway is 31.97" wide, below the 32.00" clear minimum.`)
     // Allowed half a millimetre for rounding, 812.4 mm passed as 32".
     expect(doorway(0.8124)).toBe(`A doorway is 31.98" wide, below the 32.00" clear minimum.`)
+    // Compared to the micrometre, and a hundredth of an inch read 32.00" twice.
+    expect(doorway(parseLength('31.996"', 'imperial')!)).toBe(
+      `A doorway is 31.996" wide, below the 32.000" clear minimum.`,
+    )
     expect(doorway(parseLength('32"', 'imperial')!)).toBeUndefined()
     expect(doorway(feet(2, 8))).toBeUndefined()
   })
@@ -318,6 +322,26 @@ describe('compliance calculator', () => {
     )
     expect(egress(361, 'imperial')).toBe(
       'Egress width is 72.00" against 72.20" required (from the per-occupant calculation).',
+    )
+  })
+
+  it('takes a round metric width as drawn, though an inch size rounds to it', () => {
+    // 1600 mm is what 63" is stored as. Counted as 63", three of them passed
+    // the 4800.6 mm that 945 people need.
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 15, 15)
+    for (const wall of [room.north, room.east, room.south]) b.door(wall, 5, 1.6, 'door', 'exit')
+    const egress = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 945,
+      targetEgressMinutes: 8,
+      units: 'metric',
+    }).issues.find((issue) => issue.message.startsWith('Egress width'))?.message
+
+    expect(egress).toBe(
+      'Egress width is 4800.0 mm against 4800.6 mm required (from the per-occupant calculation).',
     )
   })
 

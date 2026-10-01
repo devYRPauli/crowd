@@ -17,7 +17,6 @@ import { isWalkableOpening, openingThreshold } from '../model/planGeometry'
 import { polygonsOverlap } from '../math/geometry'
 import { detectRooms } from '../model/rooms'
 import { CODE_MINIMUMS, nominal } from '../model/standards'
-import { formatDuration } from '../model/units'
 
 const SQFT_PER_SQM = 10.7639
 const MM_PER_INCH = 25.4
@@ -203,13 +202,19 @@ export const computeCompliance = ({
     })
   }
 
-  // A width that fails is quoted to a tenth of a millimetre or a hundredth of
-  // an inch. At formatLength's centimetre and tenth of an inch, an 812 mm door
-  // failed as 2' 8" wide, below the 2' 8" clear minimum.
-  const clear = (metres: number) =>
-    units === 'imperial'
-      ? `${((metres * 1000) / MM_PER_INCH).toFixed(2)}"`
-      : `${(metres * 1000).toFixed(1)} mm`
+  // A width that fails is quoted finely enough to tell it from what it misses:
+  // to a hundredth of an inch or a tenth of a millimetre, and finer when those
+  // read the same. At formatLength's tenth of an inch an 812 mm door failed as
+  // 2' 8" wide, below the 2' 8" clear minimum, and a typed 31.996" one, at a
+  // hundredth, as 32.00" below 32.00".
+  const quote = (widthM: number, requiredM: number): [string, string] => {
+    const perMetre = units === 'imperial' ? 1000 / MM_PER_INCH : 1000
+    const unit = units === 'imperial' ? '"' : ' mm'
+    for (let places = units === 'imperial' ? 2 : 1; ; places++) {
+      const [width, required] = [widthM, requiredM].map((m) => (m * perMetre).toFixed(places))
+      if (width !== required || places === 6) return [width + unit, required + unit]
+    }
+  }
 
   // Each door counts as the size it is called, and is compared to the
   // micrometre: three 32" minimums add up to 2.4383999999999997 m, and a 96"
@@ -218,17 +223,19 @@ export const computeCompliance = ({
     Math.round(widthM * 1e6) < Math.round(requiredM * 1e6)
   const calledExitWidthM = exitWidths.reduce((sum, width) => sum + nominal(width), 0)
   if (short(calledExitWidthM, requiredWidthM)) {
+    const [drawn, required] = quote(calledExitWidthM, requiredWidthM)
     issues.push({
       severity: 'fail',
-      message: `Egress width is ${clear(calledExitWidthM)} against ${clear(requiredWidthM)} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
+      message: `Egress width is ${drawn} against ${required} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
     })
   }
 
   for (const width of doorWidths) {
     if (short(nominal(width), MIN_DOOR_WIDTH_M)) {
+      const [drawn, minimum] = quote(nominal(width), MIN_DOOR_WIDTH_M)
       issues.push({
         severity: 'fail',
-        message: `A doorway is ${clear(nominal(width))} wide, below the ${clear(MIN_DOOR_WIDTH_M)} clear minimum.`,
+        message: `A doorway is ${drawn} wide, below the ${minimum} clear minimum.`,
       })
       break
     }
@@ -244,7 +251,7 @@ export const computeCompliance = ({
   if (plannedAttendance > greenGuideCapacity && greenGuideCapacity > 0) {
     issues.push({
       severity: 'warn',
-      message: `Green Guide capacity for evacuation in ${formatDuration(targetEgressMinutes * 60)} is ${greenGuideCapacity}; the scenario has ${plannedAttendance}.`,
+      message: `Green Guide capacity for evacuation in ${targetEgressMinutes} min is ${greenGuideCapacity}; the scenario has ${plannedAttendance}.`,
     })
   }
 

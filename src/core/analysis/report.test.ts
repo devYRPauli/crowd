@@ -133,7 +133,7 @@ describe('report export', () => {
   it('says how long the Green Guide capacity is for', () => {
     const brief = toBrief({ ...input, codeCheck: { ...input.codeCheck, targetEgressMinutes: 2.5 } })
     expect(brief.split('\n').find((line) => line.startsWith('• Green Guide'))).toMatch(
-      /^• Green Guide capacity: \d+ people in 2 min 30 s\.$/,
+      /^• Green Guide capacity: \d+ people in 2.5 min\.$/,
     )
   })
 
