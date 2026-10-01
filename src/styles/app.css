@@ -465,6 +465,13 @@ textarea {
   background: var(--surface);
 }
 
+/* A locked door's width box looked editable and swallowed every click. */
+.input:disabled,
+.select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .input.is-mono {
   font-family: var(--font-mono);
 }
