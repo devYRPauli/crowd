@@ -12,7 +12,7 @@ import type { CrowdDocument } from '../model/types'
 import type { RunSummary } from '../../sim/types'
 import type { Finding } from '../../sim/metrics/findings'
 import { formatArea, formatDuration, formatLength } from '../model/units'
-import { computeCompliance, type CodeCheckSettings } from './compliance'
+import { computeCompliance, type CodeCheckSettings, type ComplianceIssue } from './compliance'
 
 export interface ReportInput {
   document: CrowdDocument
@@ -208,6 +208,12 @@ export const toJsonBundle = (input: ReportInput): string =>
     2,
   )
 
+const ISSUE_LEAD: Record<ComplianceIssue['severity'], string> = {
+  fail: 'Fails: ',
+  warn: 'Check: ',
+  info: '',
+}
+
 /** A brief someone can read without opening the app. */
 export const toBrief = (input: ReportInput): string => {
   const { document, summary, findings } = input
@@ -287,6 +293,11 @@ export const toBrief = (input: ReportInput): string => {
   lines.push(
     `• SFPE hand calculation: ${formatDuration(compliance.hydraulicEgressSeconds)} to clear, using ${formatLength(compliance.effectiveWidthM, units)} of effective width.`,
   )
+  // What the panel says under its figures. Without it a venue that failed by a
+  // fraction of an inch read "1.83 m drawn against 1.83 m required", and
+  // nothing in the brief said it had failed.
+  for (const issue of compliance.issues)
+    lines.push(`• ${ISSUE_LEAD[issue.severity]}${issue.message}`)
   lines.push('')
   lines.push(
     'Local adoption and amendments vary and approval rests with the authority having jurisdiction. ' +

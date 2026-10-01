@@ -130,6 +130,24 @@ describe('report export', () => {
     expect(line).toMatch(/: \d+' [\d.]+" drawn against \d*'? ?[\d.]+" required/)
   })
 
+  it('says which checks the venue fails', () => {
+    const { document } = input
+    const narrow = toBrief({
+      ...input,
+      document: {
+        ...document,
+        plan: {
+          ...document.plan,
+          openings: document.plan.openings.map((opening) => ({ ...opening, width: 0.7 })),
+        },
+      },
+    })
+    // The figures alone can round to the same width either side of a failure.
+    expect(narrow.split('\n')).toContain(
+      '• Fails: A doorway is 700.0 mm wide, below the 813.0 mm clear minimum.',
+    )
+  })
+
   it('names files safely', () => {
     expect(reportFileName({ ...input.document, name: 'Puck Building / 3rd floor!' }, 'csv')).toBe(
       'puck-building-3rd-floor-report.csv',
