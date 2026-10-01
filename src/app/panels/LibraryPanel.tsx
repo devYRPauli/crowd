@@ -313,6 +313,9 @@ const ToolOptions = ({ units }: { units: UnitSystem }) => {
 export const LibraryPanel = () => {
   const units = useEditor((state) => state.document.settings.units)
   const tool = useEditor((state) => state.tool)
+  // Subscribed, not read from the store in passing: picking another item while
+  // placing changes nothing else here, and the footer kept the old name.
+  const catalogId = useEditor((state) => state.toolOptions.catalogId)
   const showCatalog = tool === 'furniture' || tool === 'select'
 
   return (
@@ -336,8 +339,8 @@ export const LibraryPanel = () => {
       {showCatalog && tool === 'furniture' ? (
         <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)' }}>
           <p className="hint" style={{ margin: 0 }}>
-            <b>{resolveCatalogItem(useEditor.getState().toolOptions.catalogId).name}</b> — click in
-            the plan to place. <span className="kbd">R</span> rotates.
+            <b>{resolveCatalogItem(catalogId).name}</b> — click in the plan to place.{' '}
+            <span className="kbd">R</span> rotates.
           </p>
         </div>
       ) : null}

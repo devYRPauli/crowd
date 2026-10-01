@@ -336,6 +336,17 @@ describe('editing from the keyboard', () => {
     expect(editor().selection).toHaveLength(0)
     expect(editor().tool).toBe('select')
   })
+
+  it('keeps the instruction for the tool in hand on escape', () => {
+    mount()
+    editor().setHint('Click to select')
+
+    // Escape asks for Select, which is already in hand. The store cleared the
+    // hint on that, and only a change of tool puts one back.
+    press('Escape')
+
+    expect(editor().hint).toBe('Click to select')
+  })
 })
 
 describe('the clipboard', () => {

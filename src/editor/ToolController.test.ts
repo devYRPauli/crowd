@@ -437,6 +437,8 @@ describe('switching tools', () => {
 
   it('leaves a tool mid-gesture alone when handed the tool already in use', () => {
     const h = harness()
+    // The store and the controller agree on the tool, as they do in the app.
+    useEditor.getState().setTool('wall')
     h.controller.setTool('wall')
     h.pointerDown(pointer({ ground: { x: 3, y: 1 } }))
     const seen = h.tools.wall.calls.length
@@ -451,16 +453,10 @@ describe('switching tools', () => {
     expect(h.tools.wall.calls).toHaveLength(seen)
     expect(h.tools.wall.points).toEqual([{ x: 3, y: 1 }])
     expect(h.viewport.draft).toHaveLength(1)
-    // The instruction in the status bar goes blank and stays blank, and that is
-    // recorded rather than repaired here: the store's setTool clears the hint on
-    // every call, redundant or not, and nothing puts it back — no tool calls
-    // ctx.setHint and the controller is the only other source. The fix is in
-    // src/state/editorStore.ts, leaving the hint alone when the id has not
-    // changed. Doing it in this file instead would not reach the app at all,
-    // because ViewportHost's effect is keyed on a *changed* tool id and this
-    // method is never re-entered; the early return below is only why nothing
-    // heals it afterwards.
-    expect(useEditor.getState().hint).toBeNull()
+    // The instruction in the status bar stays. The store's setTool cleared it
+    // on every call, redundant or not, and nothing put it back: no tool calls
+    // ctx.setHint, and ViewportHost only reaches this method on a changed id.
+    expect(useEditor.getState().hint).toBe(h.tools.wall.hint)
   })
 
   it('publishes the incoming tool’s instruction and cursor', () => {

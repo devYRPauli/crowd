@@ -255,7 +255,10 @@ export const useEditor = create<EditorState>()((set, get) => ({
 
   setHover: (ref) => set({ hover: ref }),
 
-  setTool: (tool) => set({ tool, hint: null }),
+  // Asking for the tool already in hand changes nothing. It cleared the hint,
+  // and only a change of tool puts one back, so Escape in Select or a click
+  // on the lit tool button left the status strip blank.
+  setTool: (tool) => set((state) => (state.tool === tool ? state : { tool, hint: null })),
   setToolOptions: (patch) => set((state) => ({ toolOptions: { ...state.toolOptions, ...patch } })),
   setView: (patch) => set((state) => ({ view: { ...state.view, ...patch } })),
   setPanel: (panel) => set({ panel }),

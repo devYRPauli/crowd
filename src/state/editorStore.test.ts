@@ -486,6 +486,15 @@ describe('the editor around the document', () => {
     expect(editor().hint).toBeNull()
   })
 
+  it('keeps the instruction when asked for the tool already in hand', () => {
+    editor().setTool('door')
+    editor().setHint('Click a wall to place the door')
+    editor().setTool('door')
+
+    // Nothing changed, and only a change of tool puts an instruction back.
+    expect(editor().hint).toBe('Click a wall to place the door')
+  })
+
   it('queues toasts in the order they happened and forgets the one dismissed', () => {
     editor().toast('Project saved.', 'success')
     editor().toast('No room for a queue here', 'warn')

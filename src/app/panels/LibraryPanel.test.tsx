@@ -68,6 +68,19 @@ describe('the furniture catalog', () => {
     expect(screen.getByText(/click in the plan to place/i).textContent).toContain('Stacking chair')
   })
 
+  it('names the new item when another is picked while placing', () => {
+    openWith('furniture')
+    render(<LibraryPanel />)
+    useEditor.getState().setHint('Click to place')
+
+    fireEvent.click(screen.getByText('Stacking chair'))
+
+    // The tool was already in hand, so nothing the panel watched changed and
+    // the footer went on naming the table. The hint went blank as well.
+    expect(screen.getByText(/click in the plan to place/i).textContent).toContain('Stacking chair')
+    expect(useEditor.getState().hint).toBe('Click to place')
+  })
+
   it('searches by what a room is called, not only by the item name', () => {
     openWith('select')
     render(<LibraryPanel />)
