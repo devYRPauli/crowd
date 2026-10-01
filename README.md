@@ -81,10 +81,11 @@ keymap.
 interior, 3'0" entry and accessible, pairs at 5'0" and 6'0" — with a 6'8" head,
 and windows, wall thicknesses and ceiling heights likewise. A 1.0 m door is not
 a door anybody makes, and the three and a half inches between it and a 3'0" leaf
-are, at a doorway, the difference between two people abreast and one. The
-inspector offers the stock sizes and says so when a dimension is not one of
-them. The document stays metric; the imperial setting reads them back as what
-they are called.
+are, at a doorway, the difference between two people abreast and one. For a
+door or window width the inspector offers the stock sizes and says so when a
+width is not one of them; wall thickness and height, and an opening's height and
+sill, start at a stock size and are typed freely. The document stays metric; the
+imperial setting reads them back as what they are called.
 
 **A door can be the way in, the way out, or both.** Mark it in the inspector and
 people arrive through that doorway and leave through it — as many of each as the
