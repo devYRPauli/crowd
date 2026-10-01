@@ -189,10 +189,17 @@ export const useKeyboard = ({
           editor.clearSelection()
           editor.setTool('select')
           return
-        case 'Tab':
+        case 'Tab': {
+          // Only on the page itself and on the plan. Taken everywhere, it left
+          // somebody on the keyboard unable to move off a button. Shift-Tab
+          // always moves focus, so there is a way in and back out of the plan.
+          const target = event.target
+          const onPlan = target === document.body || target === viewportRef.current.viewport?.canvas
+          if (!onPlan || event.shiftKey) return
           event.preventDefault()
           editor.setView({ preset: editor.view.preset === 'plan' ? 'iso' : 'plan' })
           return
+        }
         case '.':
           event.preventDefault()
           viewportRef.current.viewport?.frame(planBounds(editor.document.plan, 3))

@@ -495,6 +495,20 @@ describe('the view and the run', () => {
     expect(reachedTheBrowser('Tab')).toBe(false)
   })
 
+  it('leaves Tab to move focus off a control, and Shift-Tab everywhere', () => {
+    mount()
+    const button = screen.getByRole('button', { name: 'Somewhere that is not a field' })
+    button.focus()
+
+    // Taken on every button as well, it left somebody on the keyboard unable
+    // to move off the first one, with the camera flipping on each press.
+    expect(fireEvent.keyDown(button, { key: 'Tab' })).toBe(true)
+    expect(fireEvent.keyDown(button, { key: 'Tab', shiftKey: true })).toBe(true)
+    // Shift-Tab on the page is the way in from the keyboard.
+    expect(reachedTheBrowser('Tab', { shiftKey: true })).toBe(true)
+    expect(editor().view.preset).toBe('iso')
+  })
+
   it('fits the whole plan in view with a margin around it', () => {
     const { frame } = mount()
     press('.')
