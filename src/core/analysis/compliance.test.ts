@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeCompliance, BOUNDARY_LAYER, MIN_DOOR_WIDTH_M, SPECIFIC_FLOW } from './compliance'
 import { PlanBuilder } from '../../library/planBuilder'
 import { DEFAULT_WALL_THICKNESS, feet } from '../model/standards'
-import { parseLength } from '../model/units'
+import { formatLength, parseLength } from '../model/units'
 
 const hall = (width: number, depth: number, doorWidths: number[]) => {
   const b = new PlanBuilder()
@@ -323,6 +323,25 @@ describe('compliance calculator', () => {
     expect(egress(361, 'imperial')).toBe(
       'Egress width is 72.00" against 72.20" required (from the per-occupant calculation).',
     )
+  })
+
+  it('shows the exit width it checks', () => {
+    const b = new PlanBuilder()
+    const room = b.room(0, 0, 15, 15)
+    for (const wall of [room.north, room.east, room.south, room.west])
+      b.door(wall, 5, feet(3), 'door', 'exit')
+    const result = computeCompliance({
+      plan: b.build(),
+      occupancy: 'assembly-standing',
+      sprinklered: false,
+      plannedAttendance: 720,
+      targetEgressMinutes: 8,
+      units: 'imperial',
+    })
+
+    expect(result.issues.filter((issue) => issue.severity === 'fail')).toEqual([])
+    expect(formatLength(result.totalExitWidthM, 'imperial')).toBe(`12' 0"`)
+    expect(formatLength(result.requiredWidthM, 'imperial')).toBe(`12' 0"`)
   })
 
   it('takes a round metric width as drawn, though an inch size rounds to it', () => {

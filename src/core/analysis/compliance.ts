@@ -66,6 +66,7 @@ export interface ComplianceResult {
   designOccupantLoad: number
   exitsRequired: number
   exitsProvided: number
+  /** Width of the ways out, each door counted as the size it is called, in metres. */
   totalExitWidthM: number
   /** Egress width the occupant load requires, in metres. */
   requiredWidthM: number
@@ -152,7 +153,10 @@ export const computeCompliance = ({
   const exitWidths = exitDoors.map((d) => d.width)
   const reached = new Set(doors.flatMap((door) => door.zones))
   const exitsProvided = exitDoors.length + exitZones.filter((zone) => !reached.has(zone)).length
-  const totalExitWidthM = exitWidths.reduce((sum, width) => sum + width, 0)
+  // The width checked is the width shown. Four 3'0" exits were checked as 144"
+  // and shown as the 143.9" they are stored as, under the 12' 0" required, with
+  // nothing failed.
+  const totalExitWidthM = exitWidths.reduce((sum, width) => sum + nominal(width), 0)
 
   const widthPerOccupantInches = sprinklered ? 0.15 : 0.2
   const calculatedWidthM = (designOccupantLoad * widthPerOccupantInches * MM_PER_INCH) / 1000
@@ -221,9 +225,8 @@ export const computeCompliance = ({
   // door is 2.4384.
   const short = (widthM: number, requiredM: number) =>
     Math.round(widthM * 1e6) < Math.round(requiredM * 1e6)
-  const calledExitWidthM = exitWidths.reduce((sum, width) => sum + nominal(width), 0)
-  if (short(calledExitWidthM, requiredWidthM)) {
-    const [drawn, required] = quote(calledExitWidthM, requiredWidthM)
+  if (short(totalExitWidthM, requiredWidthM)) {
+    const [drawn, required] = quote(totalExitWidthM, requiredWidthM)
     issues.push({
       severity: 'fail',
       message: `Egress width is ${drawn} against ${required} required (${bindingRule === 'minimum' ? 'the minimum door width binds here, not the per-occupant calculation' : 'from the per-occupant calculation'}).`,
